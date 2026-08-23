@@ -18,6 +18,8 @@ from fastapi import FastAPI
 from fastapi.responses import JSONResponse
 from sqlalchemy import text
 
+from app.channels.telegram.webhook import build_router as telegram_router
+from app.channels.telegram.webhook import register_webhook
 from app.config import get_settings
 from app.db import dispose_engine, get_session_factory
 
@@ -39,6 +41,10 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # Migrating and seeding happen in the web container's command, before
     # uvicorn starts -- not here. Keeping startup free of database work is what
     # lets /healthz answer without one.
+    #
+    # §16.1: registering the webhook refuses loudly rather than failing quietly
+    # when nothing is terminating TLS in front of this deployment.
+    await register_webhook()
     try:
         yield
     finally:
@@ -54,6 +60,10 @@ def create_app() -> FastAPI:
         redoc_url=None,
         openapi_url=None,
     )
+
+    # The Telegram webhook is an ordinary route on this one app, not a separate
+    # process (DESIGN.md §3.3).
+    app.include_router(telegram_router())
 
     @app.get("/healthz", include_in_schema=False)
     async def healthz() -> dict[str, str]:

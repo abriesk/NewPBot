@@ -34,7 +34,7 @@ the design mid-implementation.
 
 > Update this line as work progresses. It is the first thing to check each session.
 
-**Milestone: M4 (complete) — next: M5 (Telegram client)**
+**Milestone: M5 (complete) — next: M6 (Web client)**
 
 Milestones run M0 → M9 (`IMPLEMENTATION.md` §19). Work them **in order**. Each
 one's acceptance criteria must pass before starting the next. Do not implement

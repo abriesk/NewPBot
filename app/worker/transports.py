@@ -11,6 +11,7 @@ import logging
 
 from app.channels.base import Transport
 from app.channels.email.transport import EmailTransport
+from app.channels.telegram.transport import TelegramTransport
 from app.config import get_settings
 from app.core.enums import Channel
 
@@ -35,10 +36,9 @@ def build_transports() -> dict[Channel, Transport]:
     transport should never be reached -- but leaving it out means a stray row
     dies with a clear reason instead of silently pretending to send.
 
-    Telegram arrives in M5.
     """
     settings = get_settings()
-    transports: dict[Channel, Transport] = {}
+    transports: dict[Channel, Transport] = {Channel.telegram: TelegramTransport(settings=settings)}
 
     if settings.email_enabled:
         transports[Channel.email] = EmailTransport(settings)

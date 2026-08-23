@@ -602,6 +602,36 @@ class Reminder(Base):
     fired_at: Mapped[datetime | None] = _tstz()
 
 
+class FlowState(Base):
+    """Multi-step input state for a client, per channel (§13.1).
+
+    §13.1 requires this to live in the database rather than in aiogram FSM
+    memory, so restarting `web` does not lose a half-finished booking. §6 does
+    not define the table; its shape was agreed rather than invented.
+
+    Keyed per channel on purpose: a client mid-booking in Telegram and another
+    tab on the web are two independent flows, and a future WhatsApp adapter
+    reuses this without a migration.
+
+    `data` is transient UI scratch -- half-typed answers, the slot under
+    consideration. It may hold problem text, so it is purged with the rest
+    (hard rule 8) and never logged.
+    """
+
+    __tablename__ = "flow_state"
+    __table_args__ = (UniqueConstraint("client_id", "channel"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    practice_id: Mapped[int] = mapped_column(ForeignKey("practice.id"), nullable=False)
+    client_id: Mapped[UUID] = mapped_column(
+        ForeignKey("client.id", ondelete="CASCADE"), nullable=False
+    )
+    channel: Mapped[Channel] = mapped_column(pg_enum(Channel), nullable=False)
+    step: Mapped[str] = mapped_column(Text, nullable=False)
+    data: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
+    updated_at: Mapped[datetime] = _tstz(nullable=False, server_default=func.now())
+
+
 class AuditLog(Base):
     """`meta` MUST NOT carry problem_text or message bodies. Log identifiers."""
 
@@ -629,6 +659,7 @@ __all__ = [
     "ContentBlock",
     "ContentBlockRevision",
     "ContentTopic",
+    "FlowState",
     "Identity",
     "NegotiationMessage",
     "OutboxAttempt",

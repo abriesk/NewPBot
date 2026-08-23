@@ -7,7 +7,9 @@ offsets, retention -- is a database setting instead, and MUST NOT appear here.
 
 from __future__ import annotations
 
-import secrets
+import base64
+import hashlib
+import hmac
 from functools import lru_cache
 from typing import Annotated, Literal
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -83,12 +85,27 @@ class Settings(BaseSettings):
             raise ValueError(f"{v!r} is not an IANA timezone name") from exc
         return v
 
-    @field_validator("telegram_webhook_path")
-    @classmethod
-    def _unguessable_webhook_path(cls, v: str) -> str:
-        if not v:
-            return f"/channels/telegram/webhook/{secrets.token_urlsafe(24)}"
-        return v if v.startswith("/") else f"/{v}"
+    @model_validator(mode="after")
+    def _derive_webhook_path(self) -> Settings:
+        """§4: the path defaults to a random segment chosen *at install*.
+
+        Derived from SECRET_KEY rather than generated per process. A fresh
+        random segment on every boot would leave Telegram posting to the
+        previous URL until re-registration caught up, and would make the path
+        impossible to write down. This is stable for a deployment, changes if
+        the signing key does, and is not guessable without it.
+        """
+        if not self.telegram_webhook_path:
+            digest = hmac.new(
+                self.secret_key.encode(), b"telegram-webhook-path", hashlib.sha256
+            ).digest()
+            segment = base64.urlsafe_b64encode(digest).decode().rstrip("=")[:32]
+            object.__setattr__(
+                self, "telegram_webhook_path", f"/channels/telegram/webhook/{segment}"
+            )
+        elif not self.telegram_webhook_path.startswith("/"):
+            object.__setattr__(self, "telegram_webhook_path", f"/{self.telegram_webhook_path}")
+        return self
 
     @model_validator(mode="after")
     def _email_config_is_all_or_nothing(self) -> Settings:
