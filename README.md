@@ -12,7 +12,7 @@ scheduling rule inside a Telegram handler or a FastAPI route is a bug.
 - `docs/IMPLEMENTATION.md` — **normative**. Schema, state machines, routes,
   worker jobs, milestones, acceptance criteria.
 
-**Status: M0 (skeleton) complete.** Milestones run M0 → M9
+**Status: M1 (schema) complete.** Milestones run M0 → M9
 (`IMPLEMENTATION.md` §19) and are worked in order.
 
 ## Requirements
@@ -98,8 +98,18 @@ docker compose exec web alembic heads
 `alembic heads` **must** print exactly one head. Check it after every revision —
 the previous codebase branched here and it cost a rewrite.
 
-`web` runs `alembic upgrade head` before serving; `worker` waits on `web`'s
-healthcheck, so exactly one process migrates. If `web` is ever scaled beyond one
+After changing a model, confirm the migration still matches it:
+
+```bash
+docker compose exec web alembic check
+```
+
+"No new upgrade operations detected" means the schema and the models agree.
+
+`web` runs `alembic upgrade head` and then `python -m app.seed` before serving;
+`worker` waits on `web`'s healthcheck, so exactly one process does either. The
+seed is idempotent and re-runs harmlessly on every boot; it never overwrites a
+translation the therapist has edited. If `web` is ever scaled beyond one
 replica, migrations must move to a separate one-shot service.
 
 ## Layout

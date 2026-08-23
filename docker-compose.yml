@@ -27,10 +27,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
-    # web is the only process that migrates (§16.5); worker waits on its
-    # healthcheck, so exactly one process runs `alembic upgrade head`.
+    # Migrate, then seed (§20; idempotent), then serve. web is the only
+    # process that does either -- worker waits on its healthcheck (§16.5).
     command: >
       sh -c "alembic upgrade head &&
+             python -m app.seed &&
              uvicorn app.main:app --host 0.0.0.0 --port 8000
              --proxy-headers --forwarded-allow-ips='*'"
     expose:

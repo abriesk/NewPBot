@@ -34,7 +34,7 @@ the design mid-implementation.
 
 > Update this line as work progresses. It is the first thing to check each session.
 
-**Milestone: M0 (complete) — next: M1 (Schema)**
+**Milestone: M1 (complete) — next: M2 (Core domain)**
 
 Milestones run M0 → M9 (`IMPLEMENTATION.md` §19). Work them **in order**. Each
 one's acceptance criteria must pass before starting the next. Do not implement

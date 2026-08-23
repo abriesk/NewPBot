@@ -1,0 +1,138 @@
+"""Seed tests (IMPLEMENTATION.md §20, M1 acceptance).
+
+The acceptance criterion is that seeding is idempotent and loads every key from
+locales/*.yaml. Idempotency matters because the seed runs on every boot of the
+web container.
+"""
+
+from __future__ import annotations
+
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.models import (
+    AdminUser,
+    ContentTopic,
+    Practice,
+    SessionType,
+    TimezoneOption,
+    Translation,
+)
+from app.seed import (
+    CONTENT_TOPICS,
+    SESSION_TYPES,
+    TIMEZONE_OPTIONS,
+    load_locale_catalogue,
+    seed_all,
+)
+
+
+async def _count(db: AsyncSession, model: type) -> int:
+    return int((await db.execute(select(func.count()).select_from(model))).scalar_one())
+
+
+async def test_exactly_one_practice_is_seeded(db: AsyncSession) -> None:
+    # One practice is served. practice_id exists so a tenant key never has to be
+    # retrofitted -- not so that practices can be added (DESIGN.md §18).
+    assert await _count(db, Practice) == 1
+
+
+async def test_session_types_topics_and_timezones_are_seeded(db: AsyncSession) -> None:
+    assert await _count(db, SessionType) == len(SESSION_TYPES)
+    assert await _count(db, ContentTopic) == len(CONTENT_TOPICS)
+    assert await _count(db, TimezoneOption) == len(TIMEZONE_OPTIONS)
+
+
+async def test_references_topic_is_hidden_from_the_menu(db: AsyncSession) -> None:
+    """§20: it is sent with waitlist confirmations, not browsed."""
+    show = (
+        await db.execute(select(ContentTopic.show_in_menu).where(ContentTopic.code == "references"))
+    ).scalar_one()
+    assert show is False
+
+
+async def test_timezones_are_iana_names_not_offsets(db: AsyncSession) -> None:
+    names = (await db.execute(select(TimezoneOption.iana_name))).scalars().all()
+    assert names, "timezone options should have been seeded"
+    for name in names:
+        assert "/" in name, f"{name!r} is not an IANA zone name"
+        assert "UTC" not in name.upper()
+
+
+async def test_the_admin_password_is_hashed_with_argon2id(db: AsyncSession) -> None:
+    """The plaintext MUST NOT be persisted or logged (§20)."""
+    stored = (await db.execute(select(AdminUser.password_hash))).scalars().all()
+    assert stored
+    for password_hash in stored:
+        assert password_hash.startswith("$argon2id$")
+        assert "test-admin-password" not in password_hash
+
+
+async def test_every_translated_locale_key_is_loaded(db: AsyncSession) -> None:
+    """M1 acceptance: seeding loads every key from locales/*.yaml.
+
+    Every *translated* key, that is. Untranslated entries ship as `""` behind a
+    `# TODO` marker and are deliberately not stored -- see
+    test_untranslated_keys_are_not_seeded for why.
+    """
+    catalogue = load_locale_catalogue()
+    for lang, entries in catalogue.items():
+        stored = set(
+            (await db.execute(select(Translation.key).where(Translation.lang == lang)))
+            .scalars()
+            .all()
+        )
+        expected = {key for key, value in entries.items() if value.strip()}
+        missing = expected - stored
+        assert not missing, f"{lang}: {len(missing)} key(s) not seeded, e.g. {sorted(missing)[:5]}"
+
+
+async def test_untranslated_keys_are_not_seeded(db: AsyncSession) -> None:
+    """An empty row would satisfy the `translation` step of §15's lookup chain
+    and return "" to the client. Leaving the row out lets the lookup fall
+    through to the practice default language, which is the intended behaviour.
+    """
+    catalogue = load_locale_catalogue()
+    untranslated = {
+        (lang, key)
+        for lang, entries in catalogue.items()
+        for key, value in entries.items()
+        if not value.strip()
+    }
+    assert untranslated, "expected hy.yaml to still carry untranslated keys"
+
+    empties = (
+        await db.execute(select(Translation.lang, Translation.key).where(Translation.value == ""))
+    ).all()
+    assert not empties, f"empty translation rows defeat the fallback chain: {empties}"
+
+
+async def test_seeding_twice_changes_nothing(db: AsyncSession) -> None:
+    before = {
+        model.__name__: await _count(db, model)
+        for model in (Practice, AdminUser, SessionType, ContentTopic, TimezoneOption, Translation)
+    }
+
+    await seed_all(db)
+    await seed_all(db)
+
+    after = {
+        model.__name__: await _count(db, model)
+        for model in (Practice, AdminUser, SessionType, ContentTopic, TimezoneOption, Translation)
+    }
+    assert before == after
+
+
+async def test_seeding_does_not_overwrite_an_edited_translation(db: AsyncSession) -> None:
+    """§15: the therapist's edits win over the repository defaults."""
+    row = (await db.execute(select(Translation).limit(1))).scalar_one()
+    edited = "edited by the therapist"
+    row.value = edited
+    await db.flush()
+
+    await seed_all(db)
+
+    refreshed = (
+        await db.execute(select(Translation.value).where(Translation.id == row.id))
+    ).scalar_one()
+    assert refreshed == edited

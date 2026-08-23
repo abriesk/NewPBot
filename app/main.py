@@ -36,6 +36,9 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
         settings.telegram_mode,
         settings.email_enabled,
     )
+    # Migrating and seeding happen in the web container's command, before
+    # uvicorn starts -- not here. Keeping startup free of database work is what
+    # lets /healthz answer without one.
     try:
         yield
     finally:
