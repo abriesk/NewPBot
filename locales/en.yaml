@@ -1,0 +1,149 @@
+# locales/en.yaml
+#
+# NORMATIVE KEY CATALOGUE. This file defines the key names for the whole service.
+# ru.yaml and hy.yaml MUST contain exactly the same keys.
+#
+# Rules (see IMPLEMENTATION.md §15):
+#   - No markup in values. No <b>, no HTML, no Markdown emphasis. The renderer
+#     decides emphasis per channel. Emoji are allowed but should be sparing.
+#   - Placeholders are str.format names: {time}, {uuid}, {price}, ...
+#   - Practice policy (working hours, terms, cancellation rules) does NOT belong
+#     here. That is a content block the therapist edits.
+#   - Adding a key means adding it to all three locale files in the same change.
+#
+# English is the admin language and the reference copy for translators.
+# Client-facing English strings exist so `en` is a usable fallback, not because
+# clients are expected to use it.
+
+lang:
+  select: "Please choose a language."
+  name.ru: "Русский"
+  name.hy: "Հայերեն"
+  name.en: "English"
+
+common:
+  skip: "Skip"
+  back: "Back"
+  cancel: "Cancel"
+  home: "Home"
+  yes: "Yes"
+  no: "No"
+  continue: "Continue"
+  open: "Open"
+  welcome: "Welcome."
+  welcome_back: "You are back at the main menu."
+  error.generic: "Something went wrong. Please try again a little later."
+  error.expired_link: "This link has expired. Please request a new one."
+  error.not_found: "That was not found."
+  error.rate_limited: "Too many attempts. Please try again later."
+
+menu:
+  consultation: "Book a consultation"
+  home: "Home"
+
+content:
+  topic.work_terms.title: "How I work"
+  topic.qualification.title: "Qualifications"
+  topic.about_psychotherapy.title: "About psychotherapy"
+  topic.references.title: "Other specialists"
+  empty: "This section has not been filled in yet."
+
+booking:
+  choose_modality: "How would you like to meet?"
+  modality.online: "Online"
+  modality.onsite: "In person"
+  onsite_info: "In-person sessions take place here: {url}"
+  choose_type: "What kind of session?"
+  type.individual: "Individual session"
+  type.couple: "Couples session"
+  type.with_price: "{name} — {duration} min ({price})"
+  type.without_price: "{name} — {duration} min"
+  choose_timezone: "Which timezone are you in?"
+  timezone.detected: "We detected {timezone}. Is that right?"
+  choose_slot: "Choose a time that suits you. Times are shown in {timezone}."
+  slot.none_available: "There are no free times at the moment."
+  slot.held: "This time is reserved for you for {minutes} minutes while you finish."
+  slot.taken: "Sorry, that time has just been taken. Please choose another."
+  slot.hold_expired: "Your reservation expired. Please choose a time again."
+  ask_desired_time: "When would suit you? Write it in your own words — a day, a part of the day, or a specific time."
+  ask_problem: "If you would like, briefly describe what you would like to work on."
+  ask_name: "What should I call you?"
+  ask_contact: "How would you prefer to be contacted?"
+  submitted: "Thank you. Your request has been sent, number {uuid}. I will get back to you shortly."
+  cancelled_by_user: "Booking cancelled. You are back at the main menu."
+  unavailable: "New bookings are closed at the moment."
+
+waitlist:
+  intro: "There are no free places at the moment. You can leave a request and I will get in touch when something opens up."
+  ask_problem: "Briefly, what would you like to work on?"
+  ask_contact: "How can I reach you?"
+  submitted: "Thank you. I have your request and will be in touch."
+
+intent:
+  request.proposal.client.body: "A time has been proposed for your request {uuid}: {time}."
+  request.proposal.client.note: "Note from the therapist: {note}"
+  request.proposal.client.action.accept: "Accept"
+  request.proposal.client.action.counter: "Suggest another time"
+  request.proposal.client.action.decline: "Decline"
+
+  request.counter.client.ask: "What time would suit you better?"
+  request.counter.client.sent: "Thank you, your suggestion has been passed on."
+
+  request.confirmed.client.body: "Your session is confirmed: {time}."
+  request.confirmed.client.join_online: "Join here: {url}"
+  request.confirmed.client.join_onsite: "Address: {url}"
+
+  request.rejected.client.body: "Unfortunately your request {uuid} could not be scheduled."
+  request.rejected.client.reason: "Reason: {reason}"
+  request.expired.client.body: "Your request {uuid} expired without a reply. You are welcome to make a new one."
+  request.cancelled.client.body: "Your session on {time} has been cancelled."
+  request.cancelled.client.reason: "Reason: {reason}"
+
+  reminder.client.body.24h: "Reminder: your session is tomorrow, {time}."
+  reminder.client.body.1h: "Reminder: your session starts in an hour, at {time}."
+
+  waitlist.joined.client.body: "You are on the waiting list. I will be in touch when a place opens up."
+
+  auth.login_link.client.subject: "Your sign-in link"
+  auth.login_link.client.body: "Use this link to open your booking. It works once and expires in {minutes} minutes."
+  auth.login_link.client.action.open: "Open my booking"
+  auth.login_link.client.telegram_hint: "Prefer Telegram? Connect it and get updates there instead."
+  auth.login_link.client.action.telegram: "Connect Telegram"
+  auth.link_channel.client.body: "Connect Telegram to receive updates about your session there."
+
+email:
+  subject.request_update: "Update on your request"
+  subject.request_confirmed: "Your session is confirmed"
+  subject.reminder: "Reminder about your session"
+  subject.request_cancelled: "Your session has been cancelled"
+  footer: "You are receiving this because you requested a consultation. Reply to this address if you did not."
+
+# --- Admin surface. English only; never translated. -------------------------
+admin:
+  login.title: "Sign in"
+  login.failed: "Incorrect username or password."
+  nav.requests: "Requests"
+  nav.waitlist: "Waitlist"
+  nav.slots: "Slots"
+  nav.content: "Content"
+  nav.translations: "Translations"
+  nav.settings: "Settings"
+  nav.session_types: "Session types"
+  nav.timezones: "Timezones"
+  nav.delivery: "Delivery"
+  request.approve: "Approve"
+  request.propose: "Propose another time"
+  request.reject: "Reject"
+  request.cancel: "Cancel session"
+  request.meeting_url: "Meeting link (leave blank to use the practice default)"
+  slots.bulk: "Create slots in bulk"
+  content.preview: "Preview per channel"
+  content.revisions: "Revision history"
+  content.invalid_markdown: "Unsupported Markdown: {detail}"
+  settings.saved: "Saved."
+  delivery.failed: "Delivery failed: {error}"
+  intent.system.delivery_failed.admin.body: "Could not deliver {intent} to {address}: {error}"
+  intent.request.submitted.admin.body: "New request {uuid} from {name}: {session_type}, {modality}, requested {time}."
+  intent.request.counter.admin.body: "Client replied on request {uuid}: {time} {note}"
+  intent.request.confirmed.admin.body: "Request {uuid} confirmed for {time}."
+  intent.waitlist.joined.admin.body: "New waitlist entry {uuid} from {name}."

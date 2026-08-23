@@ -1,0 +1,88 @@
+# One image, three application services (DESIGN.md §3.3). Profiles select the
+# ingress; see IMPLEMENTATION.md §16.1.
+#
+#   tls   (default)  caddy + web + worker + db  -- Caddy terminates TLS
+#   plain            web + worker + db          -- something else terminates TLS
+#   plain,cloudflared  above plus a Cloudflare Tunnel, no inbound ports
+
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-psychobooking}
+      POSTGRES_USER: ${POSTGRES_USER:-psycho}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-psycho}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  web:
+    build: .
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    # web is the only process that migrates (§16.5); worker waits on its
+    # healthcheck, so exactly one process runs `alembic upgrade head`.
+    command: >
+      sh -c "alembic upgrade head &&
+             uvicorn app.main:app --host 0.0.0.0 --port 8000
+             --proxy-headers --forwarded-allow-ips='*'"
+    expose:
+      - "8000"
+    # No published ports here. Under `tls`, Caddy is the sole ingress and web is
+    # reachable only on the internal network. Under `plain`, the loopback
+    # binding comes from docker-compose.plain.yml.
+    healthcheck:
+      test: ["CMD", "python", "-c",
+             "import urllib.request;urllib.request.urlopen('http://localhost:8000/healthz')"]
+      interval: 10s
+      timeout: 5s
+      retries: 6
+    restart: unless-stopped
+
+  worker:
+    build: .
+    env_file: .env
+    depends_on:
+      web:
+        condition: service_healthy
+    command: ["python", "-m", "app.worker.main"]
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    profiles: ["tls"]
+    environment:
+      # Soft defaults on purpose: Compose interpolates every service before it
+      # filters by profile, so a hard `:?` here would force a tunnel-only
+      # operator -- who has no domain at all -- to invent one. The requirement
+      # is enforced below instead, where it actually applies.
+      DOMAIN: ${DOMAIN:-}
+      ACME_EMAIL: ${ACME_EMAIL:-}
+    # Fail loudly rather than let Caddy fall back to serving plain HTTP on :80
+    # for every host, which is exactly the exposure §16.1 warns about.
+    command: >
+      sh -c '[ -n "$$DOMAIN" ] || { echo "FATAL: DOMAIN is required by the tls profile. Set it in .env, or use the plain profile."; exit 1; };
+             [ -n "$$ACME_EMAIL" ] || { echo "FATAL: ACME_EMAIL is required by the tls profile. Set it in .env."; exit 1; };
+             exec caddy run --config /etc/caddy/Caddyfile --adapter caddyfile'
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    ports:
+      - "80:80"
+      - "443:443"
+    depends_on:
+      - web
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  caddy_data:
+  caddy_config:

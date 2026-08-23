@@ -1,0 +1,109 @@
+# locales/ru.yaml
+#
+# Keys are normative and come from en.yaml — do not rename, do not omit.
+# Copy marked `# TODO` has no equivalent in the v1.0 deployment and needs the
+# therapist's own wording before launch. Everything unmarked is carried over
+# from v1.0 with Telegram HTML tags and layout emoji stripped (see §15).
+
+lang:
+  select: "Пожалуйста, выберите язык."
+  name.ru: "Русский"
+  name.hy: "Հայերեն"
+  name.en: "English"
+
+common:
+  skip: "Пропустить"
+  back: "Назад"                                  # TODO: confirm
+  cancel: "Отмена"                               # TODO: confirm
+  home: "Домой"
+  yes: "Да"                                      # TODO: confirm
+  no: "Нет"                                      # TODO: confirm
+  continue: "Продолжить"                         # TODO: confirm
+  open: "Открыть"                                # TODO: confirm
+  welcome: "Добро пожаловать."
+  welcome_back: "Вы вернулись в главное меню."
+  error.generic: "Произошла ошибка. Пожалуйста, попробуйте позже."
+  error.expired_link: "Ссылка больше не действует. Запросите новую."   # TODO
+  error.not_found: "Не найдено."                                        # TODO
+  error.rate_limited: "Слишком много попыток. Попробуйте позже."        # TODO
+
+menu:
+  consultation: "Запись на консультацию"
+  home: "Домой"
+
+content:
+  topic.work_terms.title: "Условия работы"
+  topic.qualification.title: "Квалификация"
+  topic.about_psychotherapy.title: "О психотерапии"
+  topic.references.title: "Другие специалисты"   # TODO: confirm wording
+  empty: "Информация пока не добавлена."
+
+booking:
+  choose_modality: "Как вам удобнее встретиться?"                 # TODO
+  modality.online: "Онлайн-консультация"
+  modality.onsite: "Очная консультация"
+  onsite_info: "Очный приём проходит здесь: {url}"                # TODO
+  choose_type: "Какой формат консультации?"                       # TODO
+  type.individual: "Индивидуальная консультация"
+  type.couple: "Консультация для пар"
+  type.with_price: "{name} — {duration} мин ({price})"
+  type.without_price: "{name} — {duration} мин"
+  choose_timezone: "Пожалуйста, укажите ваш часовой пояс."
+  timezone.detected: "Определён часовой пояс {timezone}. Всё верно?"   # TODO
+  choose_slot: "Выберите удобное время. Время указано в поясе {timezone}."   # TODO
+  slot.none_available: "Свободного времени сейчас нет."                       # TODO
+  slot.held: "Это время забронировано за вами на {minutes} минут."            # TODO
+  slot.taken: "К сожалению, это время уже занято. Пожалуйста, выберите другое."
+  slot.hold_expired: "Бронь истекла. Пожалуйста, выберите время заново."       # TODO
+  ask_desired_time: "Когда вам было бы удобно? Напишите своими словами — день, часть дня или конкретное время."   # TODO
+  ask_problem: "Если хотите, кратко опишите то, с чем вы хотели бы обратиться."
+  ask_name: "Как к вам обращаться?"
+  ask_contact: "Какой способ связи для вас предпочтительнее?"
+  submitted: "Спасибо. Ваш запрос отправлен, номер {uuid}. Я свяжусь с вами в ближайшее время."
+  cancelled_by_user: "Запись отменена. Вы вернулись в главное меню."
+  unavailable: "Сейчас запись закрыта."                                        # TODO
+
+waitlist:
+  intro: "К сожалению, сейчас нет свободных мест. Вы можете оставить заявку в лист ожидания."
+  ask_problem: "Кратко опишите, с чем вы хотели бы обратиться."                 # TODO
+  ask_contact: "Пожалуйста, оставьте ваши контакты для связи."
+  submitted: "Спасибо. Ваша заявка принята, я свяжусь с вами."                  # TODO
+
+intent:
+  request.proposal.client.body: "Предложено время по вашей заявке {uuid}: {time}."
+  request.proposal.client.note: "Комментарий специалиста: {note}"               # TODO
+  request.proposal.client.action.accept: "Согласиться"
+  request.proposal.client.action.counter: "Предложить другое время"
+  request.proposal.client.action.decline: "Отказаться"                          # TODO
+
+  request.counter.client.ask: "Какое время вам подошло бы лучше?"               # TODO
+  request.counter.client.sent: "Спасибо, ваше предложение передано."            # TODO
+
+  request.confirmed.client.body: "Ваша консультация подтверждена: {time}."
+  request.confirmed.client.join_online: "Ссылка для подключения: {url}"         # TODO
+  request.confirmed.client.join_onsite: "Адрес: {url}"                          # TODO
+
+  request.rejected.client.body: "К сожалению, заявку {uuid} не удалось согласовать."
+  request.rejected.client.reason: "Причина: {reason}"                           # TODO
+  request.expired.client.body: "Заявка {uuid} истекла без ответа. Вы можете оставить новую."   # TODO
+  request.cancelled.client.body: "Консультация {time} отменена."                # TODO
+  request.cancelled.client.reason: "Причина: {reason}"                          # TODO
+
+  reminder.client.body.24h: "Напоминание: ваша консультация завтра, {time}."
+  reminder.client.body.1h: "Напоминание: ваша консультация начнётся через час, в {time}."
+
+  waitlist.joined.client.body: "Вы в листе ожидания. Я напишу, когда появится место."   # TODO
+
+  auth.login_link.client.subject: "Ссылка для входа"                            # TODO
+  auth.login_link.client.body: "По этой ссылке вы откроете свою заявку. Она действует один раз, {minutes} минут."   # TODO
+  auth.login_link.client.action.open: "Открыть заявку"                          # TODO
+  auth.login_link.client.telegram_hint: "Удобнее в Telegram? Подключите — уведомления будут приходить туда."   # TODO
+  auth.login_link.client.action.telegram: "Подключить Telegram"                 # TODO
+  auth.link_channel.client.body: "Подключите Telegram, чтобы получать уведомления о консультации там."   # TODO
+
+email:
+  subject.request_update: "Обновление по вашей заявке"                          # TODO
+  subject.request_confirmed: "Консультация подтверждена"                        # TODO
+  subject.reminder: "Напоминание о консультации"                                # TODO
+  subject.request_cancelled: "Консультация отменена"                            # TODO
+  footer: "Вы получили это письмо, потому что оставили заявку на консультацию."  # TODO

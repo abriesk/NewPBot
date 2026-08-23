@@ -1,0 +1,107 @@
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+env:
+  DATABASE_URL: postgresql+asyncpg://psycho:psycho@localhost:5432/psychobooking_test
+  SECRET_KEY: ci-secret-key-that-is-at-least-32-bytes-long
+  BASE_URL: https://ci.example.test
+  TELEGRAM_BOT_TOKEN: "0000000000:ci-token"
+  TELEGRAM_BOT_USERNAME: ci_bot
+  TELEGRAM_WEBHOOK_SECRET: ci-webhook-secret
+  TELEGRAM_ADMIN_IDS: "1"
+  ADMIN_USERNAME: admin
+  ADMIN_PASSWORD: ci-admin-password
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: ruff check app tests
+      - run: ruff format --check app tests
+      - run: mypy app
+
+  test:
+    runs-on: ubuntu-latest
+    # Tests run against real PostgreSQL. SQLite MUST NOT be substituted -- the
+    # schema depends on native enums, arrays, and FOR UPDATE SKIP LOCKED.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_DB: psychobooking_test
+          POSTGRES_USER: psycho
+          POSTGRES_PASSWORD: psycho
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U psycho"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: pytest -q
+
+  compose:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Seed a .env from the committed example
+        run: cp .env.example .env
+
+      - name: Every profile parses
+        run: |
+          docker compose config -q
+          COMPOSE_PROFILES=plain docker compose \
+            -f docker-compose.yml -f docker-compose.plain.yml config -q
+          COMPOSE_PROFILES=plain,cloudflared TUNNEL_TOKEN=ci-token docker compose \
+            -f docker-compose.yml -f docker-compose.plain.yml \
+            -f docker-compose.cloudflared.yml config -q
+
+      - name: The plain profile publishes nothing on 0.0.0.0
+        # §16.1: publishing on 0.0.0.0 would expose the app over plain HTTP and
+        # silently break `Secure` session cookies.
+        run: |
+          COMPOSE_PROFILES=plain docker compose \
+            -f docker-compose.yml -f docker-compose.plain.yml \
+            config > plain.rendered.yml
+          published=$(grep -c 'published:' plain.rendered.yml || true)
+          loopback=$(grep -c 'host_ip: 127.0.0.1' plain.rendered.yml || true)
+          echo "published=$published loopback=$loopback"
+          if [ "$published" -ne "$loopback" ]; then
+            echo "::error::plain profile publishes a port outside 127.0.0.1"
+            grep -B2 -A4 'published:' plain.rendered.yml
+            exit 1
+          fi
+
+      - name: Under tls, web is reachable only on the internal network
+        run: |
+          docker compose config > tls.rendered.yml
+          if awk '/^  web:/{f=1;next} /^  [a-z_-]+:$/{f=0} f' tls.rendered.yml \
+             | grep -q 'published:'; then
+            echo "::error::web must not publish ports under the tls profile"
+            exit 1
+          fi
+
+      - name: The stack comes up healthy
+        run: |
+          COMPOSE_PROFILES=plain docker compose \
+            -f docker-compose.yml -f docker-compose.plain.yml up -d --wait --wait-timeout 180
+          curl -fsS http://127.0.0.1:8000/healthz
+          curl -fsS http://127.0.0.1:8000/readyz
+          COMPOSE_PROFILES=plain docker compose \
+            -f docker-compose.yml -f docker-compose.plain.yml down -v

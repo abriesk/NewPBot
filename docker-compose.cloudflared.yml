@@ -1,0 +1,20 @@
+# Overlay for the `cloudflared` profile. Applied explicitly:
+#
+#   COMPOSE_PROFILES=plain,cloudflared docker compose \
+#       -f docker-compose.yml -f docker-compose.plain.yml \
+#       -f docker-compose.cloudflared.yml up -d
+#
+# SPEC DEVIATION (IMPLEMENTATION.md §16.3 places this service in the base file).
+# Compose interpolates every service in a file before it filters by profile, so
+# `${TUNNEL_TOKEN:?required}` sitting in the base file aborts *every* invocation
+# -- including the default `tls` profile -- whenever TUNNEL_TOKEN is empty.
+# Isolating the service in an overlay scopes the guard to the runs that actually
+# use it, and mirrors the precedent the spec already sets for `plain`.
+services:
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    profiles: ["cloudflared"]
+    command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN:?required}
+    depends_on:
+      - web
+    restart: unless-stopped

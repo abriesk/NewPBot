@@ -1,0 +1,41 @@
+# The stack in IMPLEMENTATION.md §2. Deliberately short -- do not add to it
+# without asking. APScheduler, Celery, and Redis are forbidden (§2).
+#
+# Pins are a set resolved together; bump them together too. aiogram constrains
+# pydantic tightly, so those two move as a pair.
+
+# --- Web ingress -------------------------------------------------------------
+fastapi==0.141.1
+uvicorn[standard]==0.52.4
+jinja2==3.1.6
+python-multipart==0.0.32
+
+# --- Database ----------------------------------------------------------------
+sqlalchemy[asyncio]==2.0.52
+asyncpg==0.31.0
+alembic==1.19.1
+
+# --- Telegram ----------------------------------------------------------------
+aiogram==3.30.0
+
+# --- Rendering and sanitising ------------------------------------------------
+markdown-it-py==4.2.0
+nh3==0.3.6
+
+# --- Email -------------------------------------------------------------------
+aiosmtplib==5.1.2
+
+# --- Configuration, validation, secrets --------------------------------------
+pydantic==2.13.4
+pydantic-settings==2.15.0
+argon2-cffi==25.1.0
+pyyaml==6.0.3
+
+# --- Tooling. Shipped in the image because the documented commands run inside
+# --- the web container (`docker compose exec web pytest`).
+pytest==9.1.1
+pytest-asyncio==1.4.0
+time-machine==3.4.0
+httpx==0.28.1
+ruff==0.16.4
+mypy==2.3.1

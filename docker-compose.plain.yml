@@ -1,0 +1,13 @@
+# Overlay for the `plain` profile. Applied explicitly:
+#
+#   COMPOSE_PROFILES=plain docker compose \
+#       -f docker-compose.yml -f docker-compose.plain.yml up -d
+#
+# Compose has no per-profile `ports` key, so the loopback binding lives here
+# rather than in the base file. It MUST stay bound to 127.0.0.1: publishing on
+# 0.0.0.0 would expose the app over plain HTTP, and `Secure` session cookies
+# would silently stop working (IMPLEMENTATION.md §16.1).
+services:
+  web:
+    ports:
+      - "127.0.0.1:8000:8000"

@@ -1,0 +1,29 @@
+# Configuration -- .env MUST never be tracked (IMPLEMENTATION.md §17).
+# v1.0 tracked it; only .env.example belongs in the repository.
+.env
+.env.*
+!.env.example
+
+# Backups contain clients' problem text.
+/backups/
+*.dump
+
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+
+# Tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Editors / OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

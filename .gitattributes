@@ -1,0 +1,9 @@
+# The image is Linux and `web`'s Compose command is a shell one-liner. CRLF
+# reaching the container turns that into a syntax error, so normalise on commit
+# and check out LF everywhere regardless of the developer's platform.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.woff2 binary

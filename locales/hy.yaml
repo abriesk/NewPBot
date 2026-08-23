@@ -1,0 +1,112 @@
+# locales/hy.yaml
+#
+# Language code is `hy` (Armenian). The v1.0 deployment used `am`, which is
+# Amharic — that code must not appear anywhere in the new codebase.
+#
+# Keys are normative and come from en.yaml — do not rename, do not omit.
+# Copy marked `# TODO` has no equivalent in the v1.0 deployment and needs a
+# native speaker before launch. Unmarked copy is carried over from v1.0 with
+# Telegram HTML tags and layout emoji stripped (see §15).
+
+lang:
+  select: "Խնդրում ենք ընտրել լեզուն:"
+  name.ru: "Русский"
+  name.hy: "Հայերեն"
+  name.en: "English"
+
+common:
+  skip: "Բաց թողնել"
+  back: "Հետ"                                    # TODO: translate
+  cancel: "Չեղարկել"                             # TODO: translate
+  home: "Գլխավոր"
+  yes: "Այո"                                     # TODO: translate
+  no: "Ոչ"                                       # TODO: translate
+  continue: "Շարունակել"                         # TODO: translate
+  open: "Բացել"                                  # TODO: translate
+  welcome: "Բարի գալուստ:"
+  welcome_back: "Դուք վերադարձել եք գլխավոր մենյու:"
+  error.generic: "Տեղի է ունեցել սխալ:"
+  error.expired_link: ""                         # TODO: translate
+  error.not_found: ""                            # TODO: translate
+  error.rate_limited: ""                         # TODO: translate
+
+menu:
+  consultation: "Գրանցվել խորհրդատվության"
+  home: "Գլխավոր"
+
+content:
+  topic.work_terms.title: "Աշխատանքի պայմաններ"
+  topic.qualification.title: "Մասնագետի որակավորում"
+  topic.about_psychotherapy.title: "Հոգեթերապիայի մասին"
+  topic.references.title: ""                     # TODO: translate
+  empty: "Տեղեկատվությունը դեռ ավելացված չէ:"
+
+booking:
+  choose_modality: ""                            # TODO: translate
+  modality.online: "Առցանց խորհրդատվություն"
+  modality.onsite: "Առկա խորհրդատվություն"
+  onsite_info: ""                                # TODO: translate
+  choose_type: ""                                # TODO: translate
+  type.individual: "Անհատական խորհրդատվություն"
+  type.couple: "Զույգերի խորհրդատվություն"
+  type.with_price: "{name} — {duration} րոպե ({price})"
+  type.without_price: "{name} — {duration} րոպե"
+  choose_timezone: "Նշեք ձեր ժամային գոտին:"
+  timezone.detected: ""                          # TODO: translate
+  choose_slot: ""                                # TODO: translate
+  slot.none_available: ""                        # TODO: translate
+  slot.held: ""                                  # TODO: translate
+  slot.taken: "Ցավոք, այդ ժամանակը արդեն զբաղված է: Խնդրում ենք ընտրել այլ ժամանակ:"
+  slot.hold_expired: ""                          # TODO: translate
+  ask_desired_time: ""                           # TODO: translate
+  ask_problem: "Եթե ցանկանաք, կարող եք կարճ նկարագրել այն հարցը, որով ցանկանում եք դիմել։"
+  ask_name: "Ինչպե՞ս կարելի է ձեզ դիմել։"
+  ask_contact: "Ո՞ր կապի եղանակն է ձեզ համար նախընտրելի։"
+  submitted: "Ձեր հայտը ուղարկված է: Ես կկապնվեմ ձեզ հետ:"   # TODO: add {uuid}
+  cancelled_by_user: "Ամրագրումը չեղարկվեց: Դուք վերադարձել եք գլխավոր մենյու:"
+  unavailable: ""                                # TODO: translate
+
+waitlist:
+  intro: "Ցավոք, այս պահին ազատ տեղեր չկան: Կարող եք գրանցվել սպասման ցուցակում:"
+  ask_problem: ""                                # TODO: translate
+  ask_contact: "Թողեք ձեր կոնտակտային տվյալները:"
+  submitted: ""                                  # TODO: translate
+
+intent:
+  request.proposal.client.body: "Նոր առաջարկ թերապևտից՝ {time}"   # TODO: add {uuid}
+  request.proposal.client.note: ""               # TODO: translate
+  request.proposal.client.action.accept: "Համաձայնվել"
+  request.proposal.client.action.counter: "Առաջարկել այլ ժամանակ"
+  request.proposal.client.action.decline: ""     # TODO: translate
+
+  request.counter.client.ask: ""                 # TODO: translate
+  request.counter.client.sent: ""                # TODO: translate
+
+  request.confirmed.client.body: "Հանդիպումը հաստատված է՝ {time}"
+  request.confirmed.client.join_online: ""       # TODO: translate
+  request.confirmed.client.join_onsite: ""       # TODO: translate
+
+  request.rejected.client.body: "Հայտը մերժված է:"   # TODO: add {uuid}
+  request.rejected.client.reason: ""             # TODO: translate
+  request.expired.client.body: ""                # TODO: translate
+  request.cancelled.client.body: ""              # TODO: translate
+  request.cancelled.client.reason: ""            # TODO: translate
+
+  reminder.client.body.24h: "Հիշեցում՝ Ձեր խորհրդատվությունը վաղն է, {time}։"
+  reminder.client.body.1h: "Հիշեցում՝ Ձեր խորհրդատվությունը սկսվում է 1 ժամից, {time}։"
+
+  waitlist.joined.client.body: ""                # TODO: translate
+
+  auth.login_link.client.subject: ""             # TODO: translate
+  auth.login_link.client.body: ""                # TODO: translate
+  auth.login_link.client.action.open: ""         # TODO: translate
+  auth.login_link.client.telegram_hint: ""       # TODO: translate
+  auth.login_link.client.action.telegram: ""     # TODO: translate
+  auth.link_channel.client.body: ""              # TODO: translate
+
+email:
+  subject.request_update: ""                     # TODO: translate
+  subject.request_confirmed: ""                  # TODO: translate
+  subject.reminder: ""                           # TODO: translate
+  subject.request_cancelled: ""                  # TODO: translate
+  footer: ""                                     # TODO: translate

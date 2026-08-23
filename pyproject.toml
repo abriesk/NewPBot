@@ -1,0 +1,50 @@
+# Tooling configuration only. The application is not packaged or installed --
+# it runs from /app in the image, with `prepend_sys_path = .` for Alembic.
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["alembic/versions"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W",    # pycodestyle
+    "F",         # pyflakes
+    "I",         # isort
+    "UP",        # pyupgrade
+    "B",         # bugbear
+    "C4",        # comprehensions
+    "DTZ",       # flake8-datetimez -- bans naive datetimes (hard rule 4)
+    "ASYNC",     # flake8-async
+    "S",         # bandit
+    "RUF",
+]
+ignore = [
+    "S101",      # assert: the test suite is built on it
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S105", "S106"]      # hardcoded test credentials are fine
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"datetime.datetime.utcnow".msg = "Naive UTC is banned. Use datetime.now(UTC)."
+
+[tool.mypy]
+python_version = "3.12"
+plugins = ["pydantic.mypy"]
+strict = true
+warn_unused_ignores = true
+disallow_untyped_decorators = false
+exclude = ["alembic/versions/"]
+
+[[tool.mypy.overrides]]
+module = ["tests.*"]
+disallow_untyped_defs = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+asyncio_default_fixture_loop_scope = "function"
+# datetime.utcnow() is deprecated in 3.12 and banned outright (hard rule 4).
+# Surfacing deprecations as errors keeps that from creeping back in quietly.
+filterwarnings = ["error::DeprecationWarning"]
