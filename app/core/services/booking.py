@@ -1,0 +1,622 @@
+"""Booking request lifecycle and negotiation (IMPLEMENTATION.md §7.1, §8).
+
+The transition table, which is the whole point of this module existing in one
+place rather than once per channel:
+
+| From        | Event                        | To          |
+|-------------|------------------------------|-------------|
+| -           | submit                       | pending     |
+| pending     | admin_approve                | confirmed   |
+| pending     | admin_propose                | negotiating |
+| pending     | admin_reject                 | rejected    |
+| pending     | expire (worker)              | expired     |
+| negotiating | client_accept                | confirmed   |
+| negotiating | client_counter               | negotiating |
+| negotiating | admin_propose                | negotiating |
+| negotiating | client_decline, admin_reject | rejected    |
+| confirmed   | admin_cancel                 | cancelled   |
+| confirmed   | complete (worker)            | completed   |
+
+Anything not in that table raises `InvalidTransition` and changes nothing.
+There is no path from `confirmed` back to `negotiating`: a change of time after
+confirmation is a cancellation plus a new request, which is what keeps reminders
+and slot bookkeeping honest (DESIGN.md §7).
+"""
+
+from __future__ import annotations
+
+from datetime import datetime
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.enums import (
+    ActorType,
+    Channel,
+    Modality,
+    NegotiationKind,
+    ReminderState,
+    RequestStatus,
+    SenderType,
+)
+from app.core.errors import (
+    BookingClosed,
+    InvalidTransition,
+    NegotiationDisabled,
+    NotFound,
+)
+from app.core.events import (
+    RequestCancelled,
+    RequestConfirmed,
+    RequestCounter,
+    RequestExpired,
+    RequestProposal,
+    RequestRejected,
+    RequestSubmitted,
+    collect,
+)
+from app.core.models import AuditLog, BookingRequest, NegotiationMessage, Reminder, SessionType
+from app.core.policies import now_utc, pending_expiry, reminder_schedule
+from app.core.services import slots as slot_service
+from app.core.services.settings import get_practice
+
+#: §7.1, as data. Keeping it declarative means a rejected transition is a
+#: lookup miss rather than a forgotten `elif`.
+ALLOWED: dict[RequestStatus, frozenset[str]] = {
+    RequestStatus.pending: frozenset({"admin_approve", "admin_propose", "admin_reject", "expire"}),
+    RequestStatus.negotiating: frozenset(
+        {"client_accept", "client_counter", "admin_propose", "client_decline", "admin_reject"}
+    ),
+    RequestStatus.confirmed: frozenset({"admin_cancel", "complete"}),
+    RequestStatus.rejected: frozenset(),
+    RequestStatus.expired: frozenset(),
+    RequestStatus.cancelled: frozenset(),
+    RequestStatus.completed: frozenset(),
+}
+
+
+def _guard(request: BookingRequest, event: str) -> None:
+    """Refuse anything outside §7.1 before a single field is touched."""
+    if event not in ALLOWED[request.status]:
+        raise InvalidTransition("booking_request", request.status.value, event)
+
+
+async def _get(session: AsyncSession, request_id: int) -> BookingRequest:
+    request = (
+        await session.execute(select(BookingRequest).where(BookingRequest.id == request_id))
+    ).scalar_one_or_none()
+    if request is None:
+        raise NotFound(f"booking request {request_id}")
+    return request
+
+
+async def get_by_uuid(session: AsyncSession, request_uuid: UUID) -> BookingRequest:
+    """`uuid` is the client-visible identifier; internal ids never leave."""
+    request = (
+        await session.execute(select(BookingRequest).where(BookingRequest.uuid == request_uuid))
+    ).scalar_one_or_none()
+    if request is None:
+        raise NotFound(f"booking request {request_uuid}")
+    return request
+
+
+async def _audit(
+    session: AsyncSession,
+    request: BookingRequest,
+    actor: ActorType,
+    action: str,
+    meta: dict[str, Any] | None = None,
+) -> None:
+    """Append an audit row.
+
+    `meta` MUST NOT carry problem_text or negotiation bodies (hard rule 8).
+    Log identifiers; the content stays in the admin UI.
+    """
+    session.add(
+        AuditLog(
+            practice_id=request.practice_id,
+            actor_type=actor,
+            action=action,
+            entity_type="booking_request",
+            entity_id=str(request.uuid),
+            meta=meta,
+        )
+    )
+
+
+async def _release_slot(session: AsyncSession, request: BookingRequest) -> None:
+    """Every terminal transition releases whatever the request was holding, in
+    the same transaction (§7.1)."""
+    if request.slot_id is not None:
+        await slot_service.release_slot(session, request.slot_id)
+
+
+async def _create_reminders(session: AsyncSession, request: BookingRequest) -> list[Reminder]:
+    """Explicit rows per configured offset (DESIGN.md §13).
+
+    One whose due time has already passed is created `skipped`, not fired late.
+    """
+    practice = await get_practice(session)
+    assert request.scheduled_start is not None  # guaranteed by the caller
+    created = []
+    for offset, due_at, already_past in reminder_schedule(practice, request.scheduled_start):
+        reminder = Reminder(
+            request_id=request.id,
+            offset_min=offset,
+            due_at=due_at,
+            state=ReminderState.skipped if already_past else ReminderState.scheduled,
+        )
+        session.add(reminder)
+        created.append(reminder)
+    await session.flush()
+    return created
+
+
+async def _cancel_reminders(session: AsyncSession, request: BookingRequest) -> None:
+    """Pending reminders die with the booking. Rows rather than booleans is
+    what makes this expressible at all."""
+    scheduled = (
+        (
+            await session.execute(
+                select(Reminder).where(
+                    Reminder.request_id == request.id,
+                    Reminder.state == ReminderState.scheduled,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for reminder in scheduled:
+        reminder.state = ReminderState.cancelled
+    await session.flush()
+
+
+async def _last_admin_proposal(session: AsyncSession, request_id: int) -> NegotiationMessage | None:
+    return (
+        await session.execute(
+            select(NegotiationMessage)
+            .where(
+                NegotiationMessage.request_id == request_id,
+                NegotiationMessage.sender == SenderType.admin,
+                NegotiationMessage.kind == NegotiationKind.proposal,
+            )
+            .order_by(NegotiationMessage.created_at.desc(), NegotiationMessage.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def whose_turn(session: AsyncSession, request_id: int) -> SenderType | None:
+    """Derived from the last message's sender, never stored (§6.6)."""
+    last = (
+        await session.execute(
+            select(NegotiationMessage)
+            .where(NegotiationMessage.request_id == request_id)
+            .order_by(NegotiationMessage.created_at.desc(), NegotiationMessage.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+    if last is None:
+        return None
+    return SenderType.client if last.sender == SenderType.admin else SenderType.admin
+
+
+# --- Submission -------------------------------------------------------------
+
+
+async def _submit(
+    session: AsyncSession,
+    *,
+    client_id: UUID,
+    session_type_id: int,
+    modality: Modality,
+    source_channel: Channel,
+    slot_id: int | None,
+    desired_time_text: str | None,
+    problem_text: str | None,
+    contact_note: str | None,
+    display_name: str | None,
+    client_timezone: str | None,
+) -> BookingRequest:
+    practice = await get_practice(session)
+    if not practice.availability_on:
+        raise BookingClosed("the practice is not accepting bookings")
+
+    session_type = (
+        await session.execute(select(SessionType).where(SessionType.id == session_type_id))
+    ).scalar_one_or_none()
+    if session_type is None or not session_type.is_active:
+        raise NotFound(f"session type {session_type_id}")
+
+    request = BookingRequest(
+        practice_id=practice.id,
+        client_id=client_id,
+        session_type_id=session_type_id,
+        modality=modality,
+        status=RequestStatus.pending,
+        source_channel=source_channel,
+        slot_id=slot_id,
+        desired_time_text=desired_time_text,
+        problem_text=problem_text,
+        contact_note=contact_note,
+        display_name=display_name,
+        client_timezone=client_timezone,
+        expires_at=pending_expiry(practice),
+    )
+    session.add(request)
+    await session.flush()
+
+    await _audit(session, request, ActorType.client, "request.submit")
+    collect(session, RequestSubmitted(request_id=request.id, request_uuid=request.uuid))
+    return request
+
+
+async def submit_slot_request(
+    session: AsyncSession,
+    *,
+    client_id: UUID,
+    slot_id: int,
+    session_type_id: int,
+    modality: Modality,
+    source_channel: Channel,
+    problem_text: str | None = None,
+    contact_note: str | None = None,
+    display_name: str | None = None,
+    client_timezone: str | None = None,
+) -> BookingRequest:
+    """Submit against a chosen slot.
+
+    The slot is held, not booked: the therapist approves every booking unless
+    `auto_confirm_slots` is on, and holding is what stops a second client
+    picking it meanwhile.
+    """
+    practice = await get_practice(session)
+    request = await _submit(
+        session,
+        client_id=client_id,
+        session_type_id=session_type_id,
+        modality=modality,
+        source_channel=source_channel,
+        slot_id=slot_id,
+        desired_time_text=None,
+        problem_text=problem_text,
+        contact_note=contact_note,
+        display_name=display_name,
+        client_timezone=client_timezone,
+    )
+
+    slot = await slot_service.hold_slot(session, slot_id, request.id)
+
+    if practice.auto_confirm_slots:
+        # One line of policy, off by default: keeping the therapist in the loop
+        # is the point of the product (DESIGN.md §6).
+        return await admin_approve(session, request.id, scheduled_start=slot.starts_at)
+    return request
+
+
+async def submit_free_time_request(
+    session: AsyncSession,
+    *,
+    client_id: UUID,
+    session_type_id: int,
+    modality: Modality,
+    desired_time_text: str,
+    source_channel: Channel,
+    problem_text: str | None = None,
+    contact_note: str | None = None,
+    display_name: str | None = None,
+    client_timezone: str | None = None,
+) -> BookingRequest:
+    """Submit a free-text desired time.
+
+    "some evening next week?" is a normal thing for a client to say; forcing it
+    into a datetime picker would be worse than storing the sentence
+    (DESIGN.md §9).
+    """
+    practice = await get_practice(session)
+    if not practice.negotiation_enabled:
+        raise NegotiationDisabled("free-time requests are switched off")
+
+    return await _submit(
+        session,
+        client_id=client_id,
+        session_type_id=session_type_id,
+        modality=modality,
+        source_channel=source_channel,
+        slot_id=None,
+        desired_time_text=desired_time_text,
+        problem_text=problem_text,
+        contact_note=contact_note,
+        display_name=display_name,
+        client_timezone=client_timezone,
+    )
+
+
+# --- Admin transitions ------------------------------------------------------
+
+
+async def admin_approve(
+    session: AsyncSession,
+    request_id: int,
+    *,
+    scheduled_start: datetime | None = None,
+    meeting_url: str | None = None,
+) -> BookingRequest:
+    """pending -> confirmed."""
+    request = await _get(session, request_id)
+    _guard(request, "admin_approve")
+
+    if scheduled_start is None and request.slot_id is None:
+        # A free-text request has no instant to derive; the admin must name one.
+        raise InvalidTransition("booking_request", request.status.value, "admin_approve")
+
+    start = scheduled_start
+    if request.slot_id is not None:
+        booked = await slot_service.book_slot(session, request.slot_id, request.id)
+        if start is None:
+            start = booked.starts_at
+    assert start is not None  # both branches above establish it
+
+    session_type = (
+        await session.execute(select(SessionType).where(SessionType.id == request.session_type_id))
+    ).scalar_one()
+
+    request.status = RequestStatus.confirmed
+    request.scheduled_start = start
+    request.scheduled_duration_min = session_type.duration_min
+    request.confirmed_at = now_utc()
+    if meeting_url is not None:
+        request.meeting_url = meeting_url
+    await session.flush()
+
+    await _create_reminders(session, request)
+    await _audit(session, request, ActorType.admin, "request.confirm")
+    collect(
+        session,
+        RequestConfirmed(request_id=request.id, request_uuid=request.uuid, scheduled_start=start),
+    )
+    return request
+
+
+async def admin_propose(
+    session: AsyncSession,
+    request_id: int,
+    *,
+    proposed_start: datetime | None = None,
+    body_text: str | None = None,
+) -> BookingRequest:
+    """pending|negotiating -> negotiating."""
+    request = await _get(session, request_id)
+    _guard(request, "admin_propose")
+
+    practice = await get_practice(session)
+    if not practice.negotiation_enabled:
+        raise NegotiationDisabled("negotiation is switched off")
+
+    # Releasing when the proposal names a different time (§7.1): holding a slot
+    # the therapist has just proposed moving away from would keep it off the
+    # picker for no reason.
+    if request.slot_id is not None and proposed_start is not None:
+        slot = await slot_service.release_slot(session, request.slot_id)
+        if slot.starts_at != proposed_start:
+            request.slot_id = None
+
+    session.add(
+        NegotiationMessage(
+            request_id=request.id,
+            sender=SenderType.admin,
+            kind=NegotiationKind.proposal,
+            proposed_start=proposed_start,
+            body_text=body_text,
+        )
+    )
+    request.status = RequestStatus.negotiating
+    await session.flush()
+
+    await _audit(session, request, ActorType.admin, "request.propose")
+    collect(
+        session,
+        RequestProposal(
+            request_id=request.id, request_uuid=request.uuid, proposed_start=proposed_start
+        ),
+    )
+    return request
+
+
+async def admin_reject(
+    session: AsyncSession, request_id: int, *, reason: str | None = None
+) -> BookingRequest:
+    """pending|negotiating -> rejected."""
+    request = await _get(session, request_id)
+    _guard(request, "admin_reject")
+
+    await _release_slot(session, request)
+    request.status = RequestStatus.rejected
+    request.rejected_reason = reason
+    await session.flush()
+
+    await _audit(session, request, ActorType.admin, "request.reject")
+    collect(session, RequestRejected(request_id=request.id, request_uuid=request.uuid))
+    return request
+
+
+async def admin_cancel(session: AsyncSession, request_id: int, *, reason: str) -> BookingRequest:
+    """confirmed -> cancelled.
+
+    Not optional and not gated on `cancel_window_hours`: without it a confirmed
+    booking has no exit that releases its slot, and the therapist has no
+    recourse when she is ill (DESIGN.md §14).
+    """
+    request = await _get(session, request_id)
+    _guard(request, "admin_cancel")
+
+    scheduled_start = request.scheduled_start
+    await _release_slot(session, request)
+    await _cancel_reminders(session, request)
+
+    request.status = RequestStatus.cancelled
+    request.cancelled_at = now_utc()
+    request.cancelled_by = ActorType.admin
+    request.cancellation_reason = reason
+    await session.flush()
+
+    await _audit(session, request, ActorType.admin, "request.cancel")
+    collect(
+        session,
+        RequestCancelled(
+            request_id=request.id,
+            request_uuid=request.uuid,
+            scheduled_start=scheduled_start,
+        ),
+    )
+    return request
+
+
+# --- Client transitions -----------------------------------------------------
+
+
+async def client_accept(session: AsyncSession, request_id: int) -> BookingRequest:
+    """negotiating -> confirmed, at the last time the admin proposed."""
+    request = await _get(session, request_id)
+    _guard(request, "client_accept")
+
+    proposal = await _last_admin_proposal(session, request.id)
+    if proposal is None or proposal.proposed_start is None:
+        # Accepting free text has no instant to confirm against; the therapist
+        # must propose a real datetime first.
+        raise InvalidTransition("booking_request", request.status.value, "client_accept")
+
+    session.add(
+        NegotiationMessage(
+            request_id=request.id, sender=SenderType.client, kind=NegotiationKind.accept
+        )
+    )
+
+    matching = await _matching_slot(session, proposal.proposed_start)
+    if matching is not None:
+        await slot_service.book_slot(session, matching, request.id)
+        request.slot_id = matching
+
+    session_type = (
+        await session.execute(select(SessionType).where(SessionType.id == request.session_type_id))
+    ).scalar_one()
+
+    request.status = RequestStatus.confirmed
+    request.scheduled_start = proposal.proposed_start
+    request.scheduled_duration_min = session_type.duration_min
+    request.confirmed_at = now_utc()
+    await session.flush()
+
+    await _create_reminders(session, request)
+    await _audit(session, request, ActorType.client, "request.accept")
+    collect(
+        session,
+        RequestConfirmed(
+            request_id=request.id,
+            request_uuid=request.uuid,
+            scheduled_start=proposal.proposed_start,
+        ),
+    )
+    return request
+
+
+async def _matching_slot(session: AsyncSession, starts_at: datetime) -> int | None:
+    """An available slot at exactly this instant, if the practice offers one."""
+    from app.core.enums import SlotStatus
+    from app.core.models import Slot
+
+    return (
+        await session.execute(
+            select(Slot.id)
+            .where(Slot.starts_at == starts_at, Slot.status == SlotStatus.available)
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def client_counter(
+    session: AsyncSession,
+    request_id: int,
+    *,
+    proposed_start: datetime | None = None,
+    body_text: str | None = None,
+) -> BookingRequest:
+    """negotiating -> negotiating."""
+    request = await _get(session, request_id)
+    _guard(request, "client_counter")
+
+    session.add(
+        NegotiationMessage(
+            request_id=request.id,
+            sender=SenderType.client,
+            kind=NegotiationKind.counter,
+            proposed_start=proposed_start,
+            body_text=body_text,
+        )
+    )
+    await session.flush()
+
+    await _audit(session, request, ActorType.client, "request.counter")
+    collect(
+        session,
+        RequestCounter(
+            request_id=request.id, request_uuid=request.uuid, proposed_start=proposed_start
+        ),
+    )
+    return request
+
+
+async def client_decline(session: AsyncSession, request_id: int) -> BookingRequest:
+    """negotiating -> rejected."""
+    request = await _get(session, request_id)
+    _guard(request, "client_decline")
+
+    session.add(
+        NegotiationMessage(
+            request_id=request.id, sender=SenderType.client, kind=NegotiationKind.decline
+        )
+    )
+    await _release_slot(session, request)
+    request.status = RequestStatus.rejected
+    await session.flush()
+
+    await _audit(session, request, ActorType.client, "request.decline")
+    collect(session, RequestRejected(request_id=request.id, request_uuid=request.uuid))
+    return request
+
+
+# --- Worker transitions -----------------------------------------------------
+
+
+async def expire_request(session: AsyncSession, request_id: int) -> BookingRequest:
+    """pending -> expired. Only `pending` expires (DESIGN.md §9)."""
+    request = await _get(session, request_id)
+    _guard(request, "expire")
+
+    await _release_slot(session, request)
+    request.status = RequestStatus.expired
+    await session.flush()
+
+    await _audit(session, request, ActorType.system, "request.expire")
+    collect(session, RequestExpired(request_id=request.id, request_uuid=request.uuid))
+    return request
+
+
+async def complete_request(session: AsyncSession, request_id: int) -> BookingRequest:
+    """confirmed -> completed, once the end time has passed.
+
+    Set by the worker, not by anyone clicking anything, and deliberately silent
+    -- no notification (§7.1).
+    """
+    request = await _get(session, request_id)
+    _guard(request, "complete")
+
+    await _release_slot(session, request)
+    request.status = RequestStatus.completed
+    await session.flush()
+
+    await _audit(session, request, ActorType.system, "request.complete")
+    return request
