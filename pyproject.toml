@@ -25,6 +25,9 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S105", "S106"]      # hardcoded test credentials are fine
+# The Armenian full stop is the point of these golden tests: §11.5 exists to
+# prove non-ASCII punctuation reaches a client unmangled.
+"tests/channels/test_markdown.py" = ["RUF001"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "datetime.datetime.utcnow".msg = "Naive UTC is banned. Use datetime.now(UTC)."
