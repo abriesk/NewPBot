@@ -11,10 +11,13 @@ DISTINCT, and FOR UPDATE SKIP LOCKED (IMPLEMENTATION.md §18).
 from __future__ import annotations
 
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Iterator
 
+import pytest
 import pytest_asyncio
 
+#: Filled in only when the environment does not already say otherwise, so the
+#: container's DATABASE_URL (db:5432) wins over this localhost placeholder.
 TEST_ENV = {
     "DATABASE_URL": "postgresql+asyncpg://psycho:psycho@localhost:5432/psychobooking_test",
     "SECRET_KEY": "test-secret-key-that-is-at-least-32-bytes-long",
@@ -22,19 +25,56 @@ TEST_ENV = {
     "TELEGRAM_BOT_TOKEN": "0000000000:test-token",
     "TELEGRAM_BOT_USERNAME": "test_bot",
     "TELEGRAM_WEBHOOK_SECRET": "test-webhook-secret",
-    "TELEGRAM_ADMIN_IDS": "1,2",
     "ADMIN_USERNAME": "admin",
     "ADMIN_PASSWORD": "test-admin-password",
 }
 
+#: Overridden unconditionally. A deployment's .env legitimately leaves
+#: TELEGRAM_ADMIN_IDS empty, but then there is no admin to notify and §13.3's
+#: routing cannot be exercised at all.
+FORCED_ENV = {
+    "TELEGRAM_ADMIN_IDS": "1,2",
+}
+
 for _key, _value in TEST_ENV.items():
     os.environ.setdefault(_key, _value)
+for _key, _value in FORCED_ENV.items():
+    os.environ[_key] = _value
 
 
 from sqlalchemy import NullPool  # noqa: E402
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine  # noqa: E402
 
 from app.config import get_settings  # noqa: E402
+
+
+@pytest.fixture
+def email_enabled(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """Turn the email channel on for one test.
+
+    `get_settings` is lru_cached and every module calls it at runtime rather
+    than binding the result, so clearing the cache around an env change is
+    enough to switch the channel on and back off again.
+    """
+    monkeypatch.setenv("SMTP_HOST", "smtp.example.test")
+    monkeypatch.setenv("SMTP_FROM", "no-reply@example.test")
+    get_settings.cache_clear()
+    try:
+        yield
+    finally:
+        get_settings.cache_clear()
+
+
+@pytest.fixture
+def email_disabled(monkeypatch: pytest.MonkeyPatch) -> Iterator[None]:
+    """§4: with SMTP_HOST unset the channel is disabled cleanly."""
+    monkeypatch.delenv("SMTP_HOST", raising=False)
+    monkeypatch.delenv("SMTP_FROM", raising=False)
+    get_settings.cache_clear()
+    try:
+        yield
+    finally:
+        get_settings.cache_clear()
 
 
 @pytest_asyncio.fixture

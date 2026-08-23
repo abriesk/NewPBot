@@ -99,6 +99,7 @@ intent:
   request.cancelled.client.body: "Your session on {time} has been cancelled."
   request.cancelled.client.reason: "Reason: {reason}"
 
+  reminder.client.body: "Reminder: your session is at {time}."
   reminder.client.body.24h: "Reminder: your session is tomorrow, {time}."
   reminder.client.body.1h: "Reminder: your session starts in an hour, at {time}."
 

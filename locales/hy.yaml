@@ -92,6 +92,7 @@ intent:
   request.cancelled.client.body: ""              # TODO: translate
   request.cancelled.client.reason: ""            # TODO: translate
 
+  reminder.client.body: ""                       # TODO: translate
   reminder.client.body.24h: "Հիշեցում՝ Ձեր խորհրդատվությունը վաղն է, {time}։"
   reminder.client.body.1h: "Հիշեցում՝ Ձեր խորհրդատվությունը սկսվում է 1 ժամից, {time}։"
 

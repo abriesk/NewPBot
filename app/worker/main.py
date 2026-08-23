@@ -19,15 +19,34 @@ from collections.abc import Awaitable, Callable
 
 from app.config import get_settings
 from app.db import dispose_engine
+from app.worker.jobs.outbox import dispatch_outbox
+from app.worker.jobs.sweeps import (
+    complete_requests,
+    expire_requests,
+    expire_slot_holds,
+    fire_reminders,
+    prune_revisions,
+    prune_tokens,
+    purge_content,
+)
 
 logger = logging.getLogger(__name__)
 
-Job = Callable[[], Awaitable[None]]
+Job = Callable[[], Awaitable[object]]
 
-# Populated in M4: dispatch_outbox, expire_slot_holds, expire_requests,
-# fire_reminders, complete_requests, purge_content, prune_tokens,
-# prune_revisions. Every job MUST be idempotent and safe to run concurrently.
-JOBS: list[Job] = []
+#: §14, in the order a pass runs them. Expiry before dispatch, so a request that
+#: lapsed since the last pass has its notification in the outbox by the time the
+#: dispatcher looks. Every job is idempotent and safe beside a second worker.
+JOBS: list[Job] = [
+    expire_slot_holds,
+    expire_requests,
+    complete_requests,
+    fire_reminders,
+    dispatch_outbox,
+    purge_content,
+    prune_tokens,
+    prune_revisions,
+]
 
 
 async def run_once() -> None:
