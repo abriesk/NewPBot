@@ -57,3 +57,12 @@ class TokenInvalid(DomainError):
     Deliberately one exception for all four: telling a caller which of them
     applies leaks whether a token existed.
     """
+
+
+class RateLimited(DomainError):
+    """§17's limits. The caller has had their allowance for the window.
+
+    A domain error rather than an HTTP concern, because the booking limit is
+    per *client* and applies on every channel -- a limit only the web enforced
+    would be no limit at all.
+    """

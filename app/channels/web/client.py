@@ -23,6 +23,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.channels.web import ratelimit
 from app.channels.web.security import (
     CSRF_FIELD,
     csrf_ok,
@@ -41,6 +42,7 @@ from app.core.services.clients import (
     consume_token,
     issue_token,
     link_identity,
+    magic_link_allowance_left,
     resolve_client,
 )
 from app.core.services.flow import Step
@@ -648,12 +650,18 @@ def build_router() -> APIRouter:
             return Response(status_code=403)
 
         settings = get_settings()
+
+        # §17: 10 per hour per IP. The per-address limit is checked below,
+        # inside the transaction, because it counts auth_token rows.
+        ip_ok = ratelimit.check(ratelimit.MAGIC_LINK_IP, ratelimit.client_ip(request))
+
         async with unit_of_work() as session:
             context = await _context(session, request)
 
             # §4: with SMTP unset there is no way to deliver a link, and the web
             # UI requires Telegram login instead.
-            if settings.email_enabled:
+            per_email = await magic_link_allowance_left(session, email)
+            if settings.email_enabled and ip_ok and per_email > 0:
                 client = await resolve_client(
                     session, Channel.email, email, language=context["lang"]
                 )

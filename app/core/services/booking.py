@@ -25,7 +25,7 @@ and slot bookkeeping honest (DESIGN.md §7).
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -46,6 +46,7 @@ from app.core.errors import (
     InvalidTransition,
     NegotiationDisabled,
     NotFound,
+    RateLimited,
 )
 from app.core.events import (
     RequestCancelled,
@@ -62,6 +63,13 @@ from app.core.policies import now_utc, pending_expiry, reminder_schedule
 from app.core.services import slots as slot_service
 from app.core.services.settings import get_practice
 
+#: §17: booking submission, 5 per hour per client. Counted from the requests
+#: themselves rather than a counter table -- they already carry the timestamp,
+#: and the count survives a restart. Enforced in the core so every channel gets
+#: it, not just the one that remembered to ask.
+SUBMISSIONS_PER_HOUR = 5
+SUBMISSION_WINDOW = timedelta(hours=1)
+
 #: §7.1, as data. Keeping it declarative means a rejected transition is a
 #: lookup miss rather than a forgotten `elif`.
 ALLOWED: dict[RequestStatus, frozenset[str]] = {
@@ -75,6 +83,29 @@ ALLOWED: dict[RequestStatus, frozenset[str]] = {
     RequestStatus.cancelled: frozenset(),
     RequestStatus.completed: frozenset(),
 }
+
+
+async def _enforce_submission_rate(session: AsyncSession, client_id: UUID) -> None:
+    """§17: 5 submissions per hour per client.
+
+    Every terminal status counts. A client who books and cancels five times in
+    an hour is doing the thing the limit exists to stop, and only counting live
+    requests would make the limit trivial to walk around.
+    """
+    from sqlalchemy import func
+
+    recent = (
+        await session.execute(
+            select(func.count())
+            .select_from(BookingRequest)
+            .where(
+                BookingRequest.client_id == client_id,
+                BookingRequest.created_at >= now_utc() - SUBMISSION_WINDOW,
+            )
+        )
+    ).scalar_one()
+    if int(recent) >= SUBMISSIONS_PER_HOUR:
+        raise RateLimited(f"{SUBMISSIONS_PER_HOUR} booking requests an hour is the limit")
 
 
 def _guard(request: BookingRequest, event: str) -> None:
@@ -224,6 +255,8 @@ async def _submit(
     practice = await get_practice(session)
     if not practice.availability_on:
         raise BookingClosed("the practice is not accepting bookings")
+
+    await _enforce_submission_rate(session, client_id)
 
     session_type = (
         await session.execute(select(SessionType).where(SessionType.id == session_type_id))

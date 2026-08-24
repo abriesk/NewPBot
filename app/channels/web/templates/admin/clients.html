@@ -1,0 +1,43 @@
+{% extends "admin/base.html" %}
+{% block title %}Clients{% endblock %}
+{% block content %}
+<h1>Clients</h1>
+{# DESIGN.md §16: a request for a copy, or to be forgotten, should be
+   answerable without a database console. #}
+<p class="muted">
+  Export sends everything held about a person, including what they wrote.
+  Erasing removes every way of reaching or identifying them and clears their
+  free text; the bookings stay, so the practice keeps its statistics.
+</p>
+
+<div class="scroll">
+<table>
+  <thead><tr><th>Client</th><th>Reached by</th><th>Since</th><th>Erased</th><th></th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td><code>{{ row.id }}</code>{% if row.display_name %}<br>{{ row.display_name }}{% endif %}</td>
+      <td class="muted">
+        {% for label in identities[row.id | string] %}{{ label }}<br>{% else %}—{% endfor %}
+      </td>
+      <td>{{ row.created_at.strftime("%Y-%m-%d") }}</td>
+      <td>{% if row.erased_at %}{{ row.erased_at.strftime("%Y-%m-%d") }}{% else %}—{% endif %}</td>
+      <td class="admin-actions">
+        <a class="cta" href="/admin/clients/{{ row.id }}/export">Export</a>
+        {% if not row.erased_at %}
+          <form method="post" action="/admin/clients/{{ row.id }}/erase">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            {# Irreversible, so it wants the word typed rather than one click. #}
+            <input type="text" name="confirm" placeholder="type erase" size="10">
+            <button type="submit">Erase</button>
+          </form>
+        {% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="muted">No clients yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

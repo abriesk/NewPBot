@@ -204,3 +204,19 @@ async def future_slot(db: AsyncSession, practice: Practice) -> _AsyncIterator[Sl
     db.add(slot)
     await db.flush()
     yield slot
+
+
+@pytest.fixture(autouse=True)
+def _fresh_rate_limits() -> Iterator[None]:
+    """Every test starts with an empty rate-limit window.
+
+    The limiter is process-global by design (§17, and Redis is forbidden), so
+    without this the admin suite exhausts its own 5-per-15-minutes allowance
+    part-way through and every later sign-in gets a 429. That is the limiter
+    working; it just makes a shared test process an unrealistic caller.
+    """
+    from app.channels.web import ratelimit
+
+    ratelimit.reset()
+    yield
+    ratelimit.reset()

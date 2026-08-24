@@ -17,7 +17,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.enums import Channel, TokenPurpose
+from app.core.enums import ActorType, Channel, TokenPurpose
 from app.core.errors import NotFound, TokenInvalid
 from app.core.models import AuthToken, Client, Identity
 from app.core.policies import now_utc
@@ -255,3 +255,245 @@ async def identities_for(session: AsyncSession, client_id: UUID) -> list[Identit
         .scalars()
         .all()
     )
+
+
+# --- Rate limiting, from rows that already exist (§17) -----------------------
+
+#: §17: magic-link issuance, 3 per hour per email.
+MAGIC_LINK_PER_EMAIL = 3
+MAGIC_LINK_WINDOW = timedelta(hours=1)
+
+
+async def magic_link_allowance_left(session: AsyncSession, email: str) -> int:
+    """How many more links this address may be sent this hour.
+
+    Counted from `auth_token` rows rather than a counter table: the tokens are
+    the thing being limited, they already carry a timestamp, and the count
+    survives a restart.
+    """
+    from sqlalchemy import func
+
+    practice = await get_practice(session)
+    key = _normalise(Channel.email, email)
+
+    issued = (
+        await session.execute(
+            select(func.count())
+            .select_from(AuthToken)
+            .join(Identity, Identity.client_id == AuthToken.client_id)
+            .where(
+                AuthToken.practice_id == practice.id,
+                AuthToken.purpose == TokenPurpose.login,
+                AuthToken.created_at >= now_utc() - MAGIC_LINK_WINDOW,
+                Identity.channel == Channel.email,
+                Identity.external_id == key,
+            )
+        )
+    ).scalar_one()
+    return max(0, MAGIC_LINK_PER_EMAIL - int(issued))
+
+
+# --- Export and erasure (DESIGN.md §16) -------------------------------------
+
+
+async def export_client(session: AsyncSession, client_id: UUID) -> dict[str, Any]:
+    """Everything held about one person, as JSON-serialisable data.
+
+    DESIGN.md §16: a request for a copy should be answerable without a database
+    console. Problem text *is* included -- this goes to the person it is about,
+    which is the one direction it may travel.
+    """
+    from app.core.models import BookingRequest, NegotiationMessage, WaitlistEntry
+
+    client = await _get_client(session, client_id)
+
+    requests = (
+        (
+            await session.execute(
+                select(BookingRequest)
+                .where(BookingRequest.client_id == client_id)
+                .order_by(BookingRequest.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    threads: dict[str, list[dict[str, Any]]] = {}
+    for request in requests:
+        messages = (
+            (
+                await session.execute(
+                    select(NegotiationMessage)
+                    .where(NegotiationMessage.request_id == request.id)
+                    .order_by(NegotiationMessage.created_at)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        threads[str(request.uuid)] = [
+            {
+                "sender": m.sender.value,
+                "kind": m.kind.value,
+                "proposed_start": m.proposed_start.isoformat() if m.proposed_start else None,
+                "body": m.body_text,
+                "at": m.created_at.isoformat(),
+            }
+            for m in messages
+        ]
+
+    waitlist_entries = (
+        (
+            await session.execute(
+                select(WaitlistEntry)
+                .where(WaitlistEntry.client_id == client_id)
+                .order_by(WaitlistEntry.created_at)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    return {
+        "client": {
+            "id": str(client.id),
+            "display_name": client.display_name,
+            "language": client.language,
+            "timezone": client.timezone,
+            "created_at": client.created_at.isoformat(),
+            "erased_at": client.erased_at.isoformat() if client.erased_at else None,
+        },
+        "identities": [
+            {
+                "channel": i.channel.value,
+                "address": i.external_id,
+                "verified_at": i.verified_at.isoformat() if i.verified_at else None,
+            }
+            for i in await identities_for(session, client_id)
+        ],
+        "requests": [
+            {
+                "uuid": str(r.uuid),
+                "status": r.status.value,
+                "modality": r.modality.value,
+                "created_at": r.created_at.isoformat(),
+                "scheduled_start": r.scheduled_start.isoformat() if r.scheduled_start else None,
+                "desired_time_text": r.desired_time_text,
+                "problem_text": r.problem_text,
+                "contact_note": r.contact_note,
+                "cancellation_reason": r.cancellation_reason,
+                "rejected_reason": r.rejected_reason,
+                "thread": threads[str(r.uuid)],
+            }
+            for r in requests
+        ],
+        "waitlist": [
+            {
+                "uuid": str(w.uuid),
+                "status": w.status.value,
+                "created_at": w.created_at.isoformat(),
+                "problem_text": w.problem_text,
+                "contact_note": w.contact_note,
+            }
+            for w in waitlist_entries
+        ],
+    }
+
+
+async def erase_client(session: AsyncSession, client_id: UUID) -> Client:
+    """Honour a request to be forgotten (DESIGN.md §16).
+
+    The person becomes unreachable and unidentifiable: identities, tokens and
+    any half-finished flow go, and every free-text field they wrote is nulled.
+    The rows themselves stay, with `erased_at` set, so the practice keeps its
+    statistics -- deleting the bookings would silently change history.
+
+    Confirmed future sessions are cancelled first, so the slot is released and
+    no reminder fires at somebody who no longer exists.
+    """
+    from sqlalchemy import delete, update
+
+    from app.core.enums import RequestStatus
+    from app.core.models import (
+        AuditLog,
+        BookingRequest,
+        FlowState,
+        NegotiationMessage,
+        WaitlistEntry,
+    )
+    from app.core.services import booking as booking_service
+
+    client = await _get_client(session, client_id)
+
+    confirmed = (
+        (
+            await session.execute(
+                select(BookingRequest.id).where(
+                    BookingRequest.client_id == client_id,
+                    BookingRequest.status == RequestStatus.confirmed,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for request_id in confirmed:
+        await booking_service.admin_cancel(session, request_id, reason="client erased")
+
+    request_ids = (
+        (
+            await session.execute(
+                select(BookingRequest.id).where(BookingRequest.client_id == client_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if request_ids:
+        await session.execute(
+            update(NegotiationMessage)
+            .where(NegotiationMessage.request_id.in_(request_ids))
+            .values(body_text=None)
+        )
+        await session.execute(
+            update(BookingRequest)
+            .where(BookingRequest.id.in_(request_ids))
+            .values(
+                problem_text=None,
+                contact_note=None,
+                display_name=None,
+                cancellation_reason=None,
+                rejected_reason=None,
+            )
+        )
+
+    await session.execute(
+        update(WaitlistEntry)
+        .where(WaitlistEntry.client_id == client_id)
+        .values(problem_text=None, contact_note=None, admin_note=None)
+    )
+
+    await session.execute(delete(Identity).where(Identity.client_id == client_id))
+    await session.execute(delete(AuthToken).where(AuthToken.client_id == client_id))
+    await session.execute(delete(FlowState).where(FlowState.client_id == client_id))
+
+    client.display_name = None
+    client.timezone = None
+    client.erased_at = now_utc()
+    await session.flush()
+
+    practice = await get_practice(session)
+    session.add(
+        AuditLog(
+            practice_id=practice.id,
+            actor_type=ActorType.admin,
+            action="client.erase",
+            entity_type="client",
+            entity_id=str(client_id),
+            # The identifier, never what was erased (hard rule 8).
+            meta={"requests": len(request_ids)},
+        )
+    )
+    await session.flush()
+    return client

@@ -22,11 +22,12 @@ from uuid import UUID
 from zoneinfo import ZoneInfo
 
 from fastapi import APIRouter, Form, Request, Response
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.channels.web import ratelimit
 from app.channels.web.security import (
     CSRF_FIELD,
     authenticate_admin,
@@ -37,10 +38,11 @@ from app.channels.web.security import (
     issue_csrf,
     start_admin_session,
 )
-from app.core.enums import BookingMode, Modality, OutboxStatus, RequestStatus
+from app.core.enums import ActorType, BookingMode, Modality, OutboxStatus, RequestStatus
 from app.core.errors import DomainError, NotFound
 from app.core.models import (
     AdminUser,
+    AuditLog,
     BookingRequest,
     Client,
     ContentBlock,
@@ -56,6 +58,7 @@ from app.core.models import (
 from app.core.policies import now_utc
 from app.core.services import booking, content, notifications, waitlist
 from app.core.services import slots as slot_service
+from app.core.services.clients import erase_client, export_client, identities_for
 from app.core.services.content import MarkdownNotAllowed
 from app.core.services.settings import MUTABLE_FIELDS, get_practice, update_settings
 from app.core.services.slots import SlotPattern
@@ -155,6 +158,12 @@ def build_router() -> APIRouter:
     ) -> Response:
         if not csrf_ok(request, csrf_token):
             return Response(status_code=403)
+
+        # §17: 5 per 15 minutes per IP. Counted before the password is checked,
+        # so a wrong guess costs the attempt whether or not it was close.
+        if not ratelimit.check(ratelimit.ADMIN_LOGIN, ratelimit.client_ip(request)):
+            logger.warning("admin login rate limit reached")
+            return Response(status_code=429)
 
         async with unit_of_work() as session:
             admin = await authenticate_admin(session, username, password)
@@ -884,6 +893,100 @@ def build_router() -> APIRouter:
                     rows=rows,
                     counts={s.value: tallied.get(s, 0) for s in OutboxStatus},
                 ),
+            )
+
+    # --- Client export and erasure (§12.2, DESIGN.md §16) -------------------
+
+    @router.get("/clients/{client_id}/export", include_in_schema=False)
+    async def export_client_route(request: Request, client_id: str) -> Response:
+        """Everything held about one person, as a JSON download.
+
+        DESIGN.md §16: answerable without a database console. This is the one
+        direction problem text may travel -- back to the person it is about.
+        """
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+
+            try:
+                data = await export_client(session, UUID(client_id))
+            except (NotFound, ValueError):
+                return Response(status_code=404)
+
+            practice = await get_practice(session)
+            session.add(
+                AuditLog(
+                    practice_id=practice.id,
+                    actor_type=ActorType.admin,
+                    action="client.export",
+                    entity_type="client",
+                    entity_id=client_id,
+                )
+            )
+
+            return JSONResponse(
+                data,
+                headers={
+                    "Content-Disposition": (f'attachment; filename="client-{client_id}.json"')
+                },
+            )
+
+    @router.post("/clients/{client_id}/erase", include_in_schema=False)
+    async def erase_client_route(
+        request: Request,
+        client_id: str,
+        confirm: str = Form(""),
+        csrf_token: str = Form("", alias=CSRF_FIELD),
+    ) -> Response:
+        """Honour a request to be forgotten.
+
+        Irreversible, so it wants the word typed rather than a single click.
+        """
+        if not csrf_ok(request, csrf_token):
+            return Response(status_code=403)
+
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+
+            if confirm.strip().lower() != "erase":
+                return _back("/admin/clients", "type erase to confirm")
+
+            try:
+                await erase_client(session, UUID(client_id))
+            except (NotFound, ValueError):
+                return Response(status_code=404)
+
+            return _back("/admin/clients", "erased")
+
+    @router.get("/clients", response_class=HTMLResponse, include_in_schema=False)
+    async def clients_page(request: Request) -> Response:
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+
+            rows = (
+                (
+                    await session.execute(
+                        select(Client).order_by(Client.created_at.desc()).limit(200)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            identities: dict[str, list[str]] = {}
+            for client in rows:
+                identities[str(client.id)] = [
+                    f"{i.channel.value}: {i.external_id}"
+                    for i in await identities_for(session, client.id)
+                ]
+
+            return _render(
+                "admin/clients.html",
+                await _context(session, request, admin, rows=rows, identities=identities),
             )
 
     return router
