@@ -14,14 +14,19 @@ def _settings(**overrides: str) -> Settings:
 
 
 def test_defaults_match_the_specification() -> None:
-    s = _settings()
-    assert s.telegram_mode == "webhook"
-    assert s.smtp_port == 587
-    assert s.smtp_starttls is True
-    assert s.practice_timezone == "Asia/Yerevan"
-    assert s.default_language == "ru"
-    assert s.worker_poll_seconds == 20
-    assert s.trust_proxy_headers is True
+    """§4's default column, read off the model rather than off a running
+    deployment -- a .env that legitimately sets TELEGRAM_MODE=polling must not
+    make this fail."""
+    defaults = {name: field.default for name, field in Settings.model_fields.items()}
+
+    assert defaults["telegram_mode"] == "webhook"
+    assert defaults["smtp_port"] == 587
+    assert defaults["smtp_starttls"] is True
+    assert defaults["practice_timezone"] == "Asia/Yerevan"
+    assert defaults["default_language"] == "ru"
+    assert defaults["worker_poll_seconds"] == 20
+    assert defaults["trust_proxy_headers"] is True
+    assert defaults["log_level"] == "INFO"
 
 
 def test_email_channel_is_disabled_without_smtp_host() -> None:

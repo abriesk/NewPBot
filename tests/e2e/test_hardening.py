@@ -79,6 +79,9 @@ def test_no_weaker_hash_is_imported_anywhere() -> None:
 
 
 def test_the_admin_cookie_is_httponly_secure_and_lax(web: TestClient) -> None:
+    """§17. `Secure` follows BASE_URL's scheme rather than being unconditional:
+    a Secure cookie over plain http is simply never sent back, and the resulting
+    "signing in does nothing" is a miserable thing to debug in development."""
     settings = get_settings()
     web.get("/admin/login")
     response = web.post(
@@ -97,8 +100,10 @@ def test_the_admin_cookie_is_httponly_secure_and_lax(web: TestClient) -> None:
     )
     assert ADMIN_COOKIE in header
     assert "HttpOnly" in header
-    assert "Secure" in header  # BASE_URL is https in the test environment
     assert "SameSite=lax" in header.replace("SameSite=Lax", "SameSite=lax")
+
+    over_https = settings.base_url.startswith("https://")
+    assert ("Secure" in header) is over_https
 
 
 def test_the_client_cookie_is_httponly_too() -> None:
