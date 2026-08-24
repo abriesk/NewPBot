@@ -1,0 +1,80 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ t.nav_slots }}{% endblock %}
+{% block content %}
+<h1>{{ t.nav_slots }}</h1>
+
+<form method="post" action="/admin/slots/bulk" class="card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <h2>{{ t.slots_bulk }}</h2>
+  {# DESIGN.md §8: the therapist enters times in her own clock. #}
+  <p class="muted">Times are in the practice timezone ({{ practice.timezone }}).</p>
+  <div class="row">
+    <label>From <input type="date" name="date_from" required></label>
+    <label>To <input type="date" name="date_to" required></label>
+  </div>
+  <fieldset>
+    <legend>Weekdays</legend>
+    {% for n, day in weekdays %}
+      <label class="choice">
+        <input type="checkbox" name="weekdays" value="{{ n }}"> {{ day }}
+      </label>
+    {% endfor %}
+  </fieldset>
+  <label>Times, comma separated
+    <input type="text" name="times" placeholder="10:00, 11:00, 15:30" required>
+  </label>
+  <div class="row">
+    <label>Duration (min)
+      <input type="number" name="duration_min" value="60" min="15" step="5">
+    </label>
+    <label>Modality
+      <select name="modality">
+        <option value="">either</option>
+        {% for m in modalities %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
+      </select>
+    </label>
+  </div>
+  <button type="submit">Create</button>
+</form>
+
+<h2>Upcoming</h2>
+<div class="scroll">
+<table>
+  <thead>
+    <tr><th>When</th><th>Status</th><th>Modality</th><th>Duration</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for s in rows %}
+    <tr>
+      <td>{{ s.when }}</td>
+      <td><span class="badge {{ s.status }}">{{ s.status }}</span></td>
+      <td>{{ s.modality }}</td>
+      <td>{{ s.duration }}</td>
+      <td class="admin-actions">
+        {% if s.status == "available" %}
+          <form method="post" action="/admin/slots/{{ s.id }}/block">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit">block</button>
+          </form>
+          <form method="post" action="/admin/slots/{{ s.id }}/delete">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit">delete</button>
+          </form>
+        {% elif s.status == "blocked" %}
+          <form method="post" action="/admin/slots/{{ s.id }}/unblock">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <button type="submit">unblock</button>
+          </form>
+        {% else %}
+          {# Held or booked: blocked rather than deleted (DESIGN.md §8). #}
+          <span class="muted">in use</span>
+        {% endif %}
+      </td>
+    </tr>
+  {% else %}
+    <tr><td colspan="5" class="muted">No upcoming slots.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

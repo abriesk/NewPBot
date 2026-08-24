@@ -1,0 +1,31 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ t.nav_timezones }}{% endblock %}
+{% block content %}
+<h1>{{ t.nav_timezones }}</h1>
+{# DESIGN.md §8: IANA names with friendly labels, never UTC offsets -- an
+   offset breaks at every DST transition. #}
+<p class="muted">IANA names only, with a friendly label clients will recognise.</p>
+
+{% for row in rows %}
+  <form method="post" action="/admin/timezones" class="card inline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="iana_name" value="{{ row.iana_name }}">
+    <code>{{ row.iana_name }}</code>
+    <input type="text" name="display_name" value="{{ row.display_name }}">
+    <label class="choice">
+      <input type="checkbox" name="is_active" value="1" {% if row.is_active %}checked{% endif %}>
+      active
+    </label>
+    <button type="submit">Save</button>
+  </form>
+{% endfor %}
+
+<form method="post" action="/admin/timezones" class="card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <h3>Add a timezone</h3>
+  <label>IANA name <input type="text" name="iana_name" required placeholder="Europe/Lisbon"></label>
+  <label>Label <input type="text" name="display_name" required placeholder="Lisbon, Dublin"></label>
+  <label class="choice"><input type="checkbox" name="is_active" value="1" checked> active</label>
+  <button type="submit">Add</button>
+</form>
+{% endblock %}

@@ -1,0 +1,45 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ t.nav_translations }}{% endblock %}
+{% block content %}
+<h1>{{ t.nav_translations }}</h1>
+
+<p class="filters">
+  {% for code in languages %}
+    <a href="/admin/translations?lang={{ code }}"
+       {% if lang == code %}class="on"{% endif %}>{{ code }}</a>
+  {% endfor %}
+</p>
+
+{% if missing %}
+  <div class="card">
+    <h2>Missing here ({{ missing | length }})</h2>
+    <p class="muted">
+      These fall back to the practice default, then to English. Untranslated
+      copy is expected; the wording is yours to write.
+    </p>
+    <ul class="keys">{% for key in missing %}<li><code>{{ key }}</code></li>{% endfor %}</ul>
+  </div>
+{% endif %}
+
+<div class="scroll">
+<table>
+  <thead><tr><th>Key</th><th>Value</th><th></th></tr></thead>
+  <tbody>
+  {% for row in rows %}
+    <tr>
+      <td><code>{{ row.key }}</code></td>
+      <td colspan="2">
+        <form method="post" action="/admin/translations" class="inline">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="hidden" name="lang" value="{{ lang }}">
+          <input type="hidden" name="key" value="{{ row.key }}">
+          <input type="text" name="value" value="{{ row.value }}">
+          <button type="submit">Save</button>
+        </form>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

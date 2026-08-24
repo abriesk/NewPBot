@@ -1,0 +1,37 @@
+<!doctype html>
+{# The admin surface is English only, by design (DESIGN.md §11). #}
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}Admin{% endblock %} — {{ practice.name }}</title>
+<link rel="stylesheet" href="/static/style.css">
+<link rel="stylesheet" href="/static/admin.css">
+<script src="/static/htmx.min.js" defer></script>
+</head>
+<body class="admin">
+<header>
+  <a class="brand" href="/admin/requests">{{ practice.name }}</a>
+  <nav>
+    <a href="/admin/requests">{{ t.nav_requests }}</a>
+    <a href="/admin/waitlist">{{ t.nav_waitlist }}</a>
+    <a href="/admin/slots">{{ t.nav_slots }}</a>
+    <a href="/admin/content">{{ t.nav_content }}</a>
+    <a href="/admin/translations">{{ t.nav_translations }}</a>
+    <a href="/admin/session-types">{{ t.nav_session_types }}</a>
+    <a href="/admin/timezones">{{ t.nav_timezones }}</a>
+    <a href="/admin/delivery">{{ t.nav_delivery }}</a>
+    <a href="/admin/settings">{{ t.nav_settings }}</a>
+  </nav>
+  <form method="post" action="/admin/logout" class="lang">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">Sign out</button>
+  </form>
+</header>
+
+<main class="wide">
+  {% if flash %}<p class="flash">{{ flash }}</p>{% endif %}
+  {% block content %}{% endblock %}
+</main>
+</body>
+</html>

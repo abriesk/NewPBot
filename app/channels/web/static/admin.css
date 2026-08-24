@@ -1,0 +1,50 @@
+/* Admin-only additions. The client stylesheet supplies the palette. */
+.admin main.wide { max-width: 72rem; }
+
+.flash {
+  background: var(--surface); border: 1px solid var(--accent);
+  border-radius: var(--radius); padding: .6rem 1rem; color: var(--ink);
+}
+.error { color: #b3261e; }
+@media (prefers-color-scheme: dark) { .error { color: #f2b8b5; } }
+
+.filters { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
+.filters a {
+  color: var(--muted); text-decoration: none; border: 1px solid var(--line);
+  border-radius: 999px; padding: .1rem .6rem; font-size: .85rem;
+}
+.filters a.on { color: var(--ink); border-color: var(--accent); }
+
+/* Wide tables scroll inside their own box; the page never scrolls sideways. */
+.scroll { overflow-x: auto; }
+table { border-collapse: collapse; width: 100%; font-size: .92rem; }
+th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--line); }
+th { color: var(--muted); font-weight: 600; }
+
+.badge {
+  display: inline-block; border-radius: 999px; padding: .05rem .55rem;
+  font-size: .8rem; border: 1px solid var(--line); color: var(--muted);
+}
+.badge.pending, .badge.new, .badge.scheduled { border-color: #b8860b; color: #b8860b; }
+.badge.confirmed, .badge.sent, .badge.available { border-color: var(--accent); color: var(--accent); }
+.badge.rejected, .badge.cancelled, .badge.dead, .badge.failed { border-color: #b3261e; color: #b3261e; }
+
+.admin-actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: end; }
+.admin-actions form { margin: 0; }
+form.inline { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
+form.inline input[type=text] { width: auto; flex: 1; min-width: 12rem; margin: 0; }
+.row { display: flex; flex-wrap: wrap; gap: 1rem; }
+.row label { flex: 1; min-width: 9rem; }
+
+textarea { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .9rem; }
+
+/* The problem description. Visible here and nowhere else (hard rule 8). */
+.problem { white-space: pre-wrap; }
+
+.preview { display: grid; gap: 1rem; grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr)); margin-top: 1rem; }
+.preview section { border: 1px solid var(--line); border-radius: var(--radius); padding: .75rem; }
+.preview h4 { margin: 0 0 .5rem; font-size: .9rem; }
+.preview pre { white-space: pre-wrap; word-break: break-word; font-size: .85rem; margin: .35rem 0; }
+.preview pre.tg { background: var(--bg); border-radius: 6px; padding: .5rem; }
+
+.keys { columns: 2; font-size: .85rem; }

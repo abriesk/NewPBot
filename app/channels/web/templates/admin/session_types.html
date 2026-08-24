@@ -1,0 +1,41 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ t.nav_session_types }}{% endblock %}
+{% block content %}
+<h1>{{ t.nav_session_types }}</h1>
+{# §6.4: session types are rows, so adding "supervision" is an insert rather
+   than a migration and a deploy. #}
+{% for row in rows %}
+  <form method="post" action="/admin/session-types" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="code" value="{{ row.code }}">
+    <h3>{{ row.code }}</h3>
+    <div class="row">
+      <label>Duration (min)
+        <input type="number" name="duration_min" value="{{ row.duration_min }}">
+      </label>
+      <label>Price (minor units)
+        <input type="number" name="price_amount_minor"
+               value="{{ row.price_amount_minor if row.price_amount_minor is not none else '' }}">
+      </label>
+      <label>Currency
+        <input type="text" name="price_currency" value="{{ row.price_currency or '' }}"
+               maxlength="3" placeholder="AMD">
+      </label>
+    </div>
+    <label class="choice">
+      <input type="checkbox" name="is_active" value="1" {% if row.is_active %}checked{% endif %}>
+      active
+    </label>
+    <button type="submit">Save</button>
+  </form>
+{% endfor %}
+
+<form method="post" action="/admin/session-types" class="card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <h3>New session type</h3>
+  <label>Code <input type="text" name="code" required placeholder="supervision"></label>
+  <label>Duration (min) <input type="number" name="duration_min" value="60"></label>
+  <label class="choice"><input type="checkbox" name="is_active" value="1" checked> active</label>
+  <button type="submit">Add</button>
+</form>
+{% endblock %}

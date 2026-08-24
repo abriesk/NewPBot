@@ -1,0 +1,26 @@
+{# §12.2: render a block exactly as each channel would, side by side.
+
+   The point of this panel is that Telegram's tag subset and its 3500-character
+   split are visible to the therapist here, rather than discovered by a client
+   when a page arrives truncated (DESIGN.md §10.3). #}
+{% if error %}
+  <p class="error">{{ error }}</p>
+{% else %}
+<div class="preview">
+  <section>
+    <h4>Telegram
+      <span class="muted">({{ telegram_parts | length }} message{{ "s" if telegram_parts | length != 1 else "" }})</span>
+    </h4>
+    {% for part in telegram_parts %}<pre class="tg">{{ part }}</pre>{% endfor %}
+  </section>
+  <section>
+    <h4>Web</h4>
+    {# Already through the sanitiser allowlist (§11.3). #}
+    <div class="prose">{{ web_html | safe }}</div>
+  </section>
+  <section>
+    <h4>Email <span class="muted">(plain text is the primary part)</span></h4>
+    <pre>{{ email_text }}</pre>
+  </section>
+</div>
+{% endif %}

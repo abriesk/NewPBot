@@ -21,6 +21,7 @@ from sqlalchemy import text
 
 from app.channels.telegram.webhook import build_router as telegram_router
 from app.channels.telegram.webhook import register_webhook
+from app.channels.web.admin import build_router as admin_router
 from app.channels.web.client import build_router as web_router
 from app.config import get_settings
 from app.db import dispose_engine, get_session_factory
@@ -92,6 +93,10 @@ def create_app() -> FastAPI:
                 content={"status": "unavailable", "detail": type(exc).__name__},
             )
         return JSONResponse(status_code=200, content={"status": "ok"})
+
+    # Admin before the client router: "/admin/..." must not be swallowed by the
+    # client's catch-all-ish "/t/{topic_code}".
+    app.include_router(admin_router())
 
     # Mounted last: its "/" and "/t/{code}" routes must not shadow anything.
     app.include_router(web_router())

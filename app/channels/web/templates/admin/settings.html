@@ -1,0 +1,86 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ t.nav_settings }}{% endblock %}
+{% block content %}
+<h1>{{ t.nav_settings }}</h1>
+{# Everything here is a database setting, not an environment variable (§4):
+   these are the knobs the therapist turns without a deploy. #}
+<form method="post" action="/admin/settings" class="card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+
+  <fieldset>
+    <legend>Booking</legend>
+    <label class="choice">
+      <input type="checkbox" name="availability_on" value="1"
+             {% if practice.availability_on %}checked{% endif %}>
+      Accepting new bookings
+    </label>
+    <label>Mode
+      <select name="booking_mode">
+        <option value="slots" {% if practice.booking_mode.value == "slots" %}selected{% endif %}>slots</option>
+        <option value="negotiation" {% if practice.booking_mode.value == "negotiation" %}selected{% endif %}>negotiation</option>
+      </select>
+    </label>
+    <label class="choice">
+      <input type="checkbox" name="fallback_to_negotiation" value="1"
+             {% if practice.fallback_to_negotiation %}checked{% endif %}>
+      Offer a free-text time when no slots are free
+    </label>
+    <label class="choice">
+      <input type="checkbox" name="negotiation_enabled" value="1"
+             {% if practice.negotiation_enabled %}checked{% endif %}>
+      Negotiation enabled
+    </label>
+    <label class="choice">
+      <input type="checkbox" name="auto_confirm_slots" value="1"
+             {% if practice.auto_confirm_slots %}checked{% endif %}>
+      Confirm picked slots without my approval
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Practice</legend>
+    <label>Name <input type="text" name="name" value="{{ practice.name }}"></label>
+    <label>Timezone (IANA)
+      <input type="text" name="timezone" value="{{ practice.timezone }}">
+    </label>
+    <label>Default language
+      <select name="default_language">
+        {% for code in ["ru", "hy", "en"] %}
+          <option value="{{ code }}" {% if practice.default_language == code %}selected{% endif %}>{{ code }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label>Clinic address link
+      <input type="text" name="clinic_onsite_url" value="{{ practice.clinic_onsite_url or '' }}">
+    </label>
+    <label>Standing meeting room
+      <input type="text" name="online_meeting_url" value="{{ practice.online_meeting_url or '' }}">
+    </label>
+  </fieldset>
+
+  <fieldset>
+    <legend>Timing</legend>
+    <div class="row">
+      <label>Slot hold (min)
+        <input type="number" name="slot_hold_minutes" value="{{ practice.slot_hold_minutes }}">
+      </label>
+      <label>Pending expiry (h)
+        <input type="number" name="pending_expiry_hours" value="{{ practice.pending_expiry_hours }}">
+      </label>
+      <label>Cancellation window (h)
+        <input type="number" name="cancel_window_hours" value="{{ practice.cancel_window_hours }}">
+      </label>
+      <label>Retention (months)
+        <input type="number" name="retention_months" value="{{ practice.retention_months }}">
+      </label>
+    </div>
+    <label>Reminder offsets, minutes, comma separated
+      <input type="text" name="reminder_offsets_min"
+             value="{{ practice.reminder_offsets_min | join(', ') }}">
+    </label>
+    <p class="muted">Leave empty to switch reminders off.</p>
+  </fieldset>
+
+  <button type="submit">Save</button>
+</form>
+{% endblock %}

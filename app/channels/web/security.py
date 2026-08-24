@@ -16,13 +16,18 @@ import base64
 import hashlib
 import hmac
 import json
+import secrets
 import time
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 
 from fastapi import Request, Response
+from sqlalchemy import select, update
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
+from app.core.models import AdminSession, AdminUser
 
 #: §5.1 keeps login tokens to 30 minutes. The session they produce lasts longer
 #: -- a client who came back to check on a request should not have to ask for a
@@ -145,3 +150,138 @@ def csrf_ok(request: Request, submitted: str | None) -> bool:
     if _decode(submitted) is None:
         return False
     return hmac.compare_digest(cookie, submitted)
+
+
+# --- Admin sessions (§6.3, §17) ---------------------------------------------
+
+ADMIN_COOKIE = "pb_admin"
+
+#: Not specified. A week is long enough that the therapist is not signing in
+#: constantly, short enough that a forgotten browser stops being a way in.
+ADMIN_SESSION_TTL = timedelta(days=7)
+
+
+def _hash_token(raw: str) -> str:
+    """Only the digest is stored, exactly as for client tokens (§6.2)."""
+    return hashlib.sha256(raw.encode()).hexdigest()
+
+
+async def authenticate_admin(
+    session: AsyncSession, username: str, password: str
+) -> AdminUser | None:
+    """Verify a username and password. Argon2id (§17).
+
+    Returns None for both an unknown user and a wrong password: telling them
+    apart tells an attacker which usernames exist. The hash is verified even
+    when the user does not exist, so the two paths take the same time.
+    """
+    from argon2 import PasswordHasher
+    from argon2.exceptions import InvalidHashError, VerificationError, VerifyMismatchError
+
+    hasher = PasswordHasher()
+    admin = (
+        await session.execute(select(AdminUser).where(AdminUser.username == username))
+    ).scalar_one_or_none()
+
+    if admin is None:
+        # Argon2 over a throwaway hash, so a missing user costs the same as a
+        # wrong password.
+        try:
+            hasher.verify(_dummy(), password)
+        except (VerifyMismatchError, VerificationError, InvalidHashError):
+            pass
+        return None
+
+    try:
+        hasher.verify(admin.password_hash, password)
+    except (VerifyMismatchError, VerificationError, InvalidHashError):
+        return None
+
+    admin.last_login_at = _now()
+    await session.flush()
+    return admin
+
+
+_dummy_hash: str | None = None
+
+
+def _dummy() -> str:
+    """A real Argon2id hash of a value nobody knows.
+
+    It has to be genuine: a fabricated string fails parsing immediately, which
+    would make the unknown-user path measurably faster than a wrong password
+    and give away which usernames exist. Computed once, lazily, so importing
+    this module does not cost a KDF round.
+    """
+    global _dummy_hash
+    if _dummy_hash is None:
+        from argon2 import PasswordHasher
+
+        _dummy_hash = PasswordHasher().hash(secrets.token_urlsafe(32))
+    return _dummy_hash
+
+
+def _now() -> datetime:
+    return datetime.now(UTC)
+
+
+async def start_admin_session(session: AsyncSession, response: Response, admin: AdminUser) -> str:
+    """§17: rotated on login. Every previous session for this admin is revoked,
+    so signing in from a new device ends the old one."""
+    await session.execute(
+        update(AdminSession)
+        .where(
+            AdminSession.admin_user_id == admin.id,
+            AdminSession.revoked_at.is_(None),
+        )
+        .values(revoked_at=_now())
+    )
+
+    raw = secrets.token_urlsafe(32)
+    session.add(
+        AdminSession(
+            admin_user_id=admin.id,
+            token_hash=_hash_token(raw),
+            expires_at=_now() + ADMIN_SESSION_TTL,
+        )
+    )
+    await session.flush()
+
+    response.set_cookie(
+        ADMIN_COOKIE,
+        raw,
+        max_age=int(ADMIN_SESSION_TTL.total_seconds()),
+        **_cookie_kwargs(),
+    )
+    return raw
+
+
+async def current_admin(session: AsyncSession, request: Request) -> AdminUser | None:
+    """The signed-in therapist, or None."""
+    raw = request.cookies.get(ADMIN_COOKIE)
+    if not raw:
+        return None
+
+    row = (
+        await session.execute(
+            select(AdminSession).where(AdminSession.token_hash == _hash_token(raw))
+        )
+    ).scalar_one_or_none()
+    if row is None or row.revoked_at is not None or row.expires_at <= _now():
+        return None
+
+    return (
+        await session.execute(select(AdminUser).where(AdminUser.id == row.admin_user_id))
+    ).scalar_one_or_none()
+
+
+async def end_admin_session(session: AsyncSession, request: Request, response: Response) -> None:
+    raw = request.cookies.get(ADMIN_COOKIE)
+    if raw:
+        await session.execute(
+            update(AdminSession)
+            .where(AdminSession.token_hash == _hash_token(raw))
+            .values(revoked_at=_now())
+        )
+        await session.flush()
+    response.delete_cookie(ADMIN_COOKIE, path="/")

@@ -1,0 +1,72 @@
+{% extends "admin/base.html" %}
+{% block title %}Request {{ summary.uuid[:8] }}{% endblock %}
+{% block content %}
+<h1>Request <code>{{ summary.uuid }}</code></h1>
+
+<div class="card">
+  <p><span class="badge {{ summary.status }}">{{ summary.status }}</span>
+     {{ summary.session_type }} · {{ summary.modality }}</p>
+  <p>From <strong>{{ summary.name or 'unnamed' }}</strong>, {{ summary.created }}</p>
+  {% if summary.scheduled %}<p>Scheduled: {{ summary.scheduled }}</p>{% endif %}
+  {% if summary.desired %}<p>Asked for: {{ summary.desired }}</p>{% endif %}
+  {% if req.client_timezone %}<p class="muted">Client timezone: {{ req.client_timezone }}</p>{% endif %}
+  {% if req.contact_note %}<p>Contact: {{ req.contact_note }}</p>{% endif %}
+</div>
+
+{% if req.problem_text %}
+  {# Visible only here: never in a list, a log, an email, or audit meta
+     (hard rule 8, DESIGN.md §16). #}
+  <h2>What they wrote</h2>
+  <div class="card problem">{{ req.problem_text }}</div>
+{% endif %}
+
+{% if thread %}
+<h2>Negotiation</h2>
+<ol class="thread">
+  {% for m in thread %}
+    <li class="{{ m.sender.value }}">
+      <span class="who">{{ m.sender.value }}</span> · <span class="muted">{{ m.kind.value }}</span>
+      {% if m.proposed_start %}<time>{{ m.proposed_start.strftime('%Y-%m-%d %H:%M') }} UTC</time>{% endif %}
+      {% if m.body_text %}<p>{{ m.body_text }}</p>{% endif %}
+    </li>
+  {% endfor %}
+</ol>
+{% if turn %}<p class="muted">Waiting on: {{ turn.value }}</p>{% endif %}
+{% endif %}
+
+<h2>Actions</h2>
+<div class="admin-actions">
+  <form method="post" action="/admin/requests/{{ req.uuid }}/approve" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h3>{{ t.approve }}</h3>
+    <label>Time (practice timezone; blank uses the held slot)
+      <input type="datetime-local" name="scheduled_start">
+    </label>
+    <label>{{ t.meeting_url }}<input type="text" name="meeting_url"></label>
+    <button type="submit">{{ t.approve }}</button>
+  </form>
+
+  <form method="post" action="/admin/requests/{{ req.uuid }}/propose" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h3>{{ t.propose }}</h3>
+    <label>Time <input type="datetime-local" name="scheduled_start"></label>
+    <label>Note <input type="text" name="body"></label>
+    <button type="submit">{{ t.propose }}</button>
+  </form>
+
+  <form method="post" action="/admin/requests/{{ req.uuid }}/reject" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h3>{{ t.reject }}</h3>
+    <label>Reason <input type="text" name="reason"></label>
+    <button type="submit">{{ t.reject }}</button>
+  </form>
+
+  <form method="post" action="/admin/requests/{{ req.uuid }}/cancel" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h3>{{ t.cancel }}</h3>
+    <label>Reason <input type="text" name="reason"></label>
+    <button type="submit">{{ t.cancel }}</button>
+  </form>
+</div>
+<p><a href="/admin/requests">Back to requests</a></p>
+{% endblock %}

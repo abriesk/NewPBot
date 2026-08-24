@@ -1,0 +1,25 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ t.nav_waitlist }}{% endblock %}
+{% block content %}
+<h1>{{ t.nav_waitlist }}</h1>
+{% for e in rows %}
+  <div class="card">
+    <p><code>{{ e.uuid }}</code>
+       <span class="badge {{ e.status.value }}">{{ e.status.value }}</span></p>
+    {% if e.problem_text %}<p class="problem">{{ e.problem_text }}</p>{% endif %}
+    {% if e.contact_note %}<p>Contact: {{ e.contact_note }}</p>{% endif %}
+    {% if e.admin_note %}<p class="muted">Note: {{ e.admin_note }}</p>{% endif %}
+    <div class="admin-actions">
+      {% for action in actions %}
+        <form method="post" action="/admin/waitlist/{{ e.id }}/{{ action }}">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <input type="text" name="note" placeholder="note">
+          <button type="submit">{{ action }}</button>
+        </form>
+      {% endfor %}
+    </div>
+  </div>
+{% else %}
+  <p class="muted">Nobody is waiting.</p>
+{% endfor %}
+{% endblock %}

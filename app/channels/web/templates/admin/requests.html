@@ -1,0 +1,34 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ t.nav_requests }}{% endblock %}
+{% block content %}
+<h1>{{ t.nav_requests }}</h1>
+<p class="filters">
+  <a href="/admin/requests" {% if not active %}class="on"{% endif %}>all</a>
+  {% for s in statuses %}
+    <a href="/admin/requests?status={{ s }}" {% if active == s %}class="on"{% endif %}>{{ s }}</a>
+  {% endfor %}
+</p>
+<div class="scroll">
+<table>
+  <thead><tr>
+    <th>UUID</th><th>Status</th><th>Type</th><th>Modality</th>
+    <th>Name</th><th>Requested</th><th>Scheduled</th>
+  </tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td><a href="/admin/requests/{{ r.uuid }}"><code>{{ r.uuid[:8] }}</code></a></td>
+      <td><span class="badge {{ r.status }}">{{ r.status }}</span></td>
+      <td>{{ r.session_type }}</td>
+      <td>{{ r.modality }}</td>
+      <td>{{ r.name }}</td>
+      <td>{{ r.created }}</td>
+      <td>{{ r.scheduled or r.desired }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="7" class="muted">Nothing here yet.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endblock %}

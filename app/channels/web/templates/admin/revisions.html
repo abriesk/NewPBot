@@ -1,0 +1,32 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ t.content_revisions }}{% endblock %}
+{% block content %}
+<h1>{{ t.content_revisions }}</h1>
+<p class="muted">
+  Block {{ block.id }} &middot; {{ block.lang }} &middot;
+  position {{ block.position }} &middot; now v{{ block.version }}
+</p>
+
+<div class="card">
+  <h3>Current (v{{ block.version }})</h3>
+  <pre>{{ block.body_md }}</pre>
+</div>
+
+{% for rev in revisions %}
+  <div class="card">
+    <h3>v{{ rev.version }}
+      <span class="muted">{{ rev.created_at.strftime("%Y-%m-%d %H:%M") }} UTC</span>
+    </h3>
+    <pre>{{ rev.body_md }}</pre>
+    {# DESIGN.md §10.2: a paste that breaks a page at 23:00 has to be undoable. #}
+    <form method="post" action="/admin/content/revisions/{{ block.id }}/restore">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="version" value="{{ rev.version }}">
+      <button type="submit">Restore this version</button>
+    </form>
+  </div>
+{% else %}
+  <p class="muted">No earlier versions yet.</p>
+{% endfor %}
+<p><a href="/admin/content?lang={{ block.lang }}">Back to content</a></p>
+{% endblock %}

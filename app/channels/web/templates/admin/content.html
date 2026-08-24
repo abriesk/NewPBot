@@ -1,0 +1,65 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ t.nav_content }}{% endblock %}
+{% block content %}
+<h1>{{ t.nav_content }}</h1>
+
+<p class="filters">
+  {% for topic in topics %}
+    <a href="/admin/content?topic={{ topic.code }}&lang={{ lang }}"
+       {% if selected == topic.code %}class="on"{% endif %}>{{ topic.code }}</a>
+  {% endfor %}
+  &middot;
+  {% for code in languages %}
+    <a href="/admin/content?topic={{ selected }}&lang={{ code }}"
+       {% if lang == code %}class="on"{% endif %}>{{ code }}</a>
+  {% endfor %}
+</p>
+
+{% for block in blocks %}
+  <form method="post" action="/admin/content/blocks" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="topic_code" value="{{ selected }}">
+    <input type="hidden" name="lang" value="{{ lang }}">
+    <input type="hidden" name="position" value="{{ block.position }}">
+    <h3>Position {{ block.position }} &middot; v{{ block.version }}</h3>
+    <textarea name="body_md" rows="8" id="md-{{ block.id }}">{{ block.body_md }}</textarea>
+    <label class="choice">
+      <input type="checkbox" name="is_published" value="1"
+             {% if block.is_published %}checked{% endif %}>
+      published
+    </label>
+    <div class="admin-actions">
+      <button type="submit">Save</button>
+      {# §12.2: side by side, before a client sees it. #}
+      <button type="button"
+              hx-post="/admin/content/preview"
+              hx-include="#md-{{ block.id }}, [name=csrf_token]"
+              hx-target="#preview-{{ block.id }}">{{ t.content_preview }}</button>
+      <a class="cta" href="/admin/content/revisions/{{ block.id }}">{{ t.content_revisions }}</a>
+    </div>
+    <div id="preview-{{ block.id }}"></div>
+  </form>
+{% endfor %}
+
+<form method="post" action="/admin/content/blocks" class="card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <input type="hidden" name="topic_code" value="{{ selected }}">
+  <input type="hidden" name="lang" value="{{ lang }}">
+  <h3>New block</h3>
+  <label>Position
+    <input type="number" name="position" value="{{ blocks | length }}" min="0">
+  </label>
+  <textarea name="body_md" rows="6" id="md-new"></textarea>
+  <label class="choice">
+    <input type="checkbox" name="is_published" value="1" checked> published
+  </label>
+  <div class="admin-actions">
+    <button type="submit">Add</button>
+    <button type="button"
+            hx-post="/admin/content/preview"
+            hx-include="#md-new, [name=csrf_token]"
+            hx-target="#preview-new">{{ t.content_preview }}</button>
+  </div>
+  <div id="preview-new"></div>
+</form>
+{% endblock %}
