@@ -44,6 +44,7 @@ from app.core.services.clients import (
     link_identity,
     magic_link_allowance_left,
     resolve_client,
+    set_client_language,
 )
 from app.core.services.flow import Step
 from app.core.services.notifications import Envelope, Recipient
@@ -62,6 +63,11 @@ SLOT_WINDOW = timedelta(days=30)
 
 #: Set client-side from Intl.DateTimeFormat (DESIGN.md §8).
 TZ_COOKIE = "pb_tz"
+
+#: The last language this browser asked for. The switcher is a setting, not a
+#: query parameter, and none of the links on a page carry one.
+LANG_COOKIE = "pb_lang"
+LANG_COOKIE_MAX_AGE = 365 * 24 * 3600
 
 LANGUAGES = ("ru", "hy", "en")
 
@@ -125,7 +131,16 @@ async def _context(
     session: AsyncSession, request: Request, lang: str | None = None
 ) -> dict[str, Any]:
     practice = await get_practice(session)
-    resolved = _language(request, practice.default_language, lang)
+
+    # A signed-in client carries their own language, the same one Telegram set
+    # (§13.1 step 2), so the two channels do not disagree about a person.
+    client = await _session_client(session, request)
+    default = client.language if client is not None else practice.default_language
+    resolved = _language(request, default, lang)
+
+    if client is not None and _chosen_language(request) is not None:
+        if client.language != resolved:
+            await set_client_language(session, client.id, resolved)
 
     topics = []
     for topic in await content.list_menu_topics(session):
@@ -146,12 +161,32 @@ async def _context(
     }
 
 
+def _chosen_language(request: Request) -> str | None:
+    """The language this request explicitly asks for, if it asks for one."""
+    query = request.query_params.get("lang")
+    return query if query in LANGUAGES else None
+
+
 def _language(request: Request, default: str, override: str | None) -> str:
+    """DESIGN.md §11's two client languages, in order of how explicit the
+    choice is: this request, then the last one this browser made, then whatever
+    the caller considers the default.
+
+    Without the cookie the switcher only lasted as long as the query string,
+    and the first nav link -- none of which carry `?lang=` -- put the page back
+    into the practice language.
+    """
     if override in LANGUAGES:
         return override
-    query = request.query_params.get("lang")
-    if query in LANGUAGES:
-        return query
+
+    chosen = _chosen_language(request)
+    if chosen is not None:
+        return chosen
+
+    remembered = request.cookies.get(LANG_COOKIE)
+    if remembered in LANGUAGES:
+        return remembered
+
     return default
 
 
@@ -177,7 +212,30 @@ def _render(name: str, context: dict[str, Any], status_code: int = 200) -> HTMLR
     # The cookie must carry exactly what the page embedded, or every form on
     # it would be rejected.
     issue_csrf(response, context.get("csrf_token"))
+    # The HTMX partials build their own context and carry no language.
+    if context.get("lang"):
+        _remember_language(response, context["request"], context["lang"])
     return response
+
+
+def _remember_language(response: Response, request: Request, lang: str) -> None:
+    """Persist an explicit switch, and nothing else.
+
+    Only a request that asked for a language writes the cookie: pinning the
+    practice default on every visitor would freeze a later change to it for
+    everyone who had ever loaded a page.
+    """
+    if _chosen_language(request) is None:
+        return
+    response.set_cookie(
+        LANG_COOKIE,
+        lang,
+        max_age=LANG_COOKIE_MAX_AGE,
+        httponly=True,
+        secure=get_settings().base_url.startswith("https://"),
+        samesite="lax",
+        path="/",
+    )
 
 
 def build_router() -> APIRouter:

@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import NullPool, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+from app.channels.web.client import LANG_COOKIE
 from app.channels.web.security import CLIENT_COOKIE, CSRF_COOKIE
 from app.config import get_settings
 from app.core.enums import Channel, RequestStatus, SlotStatus, TokenPurpose
@@ -475,6 +476,60 @@ def test_the_language_switcher_offers_ru_and_hy_never_am(web: TestClient) -> Non
 def test_the_page_language_can_be_switched(web: TestClient) -> None:
     assert 'lang="hy"' in web.get("/", params={"lang": "hy"}).text
     assert 'lang="ru"' in web.get("/", params={"lang": "ru"}).text
+
+
+def test_a_switched_language_survives_the_next_link(web: TestClient) -> None:
+    """The switcher is a setting. No link on a page carries `?lang=`, so
+    without this the choice lasted exactly one request."""
+    web.get("/", params={"lang": "hy"})
+    assert web.cookies.get(LANG_COOKIE) == "hy"
+
+    assert 'lang="hy"' in web.get("/").text
+    assert 'lang="hy"' in web.get("/t/qualification").text
+
+    # And an explicit choice still wins over the remembered one.
+    assert 'lang="ru"' in web.get("/t/qualification", params={"lang": "ru"}).text
+    assert 'lang="ru"' in web.get("/t/qualification").text
+    web.cookies.delete(LANG_COOKIE)
+
+
+def test_an_unasked_for_page_does_not_pin_a_language(web: TestClient) -> None:
+    """Only an explicit switch writes the cookie; otherwise changing the
+    practice default would never reach anyone who had visited before."""
+    assert web.get("/").status_code == 200
+    assert web.cookies.get(LANG_COOKIE) is None
+
+
+async def test_a_signed_in_client_keeps_the_language_they_chose(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """One person, one language, whichever channel they are on (§13.1 step 2)."""
+    from app.core.services.clients import issue_token, resolve_client
+
+    address = "lang-pref@example.test"
+    client = await resolve_client(committed, Channel.email, address)
+    client.language = "hy"
+    raw = await issue_token(
+        committed, TokenPurpose.login, client_id=client.id, payload={"email": address}
+    )
+    await committed.commit()
+
+    assert web.get("/auth/callback", params={"token": raw}).status_code == 200
+    try:
+        # No cookie, no query: the client's own language is the default now.
+        assert 'lang="hy"' in web.get("/").text
+
+        # Switching on the web writes it back, so Telegram agrees next time.
+        web.get("/", params={"lang": "ru"})
+        await committed.refresh(client)
+        assert client.language == "ru"
+    finally:
+        web.cookies.delete(CLIENT_COOKIE)
+        web.cookies.delete(LANG_COOKIE)
+        await committed.execute(delete(AuthToken).where(AuthToken.client_id == client.id))
+        await committed.execute(delete(Identity).where(Identity.client_id == client.id))
+        await committed.execute(delete(Client).where(Client.id == client.id))
+        await committed.commit()
 
 
 def test_htmx_is_served_locally_not_from_a_cdn(web: TestClient) -> None:
