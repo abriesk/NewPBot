@@ -44,7 +44,12 @@ class Step(StrEnum):
     choosing_modality = "choosing_modality"
     entering_problem = "entering_problem"
     entering_name = "entering_name"
+    # §13.1 step 7: the contact question is a choice first. `entering_contact`
+    # is the free-text branch behind "Other"; `entering_contact_email` collects
+    # an address that a login link then has to prove.
+    choosing_contact = "choosing_contact"
     entering_contact = "entering_contact"
+    entering_contact_email = "entering_contact_email"
 
     # Free-text negotiation path.
     entering_desired_time = "entering_desired_time"

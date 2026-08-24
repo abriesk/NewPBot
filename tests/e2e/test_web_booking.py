@@ -325,9 +325,77 @@ async def test_the_magic_link_flow_signs_a_client_in(
     # Following the link is what proves the address.
     assert identity.verified_at is not None
 
+    await committed.execute(
+        delete(OutboxMessage).where(OutboxMessage.client_id == identity.client_id)
+    )
     await committed.execute(delete(AuthToken).where(AuthToken.client_id == identity.client_id))
     await committed.execute(delete(Identity).where(Identity.id == identity.id))
     await committed.execute(delete(Client).where(Client.id == identity.client_id))
+    await committed.commit()
+
+
+async def test_the_login_link_is_queued_to_the_address_it_is_about(
+    web: TestClient, committed: AsyncSession, email_enabled: None
+) -> None:
+    """§13.3: this intent addresses itself. Under the general policy the row is
+    never written, because the address it proves is unverified by definition."""
+    address = "link-target@example.test"
+    web.get("/auth/email")
+    assert web.post("/auth/email", data={"csrf_token": _csrf(web), "email": address}).status_code
+
+    row = (
+        await committed.execute(
+            select(OutboxMessage)
+            .where(
+                OutboxMessage.intent_key == "auth.login_link.client",
+                OutboxMessage.address == address,
+            )
+            .order_by(OutboxMessage.id.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+    assert row.channel is Channel.email
+
+    identity = (
+        await committed.execute(select(Identity).where(Identity.external_id == address))
+    ).scalar_one()
+    await committed.execute(delete(OutboxMessage).where(OutboxMessage.address == address))
+    await committed.execute(delete(AuthToken).where(AuthToken.client_id == identity.client_id))
+    await committed.execute(delete(Identity).where(Identity.id == identity.id))
+    await committed.execute(delete(Client).where(Client.id == identity.client_id))
+    await committed.commit()
+
+
+async def test_a_link_for_an_address_owned_by_someone_else_is_refused(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """§13.1 step 7 lets a Telegram client name any address, so the callback has
+    to answer for one that turns out to belong to another person."""
+    from app.core.services.clients import issue_token, resolve_client
+
+    owner = await resolve_client(committed, Channel.email, "owned@example.test")
+    stranger = await resolve_client(committed, Channel.telegram, "909090", verified=True)
+    raw = await issue_token(
+        committed,
+        TokenPurpose.login,
+        client_id=stranger.id,
+        payload={"email": "owned@example.test"},
+    )
+    await committed.commit()
+
+    response = web.get("/auth/callback", params={"token": raw}, follow_redirects=False)
+    assert response.status_code == 400
+
+    identity = (
+        await committed.execute(
+            select(Identity).where(Identity.external_id == "owned@example.test")
+        )
+    ).scalar_one()
+    assert identity.client_id == owner.id  # not reassigned
+
+    await committed.execute(delete(AuthToken).where(AuthToken.client_id == stranger.id))
+    await committed.execute(delete(Identity).where(Identity.client_id.in_([owner.id, stranger.id])))
+    await committed.execute(delete(Client).where(Client.id.in_([owner.id, stranger.id])))
     await committed.commit()
 
 

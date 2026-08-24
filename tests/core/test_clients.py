@@ -45,6 +45,24 @@ async def test_email_addresses_are_matched_case_insensitively(db: AsyncSession) 
     assert first.id == again.id
 
 
+@pytest.mark.parametrize(
+    "value",
+    ["anna@example.test", "  Anna.B+tag@mail.example.co.uk  ", "a@b.cd"],
+)
+def test_an_address_shaped_like_an_address_is_accepted(value: str) -> None:
+    assert clients.looks_like_email(value)
+
+
+@pytest.mark.parametrize(
+    "value",
+    ["", "anna", "anna at example dot test", "anna@example", "anna@@example.test", "a b@c.de"],
+)
+def test_anything_else_is_refused(value: str) -> None:
+    """A typo check for §13.1 step 7. The login link is what actually proves an
+    address, so this only has to catch the obvious."""
+    assert not clients.looks_like_email(value)
+
+
 async def test_a_client_defaults_to_the_practice_language(
     db: AsyncSession, practice: Practice
 ) -> None:

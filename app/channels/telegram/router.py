@@ -29,12 +29,16 @@ from app.core.policies import BookingPath, now_utc, resolve_booking_mode
 from app.core.services import booking, content, flow, notifications, waitlist
 from app.core.services.clients import (
     consume_token,
+    issue_token,
     link_identity,
+    looks_like_email,
+    magic_link_allowance_left,
     resolve_client,
     set_client_language,
     set_client_timezone,
 )
 from app.core.services.flow import Step
+from app.core.services.notifications import Envelope, Recipient
 from app.core.services.settings import get_practice
 from app.core.services.slots import list_available_slots
 from app.core.services.translations import get_text
@@ -226,9 +230,18 @@ async def _text(session: AsyncSession, client: Client, update: Update) -> Reply 
         await flow.remember(session, client.id, Channel.telegram, name=text)
         return await _ask_contact(session, client)
 
+    if step is Step.choosing_contact:
+        # Typed instead of tapped: take the sentence as the note it plainly is,
+        # rather than repeating the question.
+        await flow.remember(session, client.id, Channel.telegram, contact=text)
+        return await _submit_booking(session, client)
+
     if step is Step.entering_contact:
         await flow.remember(session, client.id, Channel.telegram, contact=text)
         return await _submit_booking(session, client)
+
+    if step is Step.entering_contact_email:
+        return await _contact_email(session, client, text)
 
     if step is Step.entering_desired_time:
         # §13.1 asks the slot path for the session type and modality *after* the
@@ -430,11 +443,116 @@ async def _ask_name(session: AsyncSession, client: Client) -> Reply:
 
 
 async def _ask_contact(session: AsyncSession, client: Client) -> Reply:
-    await flow.set_step(session, client.id, Channel.telegram, Step.entering_contact)
+    """§13.1 step 7: a choice, not an open question.
+
+    "Email" was always a reasonable answer to "how would you prefer to be
+    contacted?", and nothing used to follow it -- the note went to the therapist
+    and delivery kept going to Telegram. The buttons make the question mean what
+    it says: picking Email asks for the address and starts verifying it.
+    """
+    await flow.set_step(session, client.id, Channel.telegram, Step.choosing_contact)
+
+    options = [
+        (kb.CONTACT_TELEGRAM, await get_text(session, client.language, "booking.contact.telegram")),
+    ]
+    # §4: with SMTP unset there is no way to send the link that would verify an
+    # address, so the option that promises one is not offered.
+    if get_settings().email_enabled:
+        options.append(
+            (kb.CONTACT_EMAIL, await get_text(session, client.language, "booking.contact.email"))
+        )
+    options.append(
+        (kb.CONTACT_OTHER, await get_text(session, client.language, "booking.contact.other"))
+    )
+
     return Reply(
         await get_text(session, client.language, "booking.ask_contact"),
-        keyboard=kb.skip_keyboard(await get_text(session, client.language, "common.skip")),
+        keyboard=kb.choice_keyboard(kb.CONTACT, options),
     )
+
+
+async def _contact_choice(session: AsyncSession, client: Client, choice: str) -> Reply:
+    """The branch behind each button of §13.1 step 7."""
+    if choice == kb.CONTACT_EMAIL:
+        await flow.set_step(session, client.id, Channel.telegram, Step.entering_contact_email)
+        return Reply(
+            await get_text(session, client.language, "booking.ask_email"),
+            keyboard=kb.skip_keyboard(await get_text(session, client.language, "common.skip")),
+        )
+
+    if choice == kb.CONTACT_OTHER:
+        await flow.set_step(session, client.id, Channel.telegram, Step.entering_contact)
+        return Reply(
+            await get_text(session, client.language, "booking.ask_contact_other"),
+            keyboard=kb.skip_keyboard(await get_text(session, client.language, "common.skip")),
+        )
+
+    # Telegram: the identity already exists and §13.3 already prefers it, so
+    # there is nothing to record.
+    return await _submit_booking(session, client)
+
+
+async def _contact_email(session: AsyncSession, client: Client, address: str) -> Reply:
+    """Collect an address and send the link that proves it (§13.1 step 7).
+
+    The address is stored as the contact note so the therapist can see it, but
+    it becomes a delivery target only once `verified_at` is set -- which happens
+    when the client follows the link, not here (DESIGN.md §5.1).
+    """
+    settings = get_settings()
+
+    if not looks_like_email(address):
+        return Reply(
+            await get_text(session, client.language, "booking.contact.email_invalid"),
+            keyboard=kb.skip_keyboard(await get_text(session, client.language, "common.skip")),
+        )
+
+    # Identities are stored lowercased, so the outbox row, the contact note and
+    # the identity all say the same thing.
+    address = address.strip().lower()
+
+    try:
+        await link_identity(session, client.id, Channel.email, address, verified=False)
+    except TokenInvalid:
+        # Someone else already holds it. Merging two people on the say-so of a
+        # typed address is not a recoverable mistake, so the flow stops here.
+        return Reply(
+            await get_text(session, client.language, "booking.contact.email_taken"),
+            keyboard=kb.skip_keyboard(await get_text(session, client.language, "common.skip")),
+        )
+
+    # §17: 3 per hour per address, counted from the tokens themselves.
+    if await magic_link_allowance_left(session, address) <= 0:
+        return Reply(
+            await get_text(session, client.language, "booking.contact.email_throttled"),
+            keyboard=kb.skip_keyboard(await get_text(session, client.language, "common.skip")),
+        )
+
+    raw = await issue_token(
+        session, TokenPurpose.login, client_id=client.id, payload={"email": address}
+    )
+    await notifications.enqueue(
+        session,
+        Envelope(
+            "auth.login_link.client",
+            Recipient.client,
+            {
+                "url": f"{settings.base_url}/auth/callback?token={raw}",
+                "minutes": 30,
+            },
+            # §13.3: addressed to the mailbox being proved, not routed by the
+            # general policy -- which would send it straight back to Telegram.
+            client_id=client.id,
+            to=(Channel.email, address),
+        ),
+    )
+
+    await flow.remember(session, client.id, Channel.telegram, contact=address)
+    reply = await _submit_booking(session, client)
+    reply.extra.insert(
+        0, await get_text(session, client.language, "booking.contact.email_sent", email=address)
+    )
+    return reply
 
 
 async def _submit_booking(session: AsyncSession, client: Client) -> Reply:
@@ -535,6 +653,9 @@ async def _callback(session: AsyncSession, client: Client, update: Update) -> Re
                 )
                 return reply
         return await _ask_problem(session, client)
+
+    if action == kb.CONTACT:
+        return await _contact_choice(session, client, argument)
 
     if action == kb.SKIP:
         return await _skip(session, client, step)
@@ -771,7 +892,7 @@ async def _skip(session: AsyncSession, client: Client, step: Step) -> Reply | No
         return await _ask_name(session, client)
     if step is Step.entering_name:
         return await _ask_contact(session, client)
-    if step is Step.entering_contact:
+    if step in (Step.choosing_contact, Step.entering_contact, Step.entering_contact_email):
         return await _submit_booking(session, client)
     if step is Step.waitlist_problem:
         await flow.set_step(session, client.id, Channel.telegram, Step.waitlist_contact)

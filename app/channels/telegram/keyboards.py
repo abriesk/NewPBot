@@ -28,8 +28,14 @@ SLOT = "slot"
 STYPE = "stype"
 MODE = "mode"
 TZ = "tz"
+CONTACT = "contact"
 SKIP = "skip"
 CANCEL = "cancel"
+
+#: §13.1 step 7's contact choices, as callback arguments.
+CONTACT_TELEGRAM = "tg"
+CONTACT_EMAIL = "email"
+CONTACT_OTHER = "other"
 
 #: Negotiation actions. These names come from the intent catalogue (§10), not
 #: from here: the buttons on a proposal are rendered by app/render/messages.py

@@ -749,7 +749,10 @@ All under `/admin`, session-authenticated, CSRF-protected.
 4. Topic button → send that topic's published blocks in order, as separate messages.
 5. Consultation → `resolve_booking_mode()` and follow the resolved path (slots picker / free-text / waitlist).
 6. Slot picker: inline keyboard grouped by day, times in the client's timezone; timezone chosen from `timezone_option` if unknown.
-7. After the slot is held: session type, modality, problem text, optional name and contact note (each skippable where optional).
+7. After the slot is held: session type, modality, problem text, optional name, then the contact step (each skippable where optional). The contact step is a choice, not free text, because "email" is a natural answer to an open question and the service cannot act on it:
+   - **Telegram** — the identity already exists, so nothing is stored and delivery keeps following §13.3.
+   - **Email** — ask for an address and reject anything not shaped like one. The address is **not** trusted on arrival: `auth.login_link.client` is sent to it, and following that link is what sets `verified_at` (§6.2). Once verified, §13.3 delivers confirmations and reminders to both channels. Verification is never a precondition for booking — the request is submitted either way.
+   - **Other** — free text, stored in `contact_note` as before.
 8. Submit → confirmation carrying the request UUID.
 
 Multi-step input state is stored in the database against the client, **not** in aiogram FSM memory, so a restart does not lose a half-finished booking.
@@ -761,6 +764,8 @@ Multi-step input state is stored in the database against the client, **not** in 
 ### 13.3 Notification delivery policy
 
 For each intent and client, deliver to: the Telegram identity if one exists; otherwise the verified email identity; and to both when `intent_key` is `reminder.client` or `request.confirmed.client` and both identities exist.
+
+`auth.login_link.client` is the one exception, as §10 already implies by naming its recipient "client (email)": it is addressed to the email the link is *about*, verified or not, because that delivery is what proves the address. It is never routed to Telegram, and it is the only intent allowed to reach an unverified address.
 
 ### 13.4 Email content restriction
 

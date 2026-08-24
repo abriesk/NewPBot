@@ -8,6 +8,7 @@ and no path to a second channel.
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 from dataclasses import dataclass
 from datetime import timedelta
@@ -42,6 +43,19 @@ def _normalise(channel: Channel, external_id: str) -> str:
     """Email addresses are matched case-insensitively; Telegram ids are not
     text the user typed, so they are left alone."""
     return external_id.strip().lower() if channel == Channel.email else external_id.strip()
+
+
+#: Deliberately loose: one @, something either side, a dot in the domain, no
+#: whitespace. Anything stricter rejects real addresses, and the only claim
+#: that matters -- that the person reads this mailbox -- is settled by the
+#: login link, not by a pattern (DESIGN.md §5.1).
+_EMAIL_SHAPE = re.compile(r"^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$")
+
+
+def looks_like_email(value: str) -> bool:
+    """A typo check, not a validator. See `_EMAIL_SHAPE`."""
+    candidate = value.strip()
+    return len(candidate) <= 254 and _EMAIL_SHAPE.match(candidate) is not None
 
 
 @dataclass(frozen=True, slots=True)

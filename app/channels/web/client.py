@@ -711,6 +711,11 @@ def build_router() -> APIRouter:
                                 f"?start=link_{link_raw}"
                             ),
                         },
+                        # §13.3: this intent addresses itself. Left to the
+                        # general policy the row is never written at all, since
+                        # the address it is about is unverified by definition.
+                        client_id=client.id,
+                        to=(Channel.email, email),
                     ),
                 )
 
@@ -741,7 +746,24 @@ def build_router() -> APIRouter:
             # Following the link proves the address (DESIGN.md §5.1).
             email = str(result.payload.get("email", ""))
             if email:
-                await link_identity(session, result.client_id, Channel.email, email, verified=True)
+                try:
+                    await link_identity(
+                        session, result.client_id, Channel.email, email, verified=True
+                    )
+                except TokenInvalid:
+                    # The address already belongs to someone else. Reachable
+                    # since §13.1 step 7 lets a Telegram client name any
+                    # address; merging two people is not ours to decide.
+                    logger.info("login link refused: address belongs to another client")
+                    return _render(
+                        "error.html",
+                        {
+                            **context,
+                            "heading": context["t"]["expired_link"],
+                            "message": context["t"]["expired_link"],
+                        },
+                        status_code=400,
+                    )
 
             response = RedirectResponse("/", status_code=303)
             issue_client_session(response, result.client_id)

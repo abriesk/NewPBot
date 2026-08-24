@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels.telegram import keyboards as kb
-from app.channels.telegram.router import Update, handle
+from app.channels.telegram.router import Reply, Update, handle
 from app.core.enums import Channel, Modality, RequestStatus, SlotStatus, TokenPurpose
 from app.core.models import BookingRequest, Client, FlowState, Practice, Slot, WaitlistEntry
 from app.core.services import content, flow
@@ -187,6 +187,203 @@ async def test_the_answers_reach_the_request(
     assert request.modality is Modality.onsite
     assert request.source_channel is Channel.telegram
     assert request.client_timezone == "Europe/Moscow"
+
+
+# --- The contact step (§13.1 step 7) ----------------------------------------
+
+
+async def _walk_to_contact(
+    db: AsyncSession, slot: Slot, session_type_id: int
+) -> tuple[Client, Reply]:
+    """Up to the contact question, returning it along with the client."""
+    client = await _walk_to_slot_pick(db, slot)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
+    await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))  # problem
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))  # name
+    assert reply is not None
+    return client, reply
+
+
+def _contact_options(keyboard: object) -> set[str]:
+    rows = getattr(keyboard, "inline_keyboard", [])
+    return {button.callback_data for row in rows for button in row}
+
+
+async def _login_links(db: AsyncSession, client: Client) -> list[object]:
+    """This client's login-link rows. Scoped, because the e2e suite commits."""
+    from app.core.models import OutboxMessage
+
+    return list(
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.client_id == client.id,
+                    OutboxMessage.intent_key == "auth.login_link.client",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def test_the_contact_step_offers_a_choice(
+    db: AsyncSession, future_slot: Slot, session_type_id: int, email_enabled: None
+) -> None:
+    """The question used to be open, and "email" was an answer nothing acted on."""
+    client, reply = await _walk_to_contact(db, future_slot, session_type_id)
+
+    assert _contact_options(reply.keyboard) == {
+        f"{kb.CONTACT}:{kb.CONTACT_TELEGRAM}",
+        f"{kb.CONTACT}:{kb.CONTACT_EMAIL}",
+        f"{kb.CONTACT}:{kb.CONTACT_OTHER}",
+    }
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_contact
+
+
+async def test_the_email_option_is_hidden_without_smtp(
+    db: AsyncSession, future_slot: Slot, session_type_id: int, email_disabled: None
+) -> None:
+    """§4: without SMTP there is no link to send, so the promise is not made."""
+    _, reply = await _walk_to_contact(db, future_slot, session_type_id)
+
+    assert f"{kb.CONTACT}:{kb.CONTACT_EMAIL}" not in _contact_options(reply.keyboard)
+
+
+async def test_choosing_telegram_records_no_contact_note(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    """The identity already exists and §13.3 already prefers it."""
+    client, _ = await _walk_to_contact(db, future_slot, session_type_id)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.CONTACT}:{kb.CONTACT_TELEGRAM}"))
+
+    request = (
+        await db.execute(select(BookingRequest).where(BookingRequest.client_id == client.id))
+    ).scalar_one()
+    assert request.status is RequestStatus.pending
+    assert request.contact_note is None
+
+
+async def test_choosing_another_way_keeps_the_free_text_note(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    client, _ = await _walk_to_contact(db, future_slot, session_type_id)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.CONTACT}:{kb.CONTACT_OTHER}"))
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.entering_contact
+
+    await handle(db, Update(chat_id=CHAT, text="+374 55 000000, after six"))
+
+    request = (
+        await db.execute(select(BookingRequest).where(BookingRequest.client_id == client.id))
+    ).scalar_one()
+    assert request.contact_note == "+374 55 000000, after six"
+
+
+async def test_an_address_that_is_not_shaped_like_one_is_refused(
+    db: AsyncSession, future_slot: Slot, session_type_id: int, email_enabled: None
+) -> None:
+    client, _ = await _walk_to_contact(db, future_slot, session_type_id)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.CONTACT}:{kb.CONTACT_EMAIL}"))
+    reply = await handle(db, Update(chat_id=CHAT, text="anna at example dot test"))
+
+    assert reply is not None
+    # Still on the same step, and nothing was booked or sent on a typo.
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.entering_contact_email
+    assert (
+        await db.execute(select(BookingRequest).where(BookingRequest.client_id == client.id))
+    ).scalars().all() == []
+    assert await _login_links(db, client) == []
+
+
+async def test_a_given_address_is_mailed_a_link_and_stays_unverified(
+    db: AsyncSession, future_slot: Slot, session_type_id: int, email_enabled: None
+) -> None:
+    """§13.1 step 7 and §13.3: the link goes to the mailbox being proved, and
+    the address is not a delivery target until it is."""
+    from app.core.models import Identity
+
+    client, _ = await _walk_to_contact(db, future_slot, session_type_id)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.CONTACT}:{kb.CONTACT_EMAIL}"))
+    reply = await handle(db, Update(chat_id=CHAT, text="Anna@Example.Test"))
+
+    identity = (
+        await db.execute(
+            select(Identity).where(Identity.client_id == client.id, Identity.channel == "email")
+        )
+    ).scalar_one()
+    assert identity.external_id == "anna@example.test"  # normalised
+    assert identity.verified_at is None  # following the link is what proves it
+
+    link = await _login_links(db, client)
+    assert len(link) == 1
+    assert link[0].channel is Channel.email
+    assert link[0].address == "anna@example.test"
+    assert "/auth/callback?token=" in link[0].payload["url"]
+
+    # The booking still went through; verification is not a precondition.
+    request = (
+        await db.execute(select(BookingRequest).where(BookingRequest.client_id == client.id))
+    ).scalar_one()
+    assert request.status is RequestStatus.pending
+    assert request.contact_note == "anna@example.test"
+    assert reply is not None and str(request.uuid) in reply.text
+
+
+async def test_an_address_held_by_someone_else_is_not_reassigned(
+    db: AsyncSession, future_slot: Slot, session_type_id: int, email_enabled: None
+) -> None:
+    """`link_identity` refuses the merge; the flow has to survive that."""
+    await resolve_client(db, Channel.email, "taken@example.test")
+    client, _ = await _walk_to_contact(db, future_slot, session_type_id)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.CONTACT}:{kb.CONTACT_EMAIL}"))
+    reply = await handle(db, Update(chat_id=CHAT, text="taken@example.test"))
+
+    assert reply is not None
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.entering_contact_email
+    assert await _login_links(db, client) == []
+
+
+async def test_a_verified_address_makes_confirmations_arrive_twice(
+    db: AsyncSession, future_slot: Slot, session_type_id: int, email_enabled: None
+) -> None:
+    """The payoff of §13.3: once proved, both identities are targets."""
+    from app.core.models import Identity, OutboxMessage
+    from app.core.services import notifications
+    from app.core.services.clients import link_identity
+
+    client, _ = await _walk_to_contact(db, future_slot, session_type_id)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.CONTACT}:{kb.CONTACT_EMAIL}"))
+    await handle(db, Update(chat_id=CHAT, text="anna@example.test"))
+
+    # Following the link is simulated by what /auth/callback does with it.
+    await link_identity(db, client.id, Channel.email, "anna@example.test", verified=True)
+    identity = (
+        await db.execute(
+            select(Identity).where(Identity.client_id == client.id, Identity.channel == "email")
+        )
+    ).scalar_one()
+    assert identity.verified_at is not None
+
+    request = (
+        await db.execute(select(BookingRequest).where(BookingRequest.client_id == client.id))
+    ).scalar_one()
+    await notifications.enqueue(
+        db,
+        notifications.Envelope(
+            "request.confirmed.client",
+            notifications.Recipient.client,
+            {"uuid": str(request.uuid)},
+            request_id=request.id,
+        ),
+    )
+
+    confirmed = [
+        row
+        for row in (await db.execute(select(OutboxMessage))).scalars().all()
+        if row.intent_key == "request.confirmed.client"
+    ]
+    assert {row.channel for row in confirmed} == {Channel.telegram, Channel.email}
 
 
 async def test_optional_answers_are_skippable(

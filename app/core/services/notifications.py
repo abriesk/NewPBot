@@ -80,6 +80,12 @@ class Envelope:
     payload: dict[str, Any]
     request_id: int | None = None
     dedupe_scope: str | None = None
+    #: The client this is for, when no request or waitlist entry names them.
+    client_id: UUID | None = None
+    #: An explicit `(channel, address)`, bypassing §13.3. Only `auth.
+    #: login_link.client` uses it: the link must reach the address it is about,
+    #: verified or not, since following it is what verifies that address.
+    to: tuple[Channel, str] | None = None
 
 
 def _iso(value: datetime | None) -> str | None:
@@ -351,10 +357,15 @@ async def enqueue(session: AsyncSession, envelope: Envelope) -> list[OutboxMessa
             return []
         client = (await session.execute(select(Client).where(Client.id == client_id))).scalar_one()
         locale = client.language
-        targets = [
-            (channel, address, None)
-            for channel, address in await _client_targets(session, client_id, envelope.intent_key)
-        ]
+        if envelope.to is not None:
+            targets = [(envelope.to[0], envelope.to[1], None)]
+        else:
+            targets = [
+                (channel, address, None)
+                for channel, address in await _client_targets(
+                    session, client_id, envelope.intent_key
+                )
+            ]
     else:
         client_id = None
         # The admin surface is English by design (DESIGN.md §11).
@@ -393,6 +404,9 @@ async def enqueue(session: AsyncSession, envelope: Envelope) -> list[OutboxMessa
 
 
 async def _client_for(session: AsyncSession, envelope: Envelope) -> UUID | None:
+    if envelope.client_id is not None:
+        return envelope.client_id
+
     if envelope.request_id is not None:
         request = await _request(session, envelope.request_id)
         return request.client_id

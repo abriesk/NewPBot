@@ -62,6 +62,14 @@ booking:
   ask_problem: "Եթե ցանկանաք, կարող եք կարճ նկարագրել այն հարցը, որով ցանկանում եք դիմել։"
   ask_name: "Ինչպե՞ս կարելի է ձեզ դիմել։"
   ask_contact: "Ո՞ր կապի եղանակն է ձեզ համար նախընտրելի։"
+  contact.telegram: "Telegram"
+  contact.email: "Email"
+  contact.other: ""                              # TODO: translate
+  ask_contact_other: ""                          # TODO: translate
+  ask_email: ""                                  # TODO: translate
+  contact.email_invalid: ""                      # TODO: translate
+  contact.email_taken: ""                         # TODO: translate
+  contact.email_sent: ""                         # TODO: translate
   submitted: "Ձեր հայտը ուղարկված է: Ես կկապնվեմ ձեզ հետ:"   # TODO: add {uuid}
   cancelled_by_user: "Ամրագրումը չեղարկվեց: Դուք վերադարձել եք գլխավոր մենյու:"
   unavailable: ""                                # TODO: translate
