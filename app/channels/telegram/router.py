@@ -12,9 +12,10 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -23,7 +24,7 @@ from app.channels.telegram import keyboards as kb
 from app.config import get_settings
 from app.core.enums import Channel, Modality, TokenPurpose
 from app.core.errors import DomainError, SlotUnavailable, TokenInvalid
-from app.core.models import Client, SessionType, TimezoneOption
+from app.core.models import BookingRequest, Client, Practice, SessionType, TimezoneOption
 from app.core.policies import BookingPath, now_utc, resolve_booking_mode
 from app.core.services import booking, content, flow, notifications, waitlist
 from app.core.services.clients import (
@@ -87,6 +88,14 @@ async def handle(session: AsyncSession, update: Update) -> Reply | None:
 
     if update.text and update.text.startswith("/admin"):
         return await _admin(session, update, settings.admin_telegram_ids)
+
+    # Admin callbacks are answered before the fallback below: the therapist's
+    # chat is not required to have a client record, and sending her through
+    # /start because she pressed Approve would be absurd.
+    if update.callback_data:
+        action, argument = kb.parse_callback(update.callback_data)
+        if action in kb.ADMIN_ACTIONS:
+            return await _admin_action(session, update.chat_id, action, argument)
 
     client = await _known_client(session, update.chat_id)
     if client is None:
@@ -224,6 +233,12 @@ async def _text(session: AsyncSession, client: Client, update: Update) -> Reply 
     if step is Step.entering_desired_time:
         await flow.remember(session, client.id, Channel.telegram, desired_time=text)
         return await _ask_problem(session, client)
+
+    if step is Step.entering_counter:
+        return await _submit_counter(session, client, text)
+
+    if step is Step.admin_entering_proposal:
+        return await _submit_proposal(session, client, update.chat_id, text)
 
     if step is Step.waitlist_problem:
         await flow.remember(session, client.id, Channel.telegram, problem=text)
@@ -513,7 +528,230 @@ async def _callback(session: AsyncSession, client: Client, update: Update) -> Re
     if action == kb.SKIP:
         return await _skip(session, client, step)
 
+    if action in kb.CLIENT_ACTIONS:
+        return await _negotiation_action(session, client, action, argument)
+
+    if action in kb.ADMIN_ACTIONS:
+        return await _admin_action(session, update.chat_id, action, argument)
+
     return None
+
+
+async def _submit_counter(session: AsyncSession, client: Client, text: str) -> Reply:
+    """The client's reply to a proposal.
+
+    Free text stays free text: "some evening next week?" is a normal thing to
+    say, and forcing it into a datetime picker would be worse than storing the
+    sentence (DESIGN.md §9). A parseable time is also recorded structurally, so
+    the therapist can approve it directly.
+    """
+    scratch = await flow.data(session, client.id, Channel.telegram)
+    request_id = int(scratch.get("request_id", 0))
+    request = await _request_for(session, client, request_id)
+    if request is None:
+        await flow.clear(session, client.id, Channel.telegram)
+        return Reply(await get_text(session, client.language, "common.error.not_found"))
+
+    practice = await get_practice(session)
+    proposed = _parse_time(text, client.timezone or practice.timezone)
+
+    try:
+        await booking.client_counter(session, request.id, proposed_start=proposed, body_text=text)
+    except DomainError:
+        await flow.clear(session, client.id, Channel.telegram)
+        return Reply(await get_text(session, client.language, "common.error.generic"))
+
+    await notifications.publish(session)
+    await flow.clear(session, client.id, Channel.telegram)
+    return Reply(await get_text(session, client.language, "intent.request.counter.client.sent"))
+
+
+async def _submit_proposal(session: AsyncSession, client: Client, chat_id: int, text: str) -> Reply:
+    """The therapist's proposal, typed after pressing Propose (§13.2)."""
+    settings = get_settings()
+    if chat_id not in settings.admin_telegram_ids:
+        return Reply(await get_text(session, client.language, "common.error.generic"))
+
+    scratch = await flow.data(session, client.id, Channel.telegram)
+    request_id = int(scratch.get("request_id", 0))
+    request = (
+        await session.execute(select(BookingRequest).where(BookingRequest.id == request_id))
+    ).scalar_one_or_none()
+    if request is None:
+        await flow.clear(session, client.id, Channel.telegram)
+        return Reply("That request no longer exists.")
+
+    practice = await get_practice(session)
+    proposed = _parse_time(text, practice.timezone)
+
+    try:
+        await booking.admin_propose(session, request.id, proposed_start=proposed, body_text=text)
+    except DomainError as exc:
+        await flow.clear(session, client.id, Channel.telegram)
+        return Reply(f"Not possible: {type(exc).__name__}.")
+
+    await notifications.publish(session)
+    await flow.clear(session, client.id, Channel.telegram)
+    return Reply(f"Proposed to {request.uuid}.")
+
+
+def _parse_time(text: str, tz: str) -> datetime | None:
+    """`YYYY-MM-DD HH:MM` in `tz` -> an aware UTC instant, or None.
+
+    None is not a failure: §9 says a structured time is *preferred*, not
+    required, and the words are kept either way.
+    """
+    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%d.%m.%Y %H:%M"):
+        try:
+            naive = datetime.strptime(text.strip(), fmt)  # noqa: DTZ007 - zone applied next
+        except ValueError:
+            continue
+        return naive.replace(tzinfo=ZoneInfo(tz)).astimezone(UTC)
+    return None
+
+
+# --- Negotiation, client side (§7.1) ----------------------------------------
+
+
+async def _negotiation_action(
+    session: AsyncSession, client: Client, action: str, argument: str
+) -> Reply | None:
+    """The buttons on a `request.proposal.client` message.
+
+    Every rule lives in app/core/services/booking.py; this reports the outcome.
+    A refusal is answered with an explanation rather than silence -- the client
+    pressed a button and deserves to know it did nothing.
+    """
+    try:
+        request_id = int(argument)
+    except ValueError:
+        return None
+
+    request = await _request_for(session, client, request_id)
+    if request is None:
+        return Reply(await get_text(session, client.language, "common.error.not_found"))
+
+    if action == kb.COUNTER:
+        # §9: a counter needs words, and a callback carries none. Park the
+        # request id and ask.
+        await flow.set_step(
+            session,
+            client.id,
+            Channel.telegram,
+            Step.entering_counter,
+            replace={"request_id": request.id},
+        )
+        return Reply(await get_text(session, client.language, "intent.request.counter.client.ask"))
+
+    try:
+        if action == kb.ACCEPT:
+            confirmed = await booking.client_accept(session, request.id)
+            await notifications.publish(session)
+            return Reply(
+                await get_text(
+                    session,
+                    client.language,
+                    "intent.request.confirmed.client.body",
+                    uuid=str(confirmed.uuid),
+                    time=_local(confirmed.scheduled_start, client, await get_practice(session)),
+                )
+            )
+        await booking.client_decline(session, request.id)
+        await notifications.publish(session)
+        return Reply(
+            await get_text(
+                session,
+                client.language,
+                "intent.request.rejected.client.body",
+                uuid=str(request.uuid),
+            )
+        )
+    except DomainError:
+        # Already answered, or answered from the other channel.
+        return Reply(await get_text(session, client.language, "common.error.generic"))
+
+
+async def _request_for(
+    session: AsyncSession, client: Client, request_id: int
+) -> BookingRequest | None:
+    """A request, but only if it belongs to this client.
+
+    Callback data is client-supplied: a request id from someone else's message
+    must not be actionable.
+    """
+    request = (
+        await session.execute(
+            select(BookingRequest).where(
+                BookingRequest.id == request_id, BookingRequest.client_id == client.id
+            )
+        )
+    ).scalar_one_or_none()
+    return request
+
+
+def _local(value: datetime | None, client: Client, practice: Practice) -> str:
+    """An instant in the client's own zone. Storage stays UTC (DESIGN.md §8)."""
+    if value is None:
+        return ""
+    zone = ZoneInfo(client.timezone or practice.timezone)
+    return value.astimezone(zone).strftime("%Y-%m-%d %H:%M")
+
+
+# --- Negotiation, admin side (§13.2) ----------------------------------------
+
+
+async def _admin_action(
+    session: AsyncSession, chat_id: int, action: str, argument: str
+) -> Reply | None:
+    """The buttons on an admin notification.
+
+    §13.2 keeps approve, propose, reject and cancel on the phone; content,
+    translations, settings and slot creation stay web-only.
+    """
+    settings = get_settings()
+    if chat_id not in settings.admin_telegram_ids:
+        return None  # Silence: an unknown chat learns nothing.
+
+    try:
+        request_id = int(argument)
+    except ValueError:
+        return None
+
+    request = (
+        await session.execute(select(BookingRequest).where(BookingRequest.id == request_id))
+    ).scalar_one_or_none()
+    if request is None:
+        return Reply("That request no longer exists.")
+
+    if action == kb.PROPOSE:
+        # A time needs typing, so park the request and ask for it.
+        admin_client = await resolve_client(session, Channel.telegram, str(chat_id), verified=True)
+        await flow.set_step(
+            session,
+            admin_client.id,
+            Channel.telegram,
+            Step.admin_entering_proposal,
+            replace={"request_id": request.id},
+        )
+        return Reply(
+            f"Propose a time for {request.uuid}. "
+            "Send it as YYYY-MM-DD HH:MM in the practice timezone, or send words."
+        )
+
+    try:
+        if action == kb.APPROVE:
+            confirmed = await booking.admin_approve(session, request.id)
+            await notifications.publish(session)
+            return Reply(f"Confirmed {confirmed.uuid}.")
+        if action == kb.REJECT:
+            await booking.admin_reject(session, request.id)
+            await notifications.publish(session)
+            return Reply(f"Rejected {request.uuid}.")
+        await booking.admin_cancel(session, request.id, reason="cancelled from Telegram")
+        await notifications.publish(session)
+        return Reply(f"Cancelled {request.uuid}.")
+    except DomainError as exc:
+        return Reply(f"Not possible: {type(exc).__name__}.")
 
 
 async def _skip(session: AsyncSession, client: Client, step: Step) -> Reply | None:

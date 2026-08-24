@@ -31,6 +31,22 @@ TZ = "tz"
 SKIP = "skip"
 CANCEL = "cancel"
 
+#: Negotiation actions. These names come from the intent catalogue (§10), not
+#: from here: the buttons on a proposal are rendered by app/render/messages.py
+#: as `<action>:<request_id>`, and this router has to answer to the same words.
+ACCEPT = "accept"
+COUNTER = "counter"
+DECLINE = "decline"
+
+#: The admin actions §13.2 keeps on the phone.
+APPROVE = "approve"
+PROPOSE = "propose"
+REJECT = "reject"
+CANCEL_REQUEST = "cancelreq"
+
+CLIENT_ACTIONS = frozenset({ACCEPT, COUNTER, DECLINE})
+ADMIN_ACTIONS = frozenset({APPROVE, PROPOSE, REJECT, CANCEL_REQUEST})
+
 
 def language_keyboard() -> InlineKeyboardMarkup:
     """§13.1 step 2. Shown on first contact only.

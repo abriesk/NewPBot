@@ -12,7 +12,7 @@ scheduling rule inside a Telegram handler or a FastAPI route is a bug.
 - `docs/IMPLEMENTATION.md` — **normative**. Schema, state machines, routes,
   worker jobs, milestones, acceptance criteria.
 
-**Status: M7 (admin web) complete.** Milestones run M0 → M9
+**Status: M8 (negotiation and reminders across channels) complete.** Milestones run M0 → M9
 (`IMPLEMENTATION.md` §19) and are worked in order.
 
 ## Requirements

@@ -49,6 +49,13 @@ class Step(StrEnum):
     # Free-text negotiation path.
     entering_desired_time = "entering_desired_time"
 
+    # Negotiation (§7.1). The request being answered is carried in `data`,
+    # because a callback has only 64 bytes and the next message has none.
+    entering_counter = "entering_counter"
+
+    # The therapist's reduced Telegram surface (§13.2).
+    admin_entering_proposal = "admin_entering_proposal"
+
     # Waitlist.
     waitlist_problem = "waitlist_problem"
     waitlist_contact = "waitlist_contact"

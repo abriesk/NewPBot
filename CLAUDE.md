@@ -34,7 +34,7 @@ the design mid-implementation.
 
 > Update this line as work progresses. It is the first thing to check each session.
 
-**Milestone: M7 (complete) — next: M8 (Negotiation and reminders across channels)**
+**Milestone: M8 (complete) — next: M9 (Hardening)**
 
 Milestones run M0 → M9 (`IMPLEMENTATION.md` §19). Work them **in order**. Each
 one's acceptance criteria must pass before starting the next. Do not implement
