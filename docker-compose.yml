@@ -15,7 +15,13 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-psycho}"]
+      # §16.3 specifies `pg_isready`. That only asks whether the server is
+      # accepting connections: it returns 0 even for a database that does not
+      # exist, and the entrypoint runs initdb on a socket-only server, so it can
+      # report healthy before POSTGRES_DB and POSTGRES_USER have been created.
+      # `psql` authenticates and resolves the database, which is what `web`
+      # needs to be true before it runs `alembic upgrade head`.
+      test: ["CMD-SHELL", "psql -U $${POSTGRES_USER:-psycho} -d $${POSTGRES_DB:-psychobooking} -c 'SELECT 1'"]
       interval: 5s
       timeout: 5s
       retries: 10
