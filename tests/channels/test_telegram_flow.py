@@ -455,3 +455,74 @@ def test_every_callback_fits_telegram_budget(action: str) -> None:
 def test_parse_callback_splits_action_from_argument() -> None:
     assert kb.parse_callback("slot:42") == ("slot", "42")
     assert kb.parse_callback("skip") == ("skip", "")
+
+
+# --- The free-text path, run to completion ----------------------------------
+
+
+async def test_the_free_text_path_reaches_a_submitted_request(
+    db: AsyncSession, practice: Practice, session_type_id: int
+) -> None:
+    """DESIGN.md §6's last row: negotiation mode, no slot picker.
+
+    Regression: this path asked for the desired time and then jumped straight
+    to the problem text, so `session_type_id` was never collected and submit
+    raised KeyError -- out of a webhook handler, which Telegram answers by
+    redelivering the same update forever. No test ran this path to the end.
+    """
+    from app.core.enums import BookingMode
+    from app.core.services.translations import get_text
+
+    practice.booking_mode = BookingMode.negotiation
+    await db.flush()
+
+    await handle(db, Update(chat_id=CHAT, text="/start"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.LANG}:ru"))
+    consultation = await get_text(db, "ru", "menu.consultation")
+    await handle(db, Update(chat_id=CHAT, text=consultation))
+
+    client = await _client(db)
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.entering_desired_time
+
+    # §13.1's order, now the same on both paths: when, type, modality, problem.
+    await handle(db, Update(chat_id=CHAT, text="some evening next week?"))
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_session_type
+
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
+    await handle(db, Update(chat_id=CHAT, text="work stress"))
+    await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))
+
+    request = (
+        await db.execute(select(BookingRequest).where(BookingRequest.client_id == client.id))
+    ).scalar_one()
+
+    assert request.status is RequestStatus.pending
+    assert request.slot_id is None
+    # §9: the client's own words are kept, not forced into a datetime.
+    assert request.desired_time_text == "some evening next week?"
+    assert request.problem_text == "work stress"
+    assert request.session_type_id == session_type_id
+    assert reply is not None and str(request.uuid) in reply.text
+
+    # The flow is finished, not stranded mid-way.
+    assert await flow.get(db, client.id, Channel.telegram) is None
+
+
+async def test_submit_without_a_session_type_asks_again_rather_than_crashing(
+    db: AsyncSession, practice: Practice
+) -> None:
+    """Defence in depth for the bug above: whatever route a client took, a
+    missing answer must produce a question, not an exception out of a handler."""
+    await handle(db, Update(chat_id=CHAT, text="/start"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.LANG}:ru"))
+    client = await _client(db)
+
+    await flow.set_step(
+        db, client.id, Channel.telegram, Step.entering_contact, replace={"problem": "x"}
+    )
+    reply = await handle(db, Update(chat_id=CHAT, text="reach me anywhere"))
+
+    assert reply is not None
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_session_type

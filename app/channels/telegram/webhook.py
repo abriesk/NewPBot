@@ -50,8 +50,17 @@ def build_router() -> APIRouter:
             # retries it forever.
             return Response(status_code=200)
 
-        async with unit_of_work() as session:
-            reply = await handle(session, update)
+        try:
+            async with unit_of_work() as session:
+                reply = await handle(session, update)
+        except Exception:
+            # An unexpected failure is this deployment's bug, and a 500 would
+            # make Telegram redeliver the same update indefinitely. Log it with
+            # the traceback (identifiers only -- the update body is not logged)
+            # and acknowledge, so one broken message does not become a loop.
+            # The transaction rolled back, so nothing partial was written.
+            logger.exception("telegram update from chat %s failed", update.chat_id)
+            return Response(status_code=200)
 
         if reply is not None:
             await _send(update.chat_id, reply)

@@ -231,8 +231,12 @@ async def _text(session: AsyncSession, client: Client, update: Update) -> Reply 
         return await _submit_booking(session, client)
 
     if step is Step.entering_desired_time:
+        # §13.1 asks the slot path for the session type and modality *after* the
+        # time, so the free-text path asks in the same order. Going straight to
+        # the problem text here left `session_type_id` unset, and the submit
+        # below needs it: booking_request.session_type_id is NOT NULL.
         await flow.remember(session, client.id, Channel.telegram, desired_time=text)
-        return await _ask_problem(session, client)
+        return await _ask_session_type(session, client)
 
     if step is Step.entering_counter:
         return await _submit_counter(session, client, text)
@@ -437,6 +441,13 @@ async def _submit_booking(session: AsyncSession, client: Client) -> Reply:
     """§13.1 step 8. The core decides everything; this reports the outcome."""
     scratch = await flow.data(session, client.id, Channel.telegram)
     practice = await get_practice(session)
+
+    # A flow that reached here without a session type is a routing bug, not a
+    # client error. Asking again is a survivable answer; a KeyError out of a
+    # webhook handler is not -- Telegram would retry the same update forever.
+    if not scratch.get("session_type_id"):
+        logger.warning("submit reached without a session type; asking again")
+        return await _ask_session_type(session, client)
 
     common: dict[str, Any] = {
         "client_id": client.id,
