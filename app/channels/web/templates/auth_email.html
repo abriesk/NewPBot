@@ -1,9 +1,16 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>{{ t.sign_in }}</h1>
 {% if sent %}
-  <p>{{ t.link_sent }}</p>
+  <div class="card notice">
+    <h1>{{ t.sign_in }}</h1>
+    <p>{{ t.link_sent }}</p>
+    <div class="stack-actions"><a class="link-back" href="/">{{ t.home }}</a></div>
+  </div>
 {% else %}
+  <div class="page-head">
+    <span class="eyebrow">{{ practice.name }}</span>
+    <h1>{{ t.sign_in }}</h1>
+  </div>
   <form method="post" action="/auth/email" class="card">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <label>{{ t.email_label }}

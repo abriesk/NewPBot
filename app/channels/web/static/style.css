@@ -1,104 +1,573 @@
-/* One stylesheet, no build step (§2). Light and dark both painted explicitly,
-   so the page never borrows a colour it did not choose. */
+/* Client web surface. One stylesheet, no build step (§2), no external asset:
+   the page must render identically behind a plain-http tunnel and on a phone
+   with a cold cache. Light and dark are both painted explicitly, so nothing is
+   ever borrowed from the browser's default palette.
+
+   Order: tokens, elements, frame, components, utilities. */
+
+/* --- Tokens ---------------------------------------------------------- */
+
 :root {
-  --bg: #fbfaf8;
+  color-scheme: light;
+
+  --bg: #faf8f4;
+  --bg-tint: #f3efe8;          /* section fills, code, inert chips */
   --surface: #ffffff;
-  --ink: #23201d;
+  --ink: #201d19;
+  --ink-soft: #4a433c;
   --muted: #6b635b;
-  --line: #e3ddd5;
-  --accent: #3f6b5f;
+  --line: #e6e0d7;
+  --line-strong: #d5cbbe;
+  --accent: #3d6b5e;
+  --accent-hover: #33594f;
   --accent-ink: #ffffff;
-  --radius: 10px;
+  --accent-soft: #eaf2ee;      /* selected choice, held slot, own turn */
+  --ring: #3d6b5e;
+
+  --radius: 14px;
+  --radius-sm: 10px;
+  --radius-pill: 999px;
+  --wrap: 48rem;
+
+  --shadow-sm: 0 1px 2px rgb(32 29 25 / .05);
+  --shadow-md: 0 6px 20px -8px rgb(32 29 25 / .18);
+
+  /* System faces only. The serif stack ends in Armenian and sans fallbacks so
+     `hy` headings do not land on a font without the glyphs (hard rule 5). */
+  --serif: "Iowan Old Style", "Palatino Linotype", Palatino, Georgia,
+           "Noto Serif Armenian", "Segoe UI", serif;
+  --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans Armenian",
+          "Helvetica Neue", sans-serif;
 }
+
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #171513;
-    --surface: #201d1a;
-    --ink: #ece7e1;
-    --muted: #a49a90;
-    --line: #322d28;
-    --accent: #7fb3a3;
-    --accent-ink: #16211d;
+    color-scheme: dark;
+
+    --bg: #16140f;
+    --bg-tint: #201d18;
+    --surface: #1d1a16;
+    --ink: #ece7e0;
+    --ink-soft: #cfc7bd;
+    --muted: #a2988d;
+    --line: #322d27;
+    --line-strong: #453e36;
+    --accent: #83b6a5;
+    --accent-hover: #96c4b4;
+    --accent-ink: #142019;
+    --accent-soft: #1e2a25;
+    --ring: #83b6a5;
+
+    --shadow-sm: 0 1px 2px rgb(0 0 0 / .3);
+    --shadow-md: 0 8px 24px -10px rgb(0 0 0 / .6);
   }
 }
 
-* { box-sizing: border-box; }
+/* --- Elements -------------------------------------------------------- */
+
+*, *::before, *::after { box-sizing: border-box; }
+[hidden] { display: none !important; }
+
 body {
   margin: 0;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
   background: var(--bg);
   color: var(--ink);
-  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font: 1rem/1.65 var(--sans);
+  -webkit-text-size-adjust: 100%;
 }
-main { max-width: 46rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+
+::selection { background: var(--accent-soft); color: var(--ink); }
+
+:where(a, button, input, select, textarea, summary):focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+h1, h2, h3 { font-family: var(--serif); font-weight: 600; letter-spacing: -.01em; }
+h1 { font-size: clamp(1.75rem, 1.35rem + 1.7vw, 2.4rem); line-height: 1.15; margin: 0 0 .75rem; }
+h2 { font-size: 1.3rem; line-height: 1.3; margin: 2.5rem 0 .75rem; }
+h3 { font-size: 1.05rem; margin: 1.5rem 0 .5rem; }
+
+p { margin: 0 0 1rem; }
+a { color: var(--accent); text-underline-offset: .18em; }
+a:hover { color: var(--accent-hover); }
+
+/* --- Frame ----------------------------------------------------------- */
+
+.wrap { width: 100%; max-width: var(--wrap); margin-inline: auto; padding-inline: 1.25rem; }
 
 header {
-  display: flex; flex-wrap: wrap; gap: .75rem 1.25rem; align-items: center;
-  padding: 1rem; border-bottom: 1px solid var(--line); background: var(--surface);
+  /* Sticky only once there is height to spare: on a phone the topic links wrap
+     into a block tall enough to cost a quarter of the viewport. */
+  z-index: 10;
+  background: color-mix(in srgb, var(--surface) 88%, transparent);
+  backdrop-filter: saturate(1.4) blur(10px);
+  border-bottom: 1px solid var(--line);
 }
-.brand { font-weight: 650; text-decoration: none; color: var(--ink); }
-header nav { display: flex; flex-wrap: wrap; gap: 1rem; flex: 1; }
-header nav a { color: var(--muted); text-decoration: none; }
-header nav a:hover { color: var(--ink); }
-.lang { display: flex; gap: .35rem; }
-.lang button {
-  background: none; border: 1px solid var(--line); color: var(--muted);
-  border-radius: 999px; padding: .15rem .6rem; font-size: .85rem; cursor: pointer;
+header .wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: .6rem 1.25rem;
+  padding-block: .85rem;
 }
-.lang button:disabled { color: var(--ink); border-color: var(--accent); cursor: default; }
 
-h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 1rem; }
-h2 { font-size: 1.2rem; margin: 2rem 0 .5rem; }
-h3 { font-size: 1rem; margin: 1.25rem 0 .4rem; color: var(--muted); }
-.muted { color: var(--muted); }
+.brand {
+  display: inline-flex;
+  align-items: center;
+  gap: .55rem;
+  margin-right: auto;
+  font-family: var(--serif);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--ink);
+  text-decoration: none;
+}
+.brand::before {
+  content: "";
+  flex: none;
+  width: .6rem;
+  height: .6rem;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+/* Narrow screens get one scrolling row of links under the brand; the row never
+   wraps, so the header stays two lines high however long the topic titles are. */
+header nav {
+  display: flex;
+  align-items: center;
+  gap: 1.1rem;
+  order: 3;
+  width: 100%;
+  margin-top: .1rem;
+  padding-top: .2rem;
+  border-top: 1px solid var(--line);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+header nav::-webkit-scrollbar { display: none; }
+header nav a {
+  flex: none;
+  padding-block: .35rem;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+  text-decoration: none;
+  font-size: .95rem;
+  white-space: nowrap;
+}
+header nav a:hover { color: var(--ink); border-bottom-color: var(--line-strong); }
+header nav a[aria-current="page"] { color: var(--ink); border-bottom-color: var(--accent); }
+header nav a.cta {
+  /* First in the scrolling row, so the booking link is never the thing that
+     has been scrolled out of sight. */
+  order: -1;
+  min-height: 2.1rem;
+  padding: .35rem .85rem;
+  border-bottom: 0;
+  font-size: .9rem;
+}
+
+@media (min-width: 46rem) {
+  header { position: sticky; top: 0; }
+  header nav {
+    order: 0;
+    width: auto;
+    margin: 0 auto 0 1rem;
+    padding-top: 0;
+    border-top: 0;
+    overflow: visible;
+  }
+  header nav a.cta { order: 0; margin-left: .5rem; }
+  .brand { margin-right: 0; }
+}
+
+/* Language switch: one joined pill, the current language inert. */
+.lang {
+  display: flex;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+}
+.lang button {
+  min-height: 0;
+  padding: .32rem .75rem;
+  background: none;
+  border: 0;
+  border-radius: 0;
+  color: var(--muted);
+  font: inherit;
+  font-size: .82rem;
+  cursor: pointer;
+}
+.lang button + button { border-left: 1px solid var(--line); }
+.lang button:hover:not(:disabled) { background: var(--bg-tint); color: var(--ink); box-shadow: none; }
+.lang button:disabled { background: var(--accent); color: var(--accent-ink); cursor: default; }
+
+main { flex: 1; padding-block: 2.5rem 4rem; }
+
+footer {
+  border-top: 1px solid var(--line);
+  background: var(--surface);
+  color: var(--muted);
+  font-size: .9rem;
+}
+footer .wrap { padding-block: 1.75rem; }
+footer p { margin: 0; }
+
+/* --- Page head ------------------------------------------------------- */
+
+.page-head { margin-bottom: 2rem; }
+.page-head > :last-child { margin-bottom: 0; }
+
+.eyebrow {
+  display: block;
+  margin-bottom: .5rem;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: .78rem;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+/* --- Prose ----------------------------------------------------------- */
+
+.prose { max-width: 38rem; color: var(--ink-soft); }
+.prose :where(p, ul, ol, blockquote) { margin: 0 0 1rem; }
+.prose :where(ul, ol) { padding-left: 1.2rem; }
+.prose li { margin: .3rem 0; }
+.prose blockquote {
+  margin-inline: 0;
+  padding: .1rem 0 .1rem 1.1rem;
+  border-left: 3px solid var(--accent);
+  color: var(--muted);
+  font-style: italic;
+}
+.prose code {
+  padding: .1em .35em;
+  border-radius: 5px;
+  background: var(--bg-tint);
+  font-size: .9em;
+}
+.prose pre {
+  overflow-x: auto;
+  padding: .9rem 1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tint);
+}
+.prose pre code { padding: 0; background: none; }
+
+/* --- Cards and notices ----------------------------------------------- */
 
 .card {
-  background: var(--surface); border: 1px solid var(--line);
-  border-radius: var(--radius); padding: 1.25rem; margin: 1rem 0;
+  margin: 1.5rem 0;
+  padding: 1.5rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
 }
-.prose { margin: 1rem 0; }
-.prose :where(p, ul, ol, blockquote) { margin: .75rem 0; }
-.prose blockquote {
-  margin-inline: 0; padding-left: 1rem; border-left: 3px solid var(--line); color: var(--muted);
+.card > :first-child { margin-top: 0; }
+.card > :last-child { margin-bottom: 0; }
+
+.notice {
+  max-width: 34rem;
+  margin-inline: auto;
+  padding: 2.25rem 1.75rem;
+  text-align: center;
 }
-.prose pre { overflow-x: auto; background: var(--bg); padding: .75rem; border-radius: 6px; }
+.notice h1 { margin-bottom: .75rem; }
+.notice .stack-actions { justify-content: center; }
 
-.topics { list-style: none; padding: 0; }
-.topics li { border-bottom: 1px solid var(--line); }
-.topics a { display: block; padding: .8rem 0; text-decoration: none; color: var(--ink); }
+/* --- Topic list ------------------------------------------------------- */
 
-label { display: block; margin: .9rem 0; }
-label.choice { display: flex; gap: .5rem; align-items: center; margin: .4rem 0; }
+.topics { display: grid; gap: .6rem; margin: 0; padding: 0; list-style: none; }
+.topics a {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  text-decoration: none;
+  font-family: var(--serif);
+  font-size: 1.05rem;
+  transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+}
+.topics a::after {
+  content: "→";
+  color: var(--accent);
+  font-family: var(--sans);
+  transition: transform .15s ease;
+}
+.topics a:hover {
+  border-color: var(--line-strong);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-1px);
+}
+.topics a:hover::after { transform: translateX(3px); }
+
+/* --- Forms ------------------------------------------------------------ */
+
+label { display: block; margin: 0 0 1.1rem; color: var(--ink-soft); font-size: .95rem; }
+label > :where(input, textarea, select) { margin-top: .4rem; }
+
 input[type=text], input[type=email], textarea, select {
-  width: 100%; padding: .55rem .7rem; margin-top: .3rem;
-  border: 1px solid var(--line); border-radius: 8px;
-  background: var(--bg); color: var(--ink); font: inherit;
+  width: 100%;
+  padding: .7rem .85rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  transition: border-color .15s ease, box-shadow .15s ease;
 }
-fieldset { border: 1px solid var(--line); border-radius: var(--radius); margin: 1rem 0; padding: 1rem; }
-legend { color: var(--muted); font-size: .9rem; padding: 0 .4rem; }
+input[type=text]:focus, input[type=email]:focus, textarea:focus, select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  outline: none;
+}
+/* A 700px-wide box for an email address reads as a mistake; prose fields keep
+   the full column width. */
+label > input[type=text], label > input[type=email] { max-width: 26rem; }
+textarea { min-height: 6rem; resize: vertical; }
+select {
+  appearance: none;
+  padding-right: 2.2rem;
+  background-image: linear-gradient(45deg, transparent 50%, currentColor 50%),
+                    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position: right 1.05rem center, right .8rem center;
+  background-size: .32rem .32rem, .32rem .32rem;
+  background-repeat: no-repeat;
+}
+::placeholder { color: var(--muted); opacity: 1; }
+
+/* The booking form's steps: numbered, hairline-separated, no nested boxes. */
+.steps { counter-reset: step; }
+.steps fieldset { margin: 0 0 2rem; padding: 0; border: 0; }
+.steps fieldset:last-of-type { margin-bottom: 0; }
+.steps fieldset + fieldset { padding-top: 1.75rem; border-top: 1px solid var(--line); }
+.steps legend {
+  counter-increment: step;
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  margin-bottom: .9rem;
+  padding: 0;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 1.05rem;
+}
+.steps legend::before {
+  content: counter(step);
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 1.6rem;
+  height: 1.6rem;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--sans);
+  font-size: .8rem;
+  font-weight: 600;
+}
+
+/* Radio rows read as choosable cards; the input stays a real radio. */
+label.choice {
+  display: flex;
+  align-items: center;
+  gap: .65rem;
+  margin: 0 0 .5rem;
+  padding: .75rem .9rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+label.choice:hover { border-color: var(--line-strong); }
+label.choice:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+label.choice:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
+input[type=radio], input[type=checkbox] { flex: none; width: 1.05rem; height: 1.05rem; accent-color: var(--accent); }
+
+/* --- Buttons ---------------------------------------------------------- */
 
 button, .cta {
-  display: inline-block; background: var(--accent); color: var(--accent-ink);
-  border: none; border-radius: 8px; padding: .55rem 1rem;
-  font: inherit; cursor: pointer; text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: .4rem;
+  min-height: 2.6rem;
+  padding: .6rem 1.15rem;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font: inherit;
+  font-weight: 500;
+  line-height: 1.2;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background .15s ease, transform .1s ease, box-shadow .15s ease;
 }
-button:hover, .cta:hover { filter: brightness(1.08); }
+button:hover, .cta:hover { background: var(--accent-hover); color: var(--accent-ink); box-shadow: var(--shadow-md); }
+button:active, .cta:active { transform: translateY(1px); box-shadow: none; }
+
+button.secondary {
+  background: var(--surface);
+  border-color: var(--line-strong);
+  color: var(--ink);
+}
+button.secondary:hover { background: var(--bg-tint); color: var(--ink); }
+
+.link-back {
+  display: inline-block;
+  align-self: center;
+  margin-top: 1.5rem;
+  color: var(--muted);
+  font-size: .95rem;
+  text-decoration: none;
+}
+.link-back:hover { color: var(--ink); }
+
+/* --- Slot picker ------------------------------------------------------ */
+
+.day + .day { margin-top: 1.25rem; }
+.day h3 {
+  display: flex;
+  align-items: center;
+  gap: .75rem;
+  margin: 0 0 .6rem;
+  color: var(--muted);
+  font-family: var(--sans);
+  font-size: .85rem;
+  font-weight: 600;
+  letter-spacing: .04em;
+  text-transform: uppercase;
+}
+.day h3::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 
 .times { display: flex; flex-wrap: wrap; gap: .5rem; }
-.times form { margin: 0; }
-.day { margin-bottom: 1rem; }
-.held { color: var(--accent); }
-.uuid code { font-size: .85rem; color: var(--muted); }
-
-.thread { list-style: none; padding: 0; }
-.thread li {
-  border: 1px solid var(--line); border-radius: var(--radius);
-  padding: .75rem 1rem; margin: .5rem 0; background: var(--surface);
+.times form { display: contents; margin: 0; }
+.times button {
+  min-height: 2.4rem;
+  padding: .45rem .95rem;
+  border-color: var(--line-strong);
+  border-radius: var(--radius-pill);
+  background: var(--surface);
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
 }
+.times button:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  box-shadow: none;
+}
+
+/* A held slot is a countdown, so the notice on step 3 is loud. */
+.held {
+  display: flex;
+  align-items: center;
+  gap: .6rem;
+  padding: .85rem 1.1rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 500;
+}
+.held::before { content: "✓"; font-size: 1.05rem; }
+
+/* --- Request page ----------------------------------------------------- */
+
+.status {
+  display: inline-flex;
+  align-items: center;
+  gap: .5rem;
+  padding: .35rem .85rem;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-size: .9rem;
+  font-weight: 600;
+}
+.status::before {
+  content: "";
+  width: .5rem;
+  height: .5rem;
+  border-radius: 50%;
+  background: currentColor;
+}
+.meta { display: grid; gap: .35rem; margin-top: 1rem; color: var(--ink-soft); }
+.meta p { margin: 0; }
+.uuid code {
+  padding: .15rem .45rem;
+  border-radius: 5px;
+  background: var(--bg-tint);
+  color: var(--muted);
+  font-size: .82rem;
+  word-break: break-all;
+}
+
+/* Negotiation thread: one rail, the client's own turns tinted. */
+.thread {
+  margin: 0;
+  padding: 0 0 0 1.15rem;
+  border-left: 2px solid var(--line);
+  list-style: none;
+}
+.thread li {
+  position: relative;
+  margin: 0 0 .75rem;
+  padding: .85rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+.thread li::before {
+  content: "";
+  position: absolute;
+  top: 1.1rem;
+  left: -1.55rem;
+  width: .5rem;
+  height: .5rem;
+  border-radius: 50%;
+  background: var(--line-strong);
+}
+.thread li.client {
+  border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+  background: var(--accent-soft);
+}
+.thread li.client::before { background: var(--accent); }
 .thread .who { font-weight: 600; font-size: .85rem; }
-.thread time { color: var(--muted); font-size: .85rem; margin-left: .5rem; }
-.thread li.client { margin-left: 2rem; }
+.thread time { margin-left: .5rem; color: var(--muted); font-size: .85rem; }
+.thread p { margin: .35rem 0 0; color: var(--ink-soft); }
 
-.actions { display: flex; flex-wrap: wrap; gap: .75rem; align-items: start; }
-.actions form { display: flex; gap: .4rem; margin: 0; }
+.actions { display: flex; flex-wrap: wrap; gap: .75rem; align-items: flex-start; margin-top: 1.5rem; }
+.actions form { display: flex; gap: .5rem; margin: 0; }
+.actions form:has(input[type=text]) { flex: 1 1 20rem; }
+.actions input[type=text] { margin: 0; }
 
-footer { border-top: 1px solid var(--line); padding: 1.5rem 1rem; color: var(--muted); font-size: .9rem; }
+/* --- Utilities -------------------------------------------------------- */
+
+.muted { color: var(--muted); font-size: .92rem; }
+.steps .muted { margin: .55rem 0 0; }
+.stack-actions { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin-top: 1.75rem; }
+.stack-actions .link-back { margin-top: 0; }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: .01ms !important;
+    transition-duration: .01ms !important;
+  }
+}

@@ -1,4 +1,8 @@
 {% extends "base.html" %}
 {% block content %}
-<div class="card"><h1>{{ heading }}</h1><p>{{ message }}</p><p><a href="/">{{ t.home }}</a></p></div>
+<div class="card notice">
+  <h1>{{ heading }}</h1>
+  <p>{{ message }}</p>
+  <div class="stack-actions"><a class="cta" href="/">{{ t.home }}</a></div>
+</div>
 {% endblock %}

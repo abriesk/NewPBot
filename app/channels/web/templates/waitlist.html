@@ -1,7 +1,10 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>{{ t.consultation }}</h1>
-<p>{{ t.waitlist_intro }}</p>
+<div class="page-head">
+  <span class="eyebrow">{{ practice.name }}</span>
+  <h1>{{ t.consultation }}</h1>
+  <p class="muted">{{ t.waitlist_intro }}</p>
+</div>
 <form method="post" action="/waitlist" class="card">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label>{{ t.waitlist_problem }}

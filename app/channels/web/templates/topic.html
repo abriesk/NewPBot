@@ -1,11 +1,18 @@
 {% extends "base.html" %}
 {% block title %}{{ title }} — {{ practice.name }}{% endblock %}
 {% block content %}
-<h1>{{ title }}</h1>
+<div class="page-head">
+  <span class="eyebrow">{{ practice.name }}</span>
+  <h1>{{ title }}</h1>
+</div>
 {% if blocks %}
   {# Already sanitised by the web emitter's allowlist (§11.3). #}
   {% for html in blocks %}<div class="prose">{{ html | safe }}</div>{% endfor %}
 {% else %}
-  <p>{{ t.content_empty }}</p>
+  <p class="muted">{{ t.content_empty }}</p>
 {% endif %}
+<div class="stack-actions">
+  <a class="cta" href="/book">{{ t.consultation }}</a>
+  <a class="link-back" href="/">{{ t.home }}</a>
+</div>
 {% endblock %}

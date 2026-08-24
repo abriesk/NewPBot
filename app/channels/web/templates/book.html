@@ -1,10 +1,13 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>{{ t.consultation }}</h1>
+<div class="page-head">
+  <span class="eyebrow">{{ practice.name }}</span>
+  <h1>{{ t.consultation }}</h1>
+</div>
 
 {# §12.1 step 1: session type and modality. Chosen before the slot list so the
    picker can be filtered by them. #}
-<form method="get" action="/book/details" class="card" id="booking">
+<form method="get" action="/book/details" class="card steps" id="booking">
   <fieldset>
     <legend>{{ t.choose_type }}</legend>
     {% for st in session_types %}

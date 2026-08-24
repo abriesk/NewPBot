@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% block content %}
-<h1>{{ t.consultation }}</h1>
+<div class="page-head">
+  <span class="eyebrow">{{ practice.name }}</span>
+  <h1>{{ t.consultation }}</h1>
+</div>
 
 <p class="held">{{ t.slot_held }}</p>
 
@@ -24,5 +27,5 @@
   {% endif %}
   <button type="submit">{{ t.submit }}</button>
 </form>
-<p><a href="/book">{{ t.back }}</a></p>
+<a class="link-back" href="/book">{{ t.back }}</a>
 {% endblock %}
