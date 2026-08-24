@@ -1,0 +1,23 @@
+{# HTMX partial (§12.1 step 2). Times are already rendered in the client's
+   timezone; storage stays UTC (DESIGN.md §8). #}
+{% if not days %}
+  <p class="muted">{{ t.no_slots }}</p>
+{% else %}
+  {% for day, slots in days %}
+    <div class="day">
+      <h3>{{ day }}</h3>
+      <div class="times">
+        {% for slot in slots %}
+          <form method="post" action="/book/hold">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="slot_id" value="{{ slot.id }}">
+            <input type="hidden" name="session_type_id" value="{{ session_type_id }}">
+            <input type="hidden" name="modality" value="{{ modality }}">
+            <input type="hidden" name="tz" value="{{ tz }}">
+            <button type="submit">{{ slot.label }}</button>
+          </form>
+        {% endfor %}
+      </div>
+    </div>
+  {% endfor %}
+{% endif %}

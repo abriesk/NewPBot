@@ -1,0 +1,42 @@
+{% extends "base.html" %}
+{% block title %}{{ t.your_request }} — {{ practice.name }}{% endblock %}
+{% block content %}
+<h1>{{ t.your_request }}</h1>
+<div class="card">
+  <p class="uuid"><code>{{ req.uuid }}</code></p>
+  <p><strong>{{ status_label }}</strong></p>
+  {% if scheduled %}<p>{{ scheduled }}</p>{% endif %}
+  {% if join_url %}<p><a href="{{ join_url }}">{{ join_url }}</a></p>{% endif %}
+</div>
+
+{% if thread %}
+<h2>{{ t.thread }}</h2>
+<ol class="thread">
+  {% for message in thread %}
+    <li class="{{ message.sender }}">
+      <span class="who">{{ message.who }}</span>
+      {% if message.when %}<time>{{ message.when }}</time>{% endif %}
+      {% if message.body %}<p>{{ message.body }}</p>{% endif %}
+    </li>
+  {% endfor %}
+</ol>
+{% endif %}
+
+{% if can_respond %}
+<div class="actions">
+  <form method="post" action="/r/{{ req.uuid }}/accept">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">{{ t.accept }}</button>
+  </form>
+  <form method="post" action="/r/{{ req.uuid }}/counter">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="text" name="body" placeholder="{{ t.counter_ask }}" required>
+    <button type="submit">{{ t.counter }}</button>
+  </form>
+  <form method="post" action="/r/{{ req.uuid }}/decline">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit">{{ t.decline }}</button>
+  </form>
+</div>
+{% endif %}
+{% endblock %}

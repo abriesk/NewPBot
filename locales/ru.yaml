@@ -69,6 +69,16 @@ waitlist:
   ask_contact: "Пожалуйста, оставьте ваши контакты для связи."
   submitted: "Спасибо. Ваша заявка принята, я свяжусь с вами."                  # TODO
 
+auth:
+  sign_in: ""                                    # TODO: translate
+  email_label: ""                                # TODO: translate
+  send_link: ""                                  # TODO: translate
+  link_sent: ""                                  # TODO: translate
+
+request:
+  title: ""                                      # TODO: translate
+  thread: ""                                     # TODO: translate
+
 intent:
   request.proposal.client.body: "Предложено время по вашей заявке {uuid}: {time}."
   request.proposal.client.note: "Комментарий специалиста: {note}"               # TODO

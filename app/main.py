@@ -16,10 +16,12 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
 from app.channels.telegram.webhook import build_router as telegram_router
 from app.channels.telegram.webhook import register_webhook
+from app.channels.web.client import build_router as web_router
 from app.config import get_settings
 from app.db import dispose_engine, get_session_factory
 
@@ -61,8 +63,13 @@ def create_app() -> FastAPI:
         openapi_url=None,
     )
 
-    # The Telegram webhook is an ordinary route on this one app, not a separate
-    # process (DESIGN.md §3.3).
+    # One ASGI ingress: the client UI, the Telegram webhook, and (from M7) the
+    # admin UI are all routes on this one app (DESIGN.md §3.3).
+    app.mount(
+        "/static",
+        StaticFiles(directory="app/channels/web/static"),
+        name="static",
+    )
     app.include_router(telegram_router())
 
     @app.get("/healthz", include_in_schema=False)
@@ -85,6 +92,9 @@ def create_app() -> FastAPI:
                 content={"status": "unavailable", "detail": type(exc).__name__},
             )
         return JSONResponse(status_code=200, content={"status": "ok"})
+
+    # Mounted last: its "/" and "/t/{code}" routes must not shadow anything.
+    app.include_router(web_router())
 
     return app
 

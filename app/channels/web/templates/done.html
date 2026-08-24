@@ -1,0 +1,13 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="card">
+  <h1>{{ heading }}</h1>
+  <p>{{ message }}</p>
+  {% if request_uuid %}<p class="uuid"><code>{{ request_uuid }}</code></p>{% endif %}
+  {% if telegram_link %}
+    <p><a class="cta" href="{{ telegram_link }}">{{ t.connect_telegram }}</a></p>
+    <p class="muted">{{ t.telegram_hint }}</p>
+  {% endif %}
+  <p><a href="/">{{ t.home }}</a></p>
+</div>
+{% endblock %}

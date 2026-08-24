@@ -85,8 +85,11 @@ async def list_available_slots(
         Slot.starts_at <= window_to,
     )
     if modality is not None:
-        # A slot with modality NULL is offered as "either".
-        stmt = stmt.where(Slot.modality.in_([modality, None]))
+        # A slot with modality NULL is offered as "either". This MUST NOT be
+        # written as `IN (modality, NULL)`: in SQL, NULL IN (...) is never
+        # true, so every "either" slot would silently disappear from the
+        # picker the moment a client chose online or on-site.
+        stmt = stmt.where((Slot.modality == modality) | (Slot.modality.is_(None)))
     if session_type_id is not None:
         restricted = select(SlotSessionType.slot_id).where(
             SlotSessionType.session_type_id == session_type_id

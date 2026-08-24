@@ -1,0 +1,9 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ practice.name }}</h1>
+{% if intro %}<div class="prose">{{ intro | safe }}</div>{% endif %}
+<ul class="topics">
+  {% for topic in topics %}<li><a href="/t/{{ topic.code }}">{{ topic.title }}</a></li>{% endfor %}
+</ul>
+<p><a class="cta" href="/book">{{ t.consultation }}</a></p>
+{% endblock %}

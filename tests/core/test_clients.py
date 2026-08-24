@@ -104,8 +104,14 @@ async def test_a_token_is_rejected_for_the_wrong_purpose(db: AsyncSession) -> No
 async def test_an_expired_token_is_rejected(db: AsyncSession) -> None:
     from datetime import timedelta
 
+    from app.core.services.clients import _hash
+
     raw = await issue_token(db, TokenPurpose.login)
-    token = (await db.execute(select(AuthToken))).scalars().all()[-1]
+    # By hash, not "the last row": other tokens exist once more than one test
+    # has run, and an unordered SELECT would expire somebody else's.
+    token = (
+        await db.execute(select(AuthToken).where(AuthToken.token_hash == _hash(raw)))
+    ).scalar_one()
     token.expires_at = now_utc() - timedelta(seconds=1)
     await db.flush()
 

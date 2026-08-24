@@ -1,0 +1,104 @@
+/* One stylesheet, no build step (§2). Light and dark both painted explicitly,
+   so the page never borrows a colour it did not choose. */
+:root {
+  --bg: #fbfaf8;
+  --surface: #ffffff;
+  --ink: #23201d;
+  --muted: #6b635b;
+  --line: #e3ddd5;
+  --accent: #3f6b5f;
+  --accent-ink: #ffffff;
+  --radius: 10px;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #171513;
+    --surface: #201d1a;
+    --ink: #ece7e1;
+    --muted: #a49a90;
+    --line: #322d28;
+    --accent: #7fb3a3;
+    --accent-ink: #16211d;
+  }
+}
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font: 16px/1.6 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+main { max-width: 46rem; margin: 0 auto; padding: 1.5rem 1rem 4rem; }
+
+header {
+  display: flex; flex-wrap: wrap; gap: .75rem 1.25rem; align-items: center;
+  padding: 1rem; border-bottom: 1px solid var(--line); background: var(--surface);
+}
+.brand { font-weight: 650; text-decoration: none; color: var(--ink); }
+header nav { display: flex; flex-wrap: wrap; gap: 1rem; flex: 1; }
+header nav a { color: var(--muted); text-decoration: none; }
+header nav a:hover { color: var(--ink); }
+.lang { display: flex; gap: .35rem; }
+.lang button {
+  background: none; border: 1px solid var(--line); color: var(--muted);
+  border-radius: 999px; padding: .15rem .6rem; font-size: .85rem; cursor: pointer;
+}
+.lang button:disabled { color: var(--ink); border-color: var(--accent); cursor: default; }
+
+h1 { font-size: 1.6rem; line-height: 1.25; margin: 0 0 1rem; }
+h2 { font-size: 1.2rem; margin: 2rem 0 .5rem; }
+h3 { font-size: 1rem; margin: 1.25rem 0 .4rem; color: var(--muted); }
+.muted { color: var(--muted); }
+
+.card {
+  background: var(--surface); border: 1px solid var(--line);
+  border-radius: var(--radius); padding: 1.25rem; margin: 1rem 0;
+}
+.prose { margin: 1rem 0; }
+.prose :where(p, ul, ol, blockquote) { margin: .75rem 0; }
+.prose blockquote {
+  margin-inline: 0; padding-left: 1rem; border-left: 3px solid var(--line); color: var(--muted);
+}
+.prose pre { overflow-x: auto; background: var(--bg); padding: .75rem; border-radius: 6px; }
+
+.topics { list-style: none; padding: 0; }
+.topics li { border-bottom: 1px solid var(--line); }
+.topics a { display: block; padding: .8rem 0; text-decoration: none; color: var(--ink); }
+
+label { display: block; margin: .9rem 0; }
+label.choice { display: flex; gap: .5rem; align-items: center; margin: .4rem 0; }
+input[type=text], input[type=email], textarea, select {
+  width: 100%; padding: .55rem .7rem; margin-top: .3rem;
+  border: 1px solid var(--line); border-radius: 8px;
+  background: var(--bg); color: var(--ink); font: inherit;
+}
+fieldset { border: 1px solid var(--line); border-radius: var(--radius); margin: 1rem 0; padding: 1rem; }
+legend { color: var(--muted); font-size: .9rem; padding: 0 .4rem; }
+
+button, .cta {
+  display: inline-block; background: var(--accent); color: var(--accent-ink);
+  border: none; border-radius: 8px; padding: .55rem 1rem;
+  font: inherit; cursor: pointer; text-decoration: none;
+}
+button:hover, .cta:hover { filter: brightness(1.08); }
+
+.times { display: flex; flex-wrap: wrap; gap: .5rem; }
+.times form { margin: 0; }
+.day { margin-bottom: 1rem; }
+.held { color: var(--accent); }
+.uuid code { font-size: .85rem; color: var(--muted); }
+
+.thread { list-style: none; padding: 0; }
+.thread li {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  padding: .75rem 1rem; margin: .5rem 0; background: var(--surface);
+}
+.thread .who { font-weight: 600; font-size: .85rem; }
+.thread time { color: var(--muted); font-size: .85rem; margin-left: .5rem; }
+.thread li.client { margin-left: 2rem; }
+
+.actions { display: flex; flex-wrap: wrap; gap: .75rem; align-items: start; }
+.actions form { display: flex; gap: .4rem; margin: 0; }
+
+footer { border-top: 1px solid var(--line); padding: 1.5rem 1rem; color: var(--muted); font-size: .9rem; }

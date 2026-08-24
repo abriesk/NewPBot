@@ -79,6 +79,17 @@ waitlist:
   ask_contact: "How can I reach you?"
   submitted: "Thank you. I have your request and will be in touch."
 
+# --- Web client surface (§12.1). ---------------------------------------------
+auth:
+  sign_in: "Sign in"
+  email_label: "Your email address"
+  send_link: "Send me a link"
+  link_sent: "If that address is known here, a sign-in link is on its way."
+
+request:
+  title: "Your request"
+  thread: "Conversation"
+
 intent:
   request.proposal.client.body: "A time has been proposed for your request {uuid}: {time}."
   request.proposal.client.note: "Note from the therapist: {note}"

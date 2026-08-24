@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="{{ lang }}">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>{% block title %}{{ practice.name }}{% endblock %}</title>
+<link rel="stylesheet" href="/static/style.css">
+<script src="/static/htmx.min.js" defer></script>
+</head>
+<body>
+<header>
+  <a class="brand" href="/">{{ practice.name }}</a>
+  <nav>
+    {% for topic in topics %}<a href="/t/{{ topic.code }}">{{ topic.title }}</a>{% endfor %}
+    <a class="cta" href="/book">{{ t.consultation }}</a>
+  </nav>
+  <form class="lang" method="get" action="{{ request.url.path }}">
+    {# DESIGN.md §11: two client languages. `hy` is Armenian; `am` is Amharic
+       and must never appear (hard rule 5). #}
+    <button name="lang" value="ru" {% if lang == 'ru' %}disabled{% endif %}>Русский</button>
+    <button name="lang" value="hy" {% if lang == 'hy' %}disabled{% endif %}>Հայերեն</button>
+  </form>
+</header>
+
+<main>{% block content %}{% endblock %}</main>
+
+<footer><p>{{ practice.name }}</p></footer>
+
+<script>
+// DESIGN.md §8: the browser is the only automatic source of a client's zone.
+// Stored in a cookie so the server can render slot times correctly on the very
+// first request, and overridable with the visible selector on the booking form.
+(function () {
+  try {
+    var tz = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    if (tz && document.cookie.indexOf('pb_tz=') === -1) {
+      document.cookie = 'pb_tz=' + encodeURIComponent(tz) + ';path=/;max-age=31536000;samesite=lax';
+    }
+  } catch (e) { /* an old browser simply falls back to the practice timezone */ }
+})();
+</script>
+</body>
+</html>

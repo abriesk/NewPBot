@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ t.sign_in }}</h1>
+{% if sent %}
+  <p>{{ t.link_sent }}</p>
+{% else %}
+  <form method="post" action="/auth/email" class="card">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>{{ t.email_label }}
+      <input type="email" name="email" required>
+    </label>
+    <button type="submit">{{ t.send_link }}</button>
+  </form>
+{% endif %}
+{% endblock %}

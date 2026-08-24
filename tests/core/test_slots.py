@@ -312,3 +312,80 @@ async def test_two_concurrent_holds_and_exactly_one_wins() -> None:
                 )
             )
         await engine.dispose()
+
+
+# --- Filtering (§6.4: an unset modality means "either") ---------------------
+
+
+async def test_a_slot_with_no_modality_is_offered_for_both(
+    db: AsyncSession, future_slot: Slot
+) -> None:
+    """§6.4: modality NULL means "either".
+
+    Regression: written as `modality IN (chosen, NULL)` this silently returned
+    nothing, because in SQL `NULL IN (...)` is never true -- so every "either"
+    slot vanished from the picker the moment a client chose online or on-site.
+    """
+    assert future_slot.modality is None
+    window = (
+        future_slot.starts_at - timedelta(hours=1),
+        future_slot.starts_at + timedelta(hours=1),
+    )
+
+    for modality in (Modality.online, Modality.onsite, None):
+        found = await slot_service.list_available_slots(
+            db, window_from=window[0], window_to=window[1], modality=modality
+        )
+        assert future_slot.id in {s.id for s in found}, f"missing for {modality}"
+
+
+async def test_a_modality_specific_slot_is_only_offered_for_that_modality(
+    db: AsyncSession, practice: Practice
+) -> None:
+    starts_at = datetime.now(UTC) + timedelta(days=11, microseconds=31)
+    slot = Slot(
+        practice_id=practice.id,
+        starts_at=starts_at,
+        duration_min=60,
+        modality=Modality.online,
+        status=SlotStatus.available,
+    )
+    db.add(slot)
+    await db.flush()
+
+    window = (starts_at - timedelta(hours=1), starts_at + timedelta(hours=1))
+    online = await slot_service.list_available_slots(
+        db, window_from=window[0], window_to=window[1], modality=Modality.online
+    )
+    onsite = await slot_service.list_available_slots(
+        db, window_from=window[0], window_to=window[1], modality=Modality.onsite
+    )
+
+    assert slot.id in {s.id for s in online}
+    assert slot.id not in {s.id for s in onsite}
+
+
+async def test_a_slot_with_no_session_type_rows_accepts_all_of_them(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    """§6.4: an empty slot_session_type set means all active session types."""
+    window = (
+        future_slot.starts_at - timedelta(hours=1),
+        future_slot.starts_at + timedelta(hours=1),
+    )
+    found = await slot_service.list_available_slots(
+        db, window_from=window[0], window_to=window[1], session_type_id=session_type_id
+    )
+    assert future_slot.id in {s.id for s in found}
+
+
+async def test_a_held_slot_is_not_offered(
+    db: AsyncSession, future_slot: Slot, request_id: int
+) -> None:
+    await slot_service.hold_slot(db, future_slot.id, request_id=request_id)
+    window = (
+        future_slot.starts_at - timedelta(hours=1),
+        future_slot.starts_at + timedelta(hours=1),
+    )
+    found = await slot_service.list_available_slots(db, window_from=window[0], window_to=window[1])
+    assert future_slot.id not in {s.id for s in found}

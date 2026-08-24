@@ -107,6 +107,19 @@ async def _resolve(session: AsyncSession, lang: str, key: str, *, warn: bool = T
         if fallback != key:
             return fallback
 
+    # en.yaml's own header: "Client-facing English strings exist so `en` is a
+    # usable fallback". Reaching for it before the bare key means an
+    # untranslated string shows as English rather than as `auth.email_label`
+    # in front of a client. The warning below still fires, so the gap is
+    # visible in the log either way.
+    if lang != "en":
+        english = _repo_catalogue().get("en", {}).get(key, "")
+        if english.strip():
+            if warn and (lang, key) not in _warned:
+                _warned.add((lang, key))
+                logger.warning("missing translation %r for %r; using en", key, lang)
+            return english
+
     if warn and (lang, key) not in _warned:
         _warned.add((lang, key))
         logger.warning("missing translation %r for %r", key, lang)

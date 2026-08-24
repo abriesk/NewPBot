@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ t.consultation }}</h1>
+<p>{{ t.waitlist_intro }}</p>
+<form method="post" action="/waitlist" class="card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>{{ t.waitlist_problem }}
+    <textarea name="problem" rows="4"></textarea>
+  </label>
+  <label>{{ t.waitlist_contact }}
+    <input type="text" name="contact">
+  </label>
+  <label>{{ t.email_label }}
+    <input type="email" name="email" required>
+  </label>
+  <button type="submit">{{ t.submit }}</button>
+</form>
+{% endblock %}

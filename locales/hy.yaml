@@ -72,6 +72,16 @@ waitlist:
   ask_contact: "Թողեք ձեր կոնտակտային տվյալները:"
   submitted: ""                                  # TODO: translate
 
+auth:
+  sign_in: ""                                    # TODO: translate
+  email_label: ""                                # TODO: translate
+  send_link: ""                                  # TODO: translate
+  link_sent: ""                                  # TODO: translate
+
+request:
+  title: ""                                      # TODO: translate
+  thread: ""                                     # TODO: translate
+
 intent:
   request.proposal.client.body: "Նոր առաջարկ թերապևտից՝ {time}"   # TODO: add {uuid}
   request.proposal.client.note: ""               # TODO: translate

@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ t.consultation }}</h1>
+
+<p class="held">{{ t.slot_held }}</p>
+
+{# §12.1 step 3. Everything here is optional except the email, which is how a
+   client without Telegram is reached at all (§4, DESIGN.md §5.1). #}
+<form method="post" action="/book" class="card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>{{ t.ask_problem }}
+    <textarea name="problem" rows="4"></textarea>
+  </label>
+  <label>{{ t.ask_name }}
+    <input type="text" name="name" value="{{ display_name or '' }}">
+  </label>
+  <label>{{ t.ask_contact }}
+    <input type="text" name="contact">
+  </label>
+  {% if not signed_in %}
+    <label>{{ t.email_label }}
+      <input type="email" name="email" required>
+    </label>
+  {% endif %}
+  <button type="submit">{{ t.submit }}</button>
+</form>
+<p><a href="/book">{{ t.back }}</a></p>
+{% endblock %}

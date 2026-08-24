@@ -1,0 +1,814 @@
+"""Client web routes (IMPLEMENTATION.md §12.1).
+
+A thin adapter, exactly like the Telegram router: every scheduling decision is a
+call into app/core/services/. The two channels differ in what they can express,
+never in what the rules are (DESIGN.md §3.2).
+
+Multi-step state lives in `flow_state` keyed on the `web` channel, so a client
+mid-booking here and mid-booking in Telegram are two independent flows.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections import defaultdict
+from datetime import datetime, timedelta
+from typing import Any
+from uuid import UUID
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+from fastapi import APIRouter, Form, Request, Response
+from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.templating import Jinja2Templates
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.channels.web.security import (
+    CSRF_FIELD,
+    csrf_ok,
+    csrf_token_for,
+    current_client_id,
+    issue_client_session,
+    issue_csrf,
+)
+from app.config import get_settings
+from app.core.enums import Channel, Modality, SenderType, TokenPurpose
+from app.core.errors import DomainError, NotFound, SlotUnavailable, TokenInvalid
+from app.core.models import Client, NegotiationMessage, SessionType, TimezoneOption
+from app.core.policies import BookingPath, hold_expiry, now_utc, resolve_booking_mode
+from app.core.services import booking, content, flow, notifications, waitlist
+from app.core.services.clients import (
+    consume_token,
+    issue_token,
+    link_identity,
+    resolve_client,
+)
+from app.core.services.flow import Step
+from app.core.services.notifications import Envelope, Recipient
+from app.core.services.settings import get_practice
+from app.core.services.slots import list_available_slots
+from app.core.services.translations import get_text
+from app.db import unit_of_work
+from app.render.markdown import to_web_html
+
+logger = logging.getLogger(__name__)
+
+TEMPLATES = Jinja2Templates(directory="app/channels/web/templates")
+
+#: How far ahead the slot picker looks.
+SLOT_WINDOW = timedelta(days=30)
+
+#: Set client-side from Intl.DateTimeFormat (DESIGN.md §8).
+TZ_COOKIE = "pb_tz"
+
+LANGUAGES = ("ru", "hy", "en")
+
+
+# --- Page context -----------------------------------------------------------
+
+
+async def _labels(session: AsyncSession, lang: str) -> dict[str, str]:
+    """The strings every page needs.
+
+    Fetched by key rather than hardcoded so the therapist's edits win (§15).
+    """
+    keys = {
+        "consultation": "menu.consultation",
+        "home": "common.home",
+        "back": "common.back",
+        "submit": "common.continue",
+        "skip": "common.skip",
+        "content_empty": "content.empty",
+        "choose_type": "booking.choose_type",
+        "choose_modality": "booking.choose_modality",
+        "modality_online": "booking.modality.online",
+        "modality_onsite": "booking.modality.onsite",
+        "onsite_info": "booking.onsite_info",
+        "onsite_no_address": "common.error.not_found",
+        "choose_timezone": "booking.choose_timezone",
+        "timezone_detected": "booking.timezone.detected",
+        "choose_slot": "booking.choose_slot",
+        "no_slots": "booking.slot.none_available",
+        "slot_held": "booking.slot.held",
+        "slot_taken": "booking.slot.taken",
+        "ask_problem": "booking.ask_problem",
+        "ask_name": "booking.ask_name",
+        "ask_contact": "booking.ask_contact",
+        "submitted": "booking.submitted",
+        "unavailable": "booking.unavailable",
+        "waitlist_intro": "waitlist.intro",
+        "waitlist_problem": "waitlist.ask_problem",
+        "waitlist_contact": "waitlist.ask_contact",
+        "waitlist_submitted": "waitlist.submitted",
+        "email_label": "auth.email_label",
+        "sign_in": "auth.sign_in",
+        "send_link": "auth.send_link",
+        "link_sent": "auth.link_sent",
+        "your_request": "request.title",
+        "thread": "request.thread",
+        "accept": "intent.request.proposal.client.action.accept",
+        "counter": "intent.request.proposal.client.action.counter",
+        "decline": "intent.request.proposal.client.action.decline",
+        "counter_ask": "intent.request.counter.client.ask",
+        "connect_telegram": "intent.auth.login_link.client.action.telegram",
+        "telegram_hint": "intent.auth.login_link.client.telegram_hint",
+        "error": "common.error.generic",
+        "expired_link": "common.error.expired_link",
+        "not_found": "common.error.not_found",
+    }
+    return {name: await get_text(session, lang, key) for name, key in keys.items()}
+
+
+async def _context(
+    session: AsyncSession, request: Request, lang: str | None = None
+) -> dict[str, Any]:
+    practice = await get_practice(session)
+    resolved = _language(request, practice.default_language, lang)
+
+    topics = []
+    for topic in await content.list_menu_topics(session):
+        topics.append(
+            {
+                "code": topic.code,
+                "title": await get_text(session, resolved, f"content.topic.{topic.code}.title"),
+            }
+        )
+
+    return {
+        "request": request,
+        "practice": practice,
+        "lang": resolved,
+        "topics": topics,
+        "t": await _labels(session, resolved),
+        "csrf_token": csrf_token_for(request),
+    }
+
+
+def _language(request: Request, default: str, override: str | None) -> str:
+    if override in LANGUAGES:
+        return override
+    query = request.query_params.get("lang")
+    if query in LANGUAGES:
+        return query
+    return default
+
+
+def _timezone(request: Request, practice_tz: str) -> str:
+    """The client's zone, in DESIGN.md §8's order: explicit choice, then the
+    browser's detection, then the practice default."""
+    for candidate in (request.query_params.get("tz"), request.cookies.get(TZ_COOKIE)):
+        if not candidate:
+            continue
+        try:
+            ZoneInfo(candidate)
+        except (ZoneInfoNotFoundError, ValueError):
+            continue
+        return candidate
+    return practice_tz
+
+
+def _render(name: str, context: dict[str, Any], status_code: int = 200) -> HTMLResponse:
+    # Starlette takes the request first; the older (name, context) form is gone.
+    response = TEMPLATES.TemplateResponse(
+        context["request"], name, context, status_code=status_code
+    )
+    # The cookie must carry exactly what the page embedded, or every form on
+    # it would be rejected.
+    issue_csrf(response, context.get("csrf_token"))
+    return response
+
+
+def build_router() -> APIRouter:
+    router = APIRouter()
+
+    # --- Content ------------------------------------------------------------
+
+    @router.get("/", response_class=HTMLResponse, include_in_schema=False)
+    async def home(request: Request) -> Response:
+        async with unit_of_work() as session:
+            context = await _context(session, request)
+            return _render("home.html", {**context, "intro": None})
+
+    @router.get("/t/{topic_code}", response_class=HTMLResponse, include_in_schema=False)
+    async def topic_page(request: Request, topic_code: str) -> Response:
+        async with unit_of_work() as session:
+            context = await _context(session, request)
+            try:
+                await content.get_topic(session, topic_code)
+            except NotFound:
+                return _render(
+                    "error.html",
+                    {
+                        **context,
+                        "heading": context["t"]["not_found"],
+                        "message": context["t"]["not_found"],
+                    },
+                    status_code=404,
+                )
+
+            blocks = await content.get_topic_blocks(session, topic_code, context["lang"])
+            title = await get_text(session, context["lang"], f"content.topic.{topic_code}.title")
+            # §11.3: sanitised by the emitter before it reaches a template.
+            return _render(
+                "topic.html",
+                {
+                    **context,
+                    "title": title,
+                    "blocks": [to_web_html(block.body_md) for block in blocks],
+                },
+            )
+
+    # --- Booking (§12.1 steps 1-3) -----------------------------------------
+
+    @router.get("/book", response_class=HTMLResponse, include_in_schema=False)
+    async def book(request: Request) -> Response:
+        async with unit_of_work() as session:
+            context = await _context(session, request)
+            practice = context["practice"]
+            tz = _timezone(request, practice.timezone)
+
+            slots = await list_available_slots(
+                session,
+                window_from=now_utc(),
+                window_to=now_utc() + SLOT_WINDOW,
+                tz=tz,
+            )
+            resolved = resolve_booking_mode(practice, slots_exist=bool(slots))
+
+            if resolved.path is BookingPath.waitlist:
+                return _render("waitlist.html", context)
+
+            session_types = []
+            for st in await _active_session_types(session):
+                name = await get_text(session, context["lang"], f"booking.type.{st.code}")
+                session_types.append(
+                    {
+                        "id": st.id,
+                        "label": await get_text(
+                            session,
+                            context["lang"],
+                            "booking.type.without_price",
+                            name=name,
+                            duration=st.duration_min,
+                        ),
+                    }
+                )
+
+            timezones = (
+                (
+                    await session.execute(
+                        select(TimezoneOption)
+                        .where(TimezoneOption.is_active.is_(True))
+                        .order_by(TimezoneOption.sort_order, TimezoneOption.id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+            return _render(
+                "book.html",
+                {
+                    **context,
+                    "session_types": session_types,
+                    "timezones": timezones,
+                    "tz": tz,
+                    "negotiation": resolved.path is BookingPath.negotiation,
+                },
+            )
+
+    @router.get("/book/slots", response_class=HTMLResponse, include_in_schema=False)
+    async def book_slots(
+        request: Request,
+        session_type_id: int | None = None,
+        modality: str | None = None,
+        tz: str | None = None,
+    ) -> Response:
+        """§12.1 step 2, an HTMX partial. Times in the client's timezone."""
+        async with unit_of_work() as session:
+            practice = await get_practice(session)
+            lang = _language(request, practice.default_language, None)
+            zone = tz or _timezone(request, practice.timezone)
+
+            slots = await list_available_slots(
+                session,
+                window_from=now_utc(),
+                window_to=now_utc() + SLOT_WINDOW,
+                session_type_id=session_type_id,
+                modality=Modality(modality) if modality else None,
+                tz=zone,
+            )
+
+            grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            for slot in slots:
+                local = slot.starts_at_utc.astimezone(ZoneInfo(zone))
+                grouped[local.strftime("%A %d %B")].append(
+                    {"id": slot.id, "label": local.strftime("%H:%M")}
+                )
+
+            return _render(
+                "partials/slots.html",
+                {
+                    "request": request,
+                    "days": list(grouped.items()),
+                    "t": await _labels(session, lang),
+                    "csrf_token": csrf_token_for(request),
+                    "session_type_id": session_type_id or "",
+                    "modality": modality or "online",
+                    "tz": zone,
+                },
+            )
+
+    @router.post("/book/hold", include_in_schema=False)
+    async def book_hold(
+        request: Request,
+        slot_id: int = Form(...),
+        session_type_id: int = Form(...),
+        modality: str = Form("online"),
+        tz: str = Form(""),
+        csrf_token: str = Form("", alias=CSRF_FIELD),
+    ) -> Response:
+        """§12.1: hold a slot; returns the hold expiry.
+
+        DEVIATION, reported in M5 and unchanged here: the reservation is
+        recorded against the flow and the *database* hold is taken at submit.
+        §6.4's CHECK makes `held_by_request` non-null whenever a slot is held,
+        so a real hold needs a request row, and creating one here would notify
+        the therapist about a form nobody has filled in yet. The expiry below is
+        the window that will apply, `booking.slot.taken` exists in the catalogue
+        for the race this leaves, and the M2 concurrency test guarantees exactly
+        one winner. Resolving it properly wants a nullable hold owner or a
+        two-phase submit.
+        """
+        if not csrf_ok(request, csrf_token):
+            return Response(status_code=403)
+
+        async with unit_of_work() as session:
+            practice = await get_practice(session)
+            client = await _session_client(session, request)
+            zone = tz or _timezone(request, practice.timezone)
+
+            reservation = {
+                "slot_id": slot_id,
+                "session_type_id": session_type_id,
+                "modality": modality,
+                "tz": zone,
+                "hold_expires_at": hold_expiry(practice).isoformat(),
+            }
+
+            if client is not None:
+                await flow.set_step(
+                    session, client.id, Channel.web, Step.entering_problem, replace=reservation
+                )
+                response: Response = RedirectResponse("/book/details", status_code=303)
+            else:
+                # Not signed in yet: carry the reservation in a signed cookie
+                # until the email on the details form identifies them.
+                response = RedirectResponse("/book/details", status_code=303)
+                _stash(response, reservation)
+
+            issue_csrf(response, csrf_token_for(request))
+            return response
+
+    @router.get("/book/details", response_class=HTMLResponse, include_in_schema=False)
+    async def book_details(request: Request) -> Response:
+        """§12.1 step 3: problem, name, contact note."""
+        async with unit_of_work() as session:
+            context = await _context(session, request)
+            client = await _session_client(session, request)
+            reservation = await _reservation(session, request, client)
+
+            if reservation is None:
+                return RedirectResponse("/book", status_code=303)
+
+            return _render(
+                "details.html",
+                {
+                    **context,
+                    "signed_in": client is not None,
+                    "display_name": client.display_name if client else None,
+                },
+            )
+
+    @router.post("/book", include_in_schema=False)
+    async def submit(
+        request: Request,
+        problem: str = Form(""),
+        name: str = Form(""),
+        contact: str = Form(""),
+        email: str = Form(""),
+        csrf_token: str = Form("", alias=CSRF_FIELD),
+    ) -> Response:
+        """§12.1: submit; returns the confirmation with the request UUID."""
+        if not csrf_ok(request, csrf_token):
+            return Response(status_code=403)
+
+        async with unit_of_work() as session:
+            context = await _context(session, request)
+            client = await _session_client(session, request)
+            reservation = await _reservation(session, request, client)
+
+            if reservation is None:
+                return RedirectResponse("/book", status_code=303)
+
+            if client is None:
+                if not email:
+                    return RedirectResponse("/book/details", status_code=303)
+                # Unverified until the magic link is followed: an unverified
+                # address must not be able to book (DESIGN.md §5.1), so the
+                # confirmation goes out only after verification.
+                client = await resolve_client(
+                    session, Channel.email, email, language=context["lang"]
+                )
+
+            try:
+                booking_request = await booking.submit_slot_request(
+                    session,
+                    client_id=client.id,
+                    slot_id=int(reservation["slot_id"]),
+                    session_type_id=int(reservation["session_type_id"]),
+                    modality=Modality(reservation.get("modality", "online")),
+                    source_channel=Channel.web,
+                    problem_text=problem or None,
+                    contact_note=contact or None,
+                    display_name=name or None,
+                    client_timezone=reservation.get("tz"),
+                )
+            except SlotUnavailable:
+                await flow.clear(session, client.id, Channel.web)
+                return _render(
+                    "error.html",
+                    {
+                        **context,
+                        "heading": context["t"]["slot_taken"],
+                        "message": context["t"]["slot_taken"],
+                    },
+                    status_code=409,
+                )
+            except DomainError:
+                return _render(
+                    "error.html",
+                    {
+                        **context,
+                        "heading": context["t"]["error"],
+                        "message": context["t"]["unavailable"],
+                    },
+                    status_code=409,
+                )
+
+            await notifications.publish(session)
+            await flow.clear(session, client.id, Channel.web)
+
+            settings = get_settings()
+            link_raw = await issue_token(session, TokenPurpose.link_channel, client_id=client.id)
+            telegram_link = f"https://t.me/{settings.telegram_bot_username}?start=link_{link_raw}"
+
+            response = _render(
+                "done.html",
+                {
+                    **context,
+                    "heading": context["t"]["consultation"],
+                    "message": await get_text(
+                        session,
+                        context["lang"],
+                        "booking.submitted",
+                        uuid=str(booking_request.uuid),
+                    ),
+                    "request_uuid": str(booking_request.uuid),
+                    "telegram_link": telegram_link,
+                },
+            )
+            issue_client_session(response, client.id)
+            _clear_stash(response)
+            return response
+
+    # --- Waitlist -----------------------------------------------------------
+
+    @router.post("/waitlist", include_in_schema=False)
+    async def join_waitlist(
+        request: Request,
+        problem: str = Form(""),
+        contact: str = Form(""),
+        email: str = Form(""),
+        csrf_token: str = Form("", alias=CSRF_FIELD),
+    ) -> Response:
+        if not csrf_ok(request, csrf_token):
+            return Response(status_code=403)
+
+        async with unit_of_work() as session:
+            context = await _context(session, request)
+            client = await _session_client(session, request)
+            if client is None:
+                if not email:
+                    return RedirectResponse("/book", status_code=303)
+                client = await resolve_client(
+                    session, Channel.email, email, language=context["lang"]
+                )
+
+            await waitlist.join_waitlist(
+                session,
+                client_id=client.id,
+                problem_text=problem or None,
+                contact_note=contact or None,
+            )
+            await notifications.publish(session)
+
+            return _render(
+                "done.html",
+                {
+                    **context,
+                    "heading": context["t"]["consultation"],
+                    "message": context["t"]["waitlist_submitted"],
+                    "request_uuid": None,
+                },
+            )
+
+    # --- Request page (§12.1) ----------------------------------------------
+
+    @router.get("/r/{uuid}", response_class=HTMLResponse, include_in_schema=False)
+    async def request_page(request: Request, uuid: str, token: str = "") -> Response:
+        async with unit_of_work() as session:
+            context = await _context(session, request)
+            client = await _session_client(session, request)
+
+            # An emailed link carries a view token; a browser session is the
+            # other way in (§12.1: auth required).
+            if client is None and token:
+                try:
+                    result = await consume_token(session, token, TokenPurpose.view_request)
+                except TokenInvalid:
+                    result = None
+                if result and result.client_id:
+                    client = await _client_by_id(session, result.client_id)
+
+            if client is None:
+                return RedirectResponse("/auth/email", status_code=303)
+
+            try:
+                booking_request = await booking.get_by_uuid(session, UUID(uuid))
+            except (NotFound, ValueError):
+                return _render(
+                    "error.html",
+                    {
+                        **context,
+                        "heading": context["t"]["not_found"],
+                        "message": context["t"]["not_found"],
+                    },
+                    status_code=404,
+                )
+
+            if booking_request.client_id != client.id:
+                # Someone else's request. 404 rather than 403: whether a UUID
+                # exists is itself information.
+                return _render(
+                    "error.html",
+                    {
+                        **context,
+                        "heading": context["t"]["not_found"],
+                        "message": context["t"]["not_found"],
+                    },
+                    status_code=404,
+                )
+
+            thread = await _thread(session, booking_request.id, context["lang"])
+            turn = await booking.whose_turn(session, booking_request.id)
+
+            return _render(
+                "request.html",
+                {
+                    **context,
+                    "req": booking_request,
+                    "status_label": booking_request.status.value,
+                    "scheduled": _format(booking_request.scheduled_start, context),
+                    "join_url": await notifications.join_info(session, booking_request)
+                    if booking_request.status.value == "confirmed"
+                    else None,
+                    "thread": thread,
+                    "can_respond": turn is SenderType.client,
+                },
+            )
+
+    @router.post("/r/{uuid}/{action}", include_in_schema=False)
+    async def request_action(
+        request: Request,
+        uuid: str,
+        action: str,
+        body: str = Form(""),
+        csrf_token: str = Form("", alias=CSRF_FIELD),
+    ) -> Response:
+        """§12.1: accept | counter | decline."""
+        if not csrf_ok(request, csrf_token):
+            return Response(status_code=403)
+        if action not in ("accept", "counter", "decline"):
+            return Response(status_code=404)
+
+        async with unit_of_work() as session:
+            client = await _session_client(session, request)
+            if client is None:
+                return RedirectResponse("/auth/email", status_code=303)
+
+            try:
+                booking_request = await booking.get_by_uuid(session, UUID(uuid))
+            except (NotFound, ValueError):
+                return Response(status_code=404)
+            if booking_request.client_id != client.id:
+                return Response(status_code=404)
+
+            try:
+                if action == "accept":
+                    await booking.client_accept(session, booking_request.id)
+                elif action == "counter":
+                    await booking.client_counter(
+                        session, booking_request.id, body_text=body or None
+                    )
+                else:
+                    await booking.client_decline(session, booking_request.id)
+            except DomainError:
+                logger.info("refused web action %r on request %s", action, uuid)
+                return RedirectResponse(f"/r/{uuid}", status_code=303)
+
+            await notifications.publish(session)
+            return RedirectResponse(f"/r/{uuid}", status_code=303)
+
+    # --- Magic-link auth (§12.1, DESIGN.md §5.1) ---------------------------
+
+    @router.get("/auth/email", response_class=HTMLResponse, include_in_schema=False)
+    async def auth_email_form(request: Request) -> Response:
+        async with unit_of_work() as session:
+            context = await _context(session, request)
+            return _render("auth_email.html", {**context, "sent": False})
+
+    @router.post("/auth/email", include_in_schema=False)
+    async def auth_email(
+        request: Request,
+        email: str = Form(...),
+        csrf_token: str = Form("", alias=CSRF_FIELD),
+    ) -> Response:
+        if not csrf_ok(request, csrf_token):
+            return Response(status_code=403)
+
+        settings = get_settings()
+        async with unit_of_work() as session:
+            context = await _context(session, request)
+
+            # §4: with SMTP unset there is no way to deliver a link, and the web
+            # UI requires Telegram login instead.
+            if settings.email_enabled:
+                client = await resolve_client(
+                    session, Channel.email, email, language=context["lang"]
+                )
+                raw = await issue_token(
+                    session, TokenPurpose.login, client_id=client.id, payload={"email": email}
+                )
+                link_raw = await issue_token(
+                    session, TokenPurpose.link_channel, client_id=client.id
+                )
+                await notifications.enqueue(
+                    session,
+                    Envelope(
+                        "auth.login_link.client",
+                        Recipient.client,
+                        {
+                            "url": f"{settings.base_url}/auth/callback?token={raw}",
+                            "minutes": 30,
+                            "telegram_url": (
+                                f"https://t.me/{settings.telegram_bot_username}"
+                                f"?start=link_{link_raw}"
+                            ),
+                        },
+                    ),
+                )
+
+            # The same page either way: whether an address is known is not
+            # something an unauthenticated caller should learn.
+            return _render("auth_email.html", {**context, "sent": True})
+
+    @router.get("/auth/callback", include_in_schema=False)
+    async def auth_callback(request: Request, token: str = "") -> Response:
+        async with unit_of_work() as session:
+            context = await _context(session, request)
+            try:
+                result = await consume_token(session, token, TokenPurpose.login)
+            except TokenInvalid:
+                return _render(
+                    "error.html",
+                    {
+                        **context,
+                        "heading": context["t"]["expired_link"],
+                        "message": context["t"]["expired_link"],
+                    },
+                    status_code=400,
+                )
+
+            if result.client_id is None:
+                return RedirectResponse("/auth/email", status_code=303)
+
+            # Following the link proves the address (DESIGN.md §5.1).
+            email = str(result.payload.get("email", ""))
+            if email:
+                await link_identity(session, result.client_id, Channel.email, email, verified=True)
+
+            response = RedirectResponse("/", status_code=303)
+            issue_client_session(response, result.client_id)
+            issue_csrf(response, csrf_token_for(request))
+            return response
+
+    return router
+
+
+# --- Helpers ----------------------------------------------------------------
+
+
+async def _active_session_types(session: AsyncSession) -> list[SessionType]:
+    return list(
+        (
+            await session.execute(
+                select(SessionType)
+                .where(SessionType.is_active.is_(True))
+                .order_by(SessionType.sort_order, SessionType.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def _client_by_id(session: AsyncSession, client_id: UUID) -> Client | None:
+    return (
+        await session.execute(select(Client).where(Client.id == client_id))
+    ).scalar_one_or_none()
+
+
+async def _session_client(session: AsyncSession, request: Request) -> Client | None:
+    client_id = current_client_id(request)
+    if client_id is None:
+        return None
+    return await _client_by_id(session, client_id)
+
+
+#: The pre-sign-in reservation, in a signed cookie. `flow_state` needs a client
+#: row, and a visitor choosing a slot before giving an email does not have one.
+STASH_COOKIE = "pb_book"
+
+
+def _stash(response: Response, reservation: dict[str, Any]) -> None:
+    from app.channels.web.security import _cookie_kwargs, _encode
+
+    response.set_cookie(STASH_COOKIE, _encode(reservation), max_age=3600, **_cookie_kwargs())
+
+
+def _clear_stash(response: Response) -> None:
+    response.delete_cookie(STASH_COOKIE, path="/")
+
+
+async def _reservation(
+    session: AsyncSession, request: Request, client: Client | None
+) -> dict[str, Any] | None:
+    """Whichever store holds the slot choice: flow_state for a known client,
+    the signed cookie for a visitor."""
+    if client is not None:
+        data = await flow.data(session, client.id, Channel.web)
+        if data.get("slot_id"):
+            return data
+
+    from app.channels.web.security import _decode
+
+    raw = request.cookies.get(STASH_COOKIE)
+    if raw:
+        decoded = _decode(raw)
+        if decoded and decoded.get("slot_id"):
+            return decoded
+    return None
+
+
+async def _thread(session: AsyncSession, request_id: int, lang: str) -> list[dict[str, Any]]:
+    messages = (
+        (
+            await session.execute(
+                select(NegotiationMessage)
+                .where(NegotiationMessage.request_id == request_id)
+                .order_by(NegotiationMessage.created_at, NegotiationMessage.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [
+        {
+            "sender": message.sender.value,
+            "who": message.sender.value,
+            "when": message.proposed_start.strftime("%Y-%m-%d %H:%M")
+            if message.proposed_start
+            else None,
+            "body": message.body_text,
+        }
+        for message in messages
+    ]
+
+
+def _format(value: datetime | None, context: dict[str, Any]) -> str | None:
+    """A stored instant in the practice zone. Storage stays UTC (DESIGN.md §8)."""
+    if value is None:
+        return None
+    zone = ZoneInfo(context["practice"].timezone)
+    return str(value.astimezone(zone).strftime("%Y-%m-%d %H:%M"))

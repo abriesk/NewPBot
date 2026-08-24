@@ -1,0 +1,62 @@
+{% extends "base.html" %}
+{% block content %}
+<h1>{{ t.consultation }}</h1>
+
+{# §12.1 step 1: session type and modality. Chosen before the slot list so the
+   picker can be filtered by them. #}
+<form method="get" action="/book/details" class="card" id="booking">
+  <fieldset>
+    <legend>{{ t.choose_type }}</legend>
+    {% for st in session_types %}
+      <label class="choice">
+        <input type="radio" name="session_type_id" value="{{ st.id }}"
+               {% if loop.first %}checked{% endif %}
+               hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
+        {{ st.label }}
+      </label>
+    {% endfor %}
+  </fieldset>
+
+  <fieldset>
+    <legend>{{ t.choose_modality }}</legend>
+    <label class="choice">
+      <input type="radio" name="modality" value="online" checked
+             hx-get="/book/slots" hx-target="#slots" hx-include="#booking"
+             onchange="document.getElementById('onsite-info').hidden = true">
+      {{ t.modality_online }}
+    </label>
+    <label class="choice">
+      <input type="radio" name="modality" value="onsite"
+             hx-get="/book/slots" hx-target="#slots" hx-include="#booking"
+             onchange="document.getElementById('onsite-info').hidden = false">
+      {{ t.modality_onsite }}
+    </label>
+    {# §12.1: on-site selection MUST show clinic_onsite_url. #}
+    <p id="onsite-info" hidden class="muted">
+      {% if practice.clinic_onsite_url %}
+        {{ t.onsite_info }} <a href="{{ practice.clinic_onsite_url }}">{{ practice.clinic_onsite_url }}</a>
+      {% else %}{{ t.onsite_no_address }}{% endif %}
+    </p>
+  </fieldset>
+
+  <fieldset>
+    <legend>{{ t.choose_timezone }}</legend>
+    {# Detected client-side; this selector is the visible override (§12.1). #}
+    <select name="tz" hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
+      {% for option in timezones %}
+        <option value="{{ option.iana_name }}" {% if option.iana_name == tz %}selected{% endif %}>
+          {{ option.display_name }}
+        </option>
+      {% endfor %}
+    </select>
+    <p class="muted">{{ t.timezone_detected }}</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>{{ t.choose_slot }}</legend>
+    <div id="slots" hx-get="/book/slots" hx-trigger="load" hx-include="#booking">
+      <p class="muted">…</p>
+    </div>
+  </fieldset>
+</form>
+{% endblock %}
