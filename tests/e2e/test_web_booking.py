@@ -8,6 +8,7 @@ end rather than rolled back.
 
 from __future__ import annotations
 
+import re
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 
@@ -423,6 +424,42 @@ def test_the_booking_page_detects_and_offers_a_timezone(web: TestClient) -> None
     assert "resolvedOptions().timeZone" in body
     assert 'name="tz"' in body
     assert "Europe/Moscow" in body
+
+
+def test_the_booking_page_fills_its_placeholders(web: TestClient) -> None:
+    """§15: a placeholder must never reach a client's screen unfilled."""
+    body = web.get("/book", params={"tz": "Europe/Berlin"}).text
+    legends = re.findall(r"<legend>(.*?)</legend>", body, re.S)
+    assert any("Europe/Berlin" in legend for legend in legends)
+    assert "{timezone}" not in body
+
+
+async def test_the_hold_notice_names_the_hold_window(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """The same rule on step 3: {minutes} is the window the client is racing."""
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+    practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
+
+    web.get("/book")
+    web.post(
+        "/book/hold",
+        data={
+            "csrf_token": _csrf(web),
+            "slot_id": web_slot,
+            "session_type_id": session_type_id,
+            "modality": "online",
+            "tz": "Europe/Moscow",
+        },
+        follow_redirects=False,
+    )
+    body = web.get("/book/details").text
+    notice = re.search(r'<p class="held">(.*?)</p>', body, re.S)
+    assert notice is not None
+    assert str(practice.slot_hold_minutes) in notice.group(1)
+    assert "{minutes}" not in body
 
 
 async def test_onsite_selection_shows_the_clinic_address(

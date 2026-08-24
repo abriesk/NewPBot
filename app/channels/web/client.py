@@ -268,10 +268,24 @@ def build_router() -> APIRouter:
                 .all()
             )
 
+            # Both of these carry a {timezone} placeholder, which the generic
+            # label pass has no zone to fill (§15). Re-resolved here with the
+            # same IANA name the Telegram flow passes.
+            labels = {
+                **context["t"],
+                "timezone_detected": await get_text(
+                    session, context["lang"], "booking.timezone.detected", timezone=tz
+                ),
+                "choose_slot": await get_text(
+                    session, context["lang"], "booking.choose_slot", timezone=tz
+                ),
+            }
+
             return _render(
                 "book.html",
                 {
                     **context,
+                    "t": labels,
                     "session_types": session_types,
                     "timezones": timezones,
                     "tz": tz,
@@ -383,10 +397,23 @@ def build_router() -> APIRouter:
             if reservation is None:
                 return RedirectResponse("/book", status_code=303)
 
+            # `booking.slot.held` carries {minutes}: the hold window the client
+            # is racing, so it must be a number and not the placeholder (§15).
+            labels = {
+                **context["t"],
+                "slot_held": await get_text(
+                    session,
+                    context["lang"],
+                    "booking.slot.held",
+                    minutes=context["practice"].slot_hold_minutes,
+                ),
+            }
+
             return _render(
                 "details.html",
                 {
                     **context,
+                    "t": labels,
                     "signed_in": client is not None,
                     "display_name": client.display_name if client else None,
                 },
