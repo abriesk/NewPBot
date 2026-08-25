@@ -89,6 +89,10 @@ auth:
 request:
   title: ""                                      # TODO: translate
   thread: ""                                     # TODO: translate
+  open: ""                                       # TODO: translate
+  add_note: ""                                   # TODO: translate
+  note_ask: ""                                   # TODO: translate
+  when: ""                                       # TODO: translate
 
 intent:
   request.proposal.client.body: "Նոր առաջարկ թերապևտից՝ {time}"   # TODO: add {uuid}

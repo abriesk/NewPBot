@@ -114,6 +114,9 @@ async def _labels(session: AsyncSession, lang: str) -> dict[str, str]:
         "link_sent": "auth.link_sent",
         "your_request": "request.title",
         "thread": "request.thread",
+        "add_note": "request.add_note",
+        "note_ask": "request.note_ask",
+        "when": "request.when",
         "accept": "intent.request.proposal.client.action.accept",
         "counter": "intent.request.proposal.client.action.counter",
         "decline": "intent.request.proposal.client.action.decline",
@@ -620,6 +623,7 @@ def build_router() -> APIRouter:
 
             # An emailed link carries a view token; a browser session is the
             # other way in (§12.1: auth required).
+            arrived_by_token = False
             if client is None and token:
                 try:
                     result = await consume_token(session, token, TokenPurpose.view_request)
@@ -627,6 +631,7 @@ def build_router() -> APIRouter:
                     result = None
                 if result and result.client_id:
                     client = await _client_by_id(session, result.client_id)
+                    arrived_by_token = client is not None
 
             if client is None:
                 return RedirectResponse("/auth/email", status_code=303)
@@ -660,20 +665,33 @@ def build_router() -> APIRouter:
             thread = await _thread(session, booking_request.id, context["lang"])
             turn = await booking.whose_turn(session, booking_request.id)
 
-            return _render(
+            # §7.1: `scheduled_start` only exists once the therapist approved,
+            # so before that the time to show is the slot being held -- and in
+            # the zone the client picked, which the request remembers.
+            when = await booking.requested_start(session, booking_request)
+            zone = booking_request.client_timezone or client.timezone
+
+            response = _render(
                 "request.html",
                 {
                     **context,
                     "req": booking_request,
                     "status_label": booking_request.status.value,
-                    "scheduled": _format(booking_request.scheduled_start, context),
+                    "when": _format(when, context, zone) or booking_request.desired_time_text,
                     "join_url": await notifications.join_info(session, booking_request)
                     if booking_request.status.value == "confirmed"
                     else None,
                     "thread": thread,
                     "can_respond": turn is SenderType.client,
+                    "can_note": booking_request.status in booking.NOTE_STATUSES,
                 },
             )
+            if arrived_by_token:
+                # The token is spent (§6.2). A session is what makes the same
+                # link work when the client opens it again an hour later, and
+                # what lets the form on this page post back at all.
+                issue_client_session(response, client.id)
+            return response
 
     @router.post("/r/{uuid}/{action}", include_in_schema=False)
     async def request_action(
@@ -683,10 +701,10 @@ def build_router() -> APIRouter:
         body: str = Form(""),
         csrf_token: str = Form("", alias=CSRF_FIELD),
     ) -> Response:
-        """§12.1: accept | counter | decline."""
+        """§12.1: accept | counter | decline | note."""
         if not csrf_ok(request, csrf_token):
             return Response(status_code=403)
-        if action not in ("accept", "counter", "decline"):
+        if action not in ("accept", "counter", "decline", "note"):
             return Response(status_code=404)
 
         async with unit_of_work() as session:
@@ -708,6 +726,9 @@ def build_router() -> APIRouter:
                     await booking.client_counter(
                         session, booking_request.id, body_text=body or None
                     )
+                elif action == "note":
+                    # §7.1: information, not a transition.
+                    await booking.client_note(session, booking_request.id, body_text=body)
                 else:
                     await booking.client_decline(session, booking_request.id)
             except DomainError:
@@ -921,9 +942,14 @@ async def _thread(session: AsyncSession, request_id: int, lang: str) -> list[dic
     ]
 
 
-def _format(value: datetime | None, context: dict[str, Any]) -> str | None:
-    """A stored instant in the practice zone. Storage stays UTC (DESIGN.md §8)."""
+def _format(value: datetime | None, context: dict[str, Any], tz: str | None = None) -> str | None:
+    """A stored instant in the reader's zone. Storage stays UTC (DESIGN.md §8).
+
+    `tz` is the zone the client chose when booking, kept on the request. The
+    practice zone is only the fallback: showing a Moscow client a Yerevan time
+    with no label is how someone misses a session by an hour.
+    """
     if value is None:
         return None
-    zone = ZoneInfo(context["practice"].timezone)
-    return str(value.astimezone(zone).strftime("%Y-%m-%d %H:%M"))
+    zone = ZoneInfo(tz or context["practice"].timezone)
+    return f"{value.astimezone(zone).strftime('%Y-%m-%d %H:%M')} ({zone.key})"

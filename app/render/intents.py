@@ -47,6 +47,7 @@ CATALOGUE: dict[str, IntentSpec] = {
         # Reusing the in-flow confirmation copy rather than inventing a key:
         # §15 forbids new names for anything the catalogue already covers.
         body_key="booking.submitted",
+        actions=("open",),
         email_subject_key="email.subject.request_update",
     ),
     "request.proposal.client": IntentSpec(
@@ -65,6 +66,7 @@ CATALOGUE: dict[str, IntentSpec] = {
     "request.confirmed.client": IntentSpec(
         key="request.confirmed.client",
         body_key="intent.request.confirmed.client.body",
+        actions=("open",),
         email_subject_key="email.subject.request_confirmed",
     ),
     "request.confirmed.admin": IntentSpec(
@@ -94,11 +96,17 @@ CATALOGUE: dict[str, IntentSpec] = {
         # Per-offset keys exist for 24h and 1h; anything else uses the generic
         # body. See body_key_for_reminder below.
         body_key="intent.reminder.client.body",
+        actions=("open",),
         email_subject_key="email.subject.reminder",
     ),
     "waitlist.joined.client": IntentSpec(
         key="waitlist.joined.client",
         body_key="intent.waitlist.joined.client.body",
+        email_subject_key="email.subject.request_update",
+    ),
+    "request.note.admin": IntentSpec(
+        key="request.note.admin",
+        body_key="admin.intent.request.note.admin.body",
         email_subject_key="email.subject.request_update",
     ),
     "waitlist.joined.admin": IntentSpec(
@@ -129,6 +137,9 @@ ACTION_LABEL_KEYS: dict[tuple[str, str], str] = {
     ("request.proposal.client", "accept"): "intent.request.proposal.client.action.accept",
     ("request.proposal.client", "counter"): "intent.request.proposal.client.action.counter",
     ("request.proposal.client", "decline"): "intent.request.proposal.client.action.decline",
+    ("request.submitted.client", "open"): "request.open",
+    ("request.confirmed.client", "open"): "request.open",
+    ("reminder.client", "open"): "request.open",
     ("auth.login_link.client", "open"): "intent.auth.login_link.client.action.open",
     ("auth.link_channel.client", "open"): "intent.auth.login_link.client.action.telegram",
     ("request.submitted.admin", "approve"): "admin.request.approve",

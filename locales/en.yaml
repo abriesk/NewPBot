@@ -97,6 +97,10 @@ auth:
 request:
   title: "Your request"
   thread: "Conversation"
+  open: "Open your booking"
+  add_note: "Add information"
+  note_ask: "Anything you would like me to know before the session?"
+  when: "When"
 
 intent:
   request.proposal.client.body: "A time has been proposed for your request {uuid}: {time}."
@@ -166,4 +170,5 @@ admin:
   intent.request.submitted.admin.body: "New request {uuid} from {name}: {session_type}, {modality}, requested {time}."
   intent.request.counter.admin.body: "Client replied on request {uuid}: {time} {note}"
   intent.request.confirmed.admin.body: "Request {uuid} confirmed for {time}."
+  intent.request.note.admin.body: "{name} added information to request {uuid}. Open the request to read it."
   intent.waitlist.joined.admin.body: "New waitlist entry {uuid} from {name}."

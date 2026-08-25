@@ -285,6 +285,87 @@ async def test_whose_turn_is_derived_from_the_last_sender(
     assert await booking.whose_turn(db, request.id) is SenderType.admin
 
 
+# --- Client notes (§7.1, status-neutral) ------------------------------------
+
+
+async def test_a_note_records_the_message_without_moving_the_status(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    request = await _submit(db, client, session_type_id, future_slot)
+    noted = await booking.client_note(db, request.id, body_text="  I may be five minutes late  ")
+
+    assert noted.status is RequestStatus.pending
+    message = (
+        (
+            await db.execute(
+                select(NegotiationMessage).where(NegotiationMessage.request_id == request.id)
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert message.sender is SenderType.client
+    assert message.kind is NegotiationKind.note
+    assert message.body_text == "I may be five minutes late"
+
+
+async def test_a_note_is_accepted_while_the_therapist_can_still_act(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    request = await _negotiating(db, client, session_type_id, future_slot)
+    assert (await booking.client_note(db, request.id, body_text="a thought")).status is (
+        RequestStatus.negotiating
+    )
+
+    confirmed = await booking.client_accept(db, request.id)
+    assert (await booking.client_note(db, confirmed.id, body_text="another")).status is (
+        RequestStatus.confirmed
+    )
+
+
+async def test_a_note_on_a_finished_request_is_refused(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """Nobody is going to read it."""
+    request = await _submit(db, client, session_type_id, future_slot)
+    await booking.admin_reject(db, request.id)
+
+    with pytest.raises(InvalidTransition):
+        await booking.client_note(db, request.id, body_text="please reconsider")
+
+
+async def test_an_empty_note_is_refused(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    request = await _submit(db, client, session_type_id, future_slot)
+    with pytest.raises(InvalidTransition):
+        await booking.client_note(db, request.id, body_text="   ")
+
+
+async def test_a_note_is_audited_by_identifier_only(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """Hard rule 8: the audit log names the request, never the content."""
+    request = await _submit(db, client, session_type_id, future_slot)
+    await booking.client_note(db, request.id, body_text="something private")
+
+    entry = (
+        (
+            await db.execute(
+                select(AuditLog)
+                .where(AuditLog.action == "request.note")
+                .order_by(AuditLog.id.desc())
+                .limit(1)
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert entry.entity_id == str(request.uuid)
+    assert entry.actor_type is ActorType.client
+    assert "something private" not in str(entry.meta)
+
+
 async def test_client_decline_rejects_and_releases(
     db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
 ) -> None:

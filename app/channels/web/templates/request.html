@@ -8,7 +8,9 @@
 <div class="card">
   <p><span class="status">{{ status_label }}</span></p>
   <div class="meta">
-    {% if scheduled %}<p>{{ scheduled }}</p>{% endif %}
+    {# The time is the point of the page: shown for a pending request too, in
+       the zone the client booked in (§7.1, DESIGN.md §8). #}
+    {% if when %}<p class="when"><strong>{{ t.when }}</strong> {{ when }}</p>{% endif %}
     {% if join_url %}<p><a href="{{ join_url }}">{{ join_url }}</a></p>{% endif %}
     <p class="uuid"><code>{{ req.uuid }}</code></p>
   </div>
@@ -25,6 +27,18 @@
     </li>
   {% endfor %}
 </ol>
+{% endif %}
+
+{% if can_note %}
+{# §7.1: information, not a transition. Available while the therapist can still
+   act on what it says. #}
+<form method="post" action="/r/{{ req.uuid }}/note" class="card">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  <label>{{ t.note_ask }}
+    <textarea name="body" rows="3" required></textarea>
+  </label>
+  <button type="submit" class="secondary">{{ t.add_note }}</button>
+</form>
 {% endif %}
 
 {% if can_respond %}

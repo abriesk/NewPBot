@@ -67,6 +67,16 @@ class RequestCounter(DomainEvent):
 
 
 @dataclass(frozen=True, slots=True)
+class RequestNote(DomainEvent):
+    """§7.1: the client added information. Not a transition -- the status is
+    whatever it was. The body is not carried: it stays in the admin UI."""
+
+    request_id: int
+    request_uuid: UUID
+    intent_key: str = field(init=False, default="request.note")
+
+
+@dataclass(frozen=True, slots=True)
 class RequestRejected(DomainEvent):
     request_id: int
     request_uuid: UUID

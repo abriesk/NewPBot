@@ -86,6 +86,10 @@ auth:
 request:
   title: ""                                      # TODO: translate
   thread: ""                                     # TODO: translate
+  open: "Открыть вашу заявку"
+  add_note: "Добавить информацию"
+  note_ask: "Хотите что-то сообщить перед консультацией?"
+  when: "Когда"
 
 intent:
   request.proposal.client.body: "Предложено время по вашей заявке {uuid}: {time}."

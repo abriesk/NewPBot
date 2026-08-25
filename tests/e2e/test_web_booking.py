@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 import pytest_asyncio
@@ -333,6 +334,95 @@ async def test_the_magic_link_flow_signs_a_client_in(
     await committed.execute(delete(Identity).where(Identity.id == identity.id))
     await committed.execute(delete(Client).where(Client.id == identity.client_id))
     await committed.commit()
+
+
+async def test_a_client_can_open_a_request_from_a_link_and_add_information(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """§12.1: the emailed link opens the request, and §7.1's note is postable
+    from the page it opens."""
+    from app.core.enums import NegotiationKind
+    from app.core.models import NegotiationMessage
+    from app.core.services.clients import issue_token
+
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+    web.get("/book")
+    web.post(
+        "/book/hold",
+        data={
+            "csrf_token": _csrf(web),
+            "slot_id": web_slot,
+            "session_type_id": session_type_id,
+            "modality": "online",
+            "tz": "Europe/Moscow",
+        },
+        follow_redirects=False,
+    )
+    web.get("/book/details")
+    web.post("/book", data={"csrf_token": _csrf(web), "problem": "x", "email": EMAIL})
+    await committed.rollback()
+
+    identity = (
+        await committed.execute(select(Identity).where(Identity.external_id == EMAIL))
+    ).scalar_one()
+    request = (
+        await committed.execute(
+            select(BookingRequest).where(BookingRequest.client_id == identity.client_id)
+        )
+    ).scalar_one()
+
+    # Read off what the assertions need: the rollback below expires the objects.
+    request_id, request_uuid = request.id, request.uuid
+    assert request.scheduled_start is None  # not approved, so no scheduled time
+
+    # The link as the notification builds it: a view token, no session yet.
+    raw = await issue_token(
+        committed, TokenPurpose.view_request, client_id=identity.client_id
+    )
+    await committed.commit()
+
+    web.cookies.delete(CLIENT_COOKIE)
+    page = web.get(f"/r/{request_uuid}", params={"token": raw})
+    assert page.status_code == 200
+    assert f"/r/{request_uuid}/note" in page.text
+
+    # The time is the point of the page, and it is shown before approval too --
+    # `scheduled_start` is not set yet, so it comes from the held slot (§7.1).
+    slot = (await committed.execute(select(Slot).where(Slot.id == web_slot))).scalar_one()
+    local = slot.starts_at.astimezone(ZoneInfo("Europe/Moscow"))
+    assert local.strftime("%Y-%m-%d %H:%M") in page.text
+    # In the zone the client booked in, and saying which zone that is.
+    assert "Europe/Moscow" in page.text
+    # Consuming the token started a session, so the form on the page can post.
+    assert web.cookies.get(CLIENT_COOKIE)
+
+    posted = web.post(
+        f"/r/{request_uuid}/note",
+        data={"csrf_token": _csrf(web), "body": "I may be five minutes late"},
+        follow_redirects=False,
+    )
+    assert posted.status_code == 303
+
+    await committed.rollback()
+    note = (
+        await committed.execute(
+            select(NegotiationMessage).where(
+                NegotiationMessage.request_id == request_id,
+                NegotiationMessage.kind == NegotiationKind.note,
+            )
+        )
+    ).scalar_one()
+    assert note.body_text == "I may be five minutes late"
+    assert web.get(f"/r/{request_uuid}").text.count("five minutes late") == 1
+
+    # The status did not move (§7.1).
+    still = (
+        await committed.execute(select(BookingRequest).where(BookingRequest.id == request_id))
+    ).scalar_one()
+    assert still.status is RequestStatus.pending
+    web.cookies.delete(CLIENT_COOKIE)
 
 
 async def test_the_login_link_is_queued_to_the_address_it_is_about(

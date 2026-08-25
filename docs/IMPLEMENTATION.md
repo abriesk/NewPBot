@@ -541,6 +541,8 @@ CREATE TABLE audit_log (
 
 Any transition not in this table **MUST** raise `InvalidTransition` and change nothing. There is no path from `confirmed` back to `negotiating`.
 
+A **client note** is deliberately not in the table, because it is not a transition: it inserts `negotiation_message(client, note)`, emits `request.note`, and leaves the status exactly as it was. It is accepted while a request is `pending`, `negotiating` or `confirmed` — the states where the therapist can still act on what it says — and **MUST** be refused once the request is terminal. The note body stays in the admin UI: the notification says a note arrived and names the request, nothing more.
+
 ### 7.2 Slot
 
 | From | Event | To | Guard |
@@ -651,16 +653,17 @@ Each intent has a key, a recipient, a payload schema, and available actions. Tra
 | Intent key | To | Payload | Actions |
 |---|---|---|---|
 | `request.submitted.admin` | admin | uuid, client name, session type, modality, requested time, problem | approve, propose, reject |
-| `request.submitted.client` | client | uuid, session type, requested time | — |
+| `request.submitted.client` | client | uuid, session type, requested time | open |
 | `request.proposal.client` | client | uuid, proposed_start, note | accept, counter, decline |
 | `request.counter.admin` | admin | uuid, proposed_start, note, thread | approve, propose, reject |
-| `request.confirmed.client` | client | uuid, scheduled_start, session type, modality, join info | — |
+| `request.confirmed.client` | client | uuid, scheduled_start, session type, modality, join info | open |
 | `request.confirmed.admin` | admin | uuid, scheduled_start, client | — |
 | `request.rejected.client` | client | uuid, reason | — |
 | `request.expired.client` | client | uuid | — |
 | `request.cancelled.client` | client | uuid, scheduled_start, reason | — |
-| `reminder.client` | client | uuid, scheduled_start, offset_min, modality, join info | — |
+| `reminder.client` | client | uuid, scheduled_start, offset_min, modality, join info | open |
 | `waitlist.joined.client` | client | — | — |
+| `request.note.admin` | admin | uuid | — |
 | `waitlist.joined.admin` | admin | uuid, problem, contact note | — |
 | `auth.login_link.client` | client (email) | login url, telegram deep link | open |
 | `auth.link_channel.client` | client | telegram deep link | open |
@@ -720,10 +723,13 @@ The renderer **MUST** have golden tests including: Russian text containing `.`, 
 | POST | `/waitlist` | Join the waitlist |
 | GET | `/r/{uuid}` | Request status and negotiation thread (auth required) |
 | POST | `/r/{uuid}/accept` \| `/counter` \| `/decline` | Negotiation actions |
+| POST | `/r/{uuid}/note` | Add information to a request (§7.1); status unchanged |
 | GET | `/auth/email` | Request a magic link |
 | GET | `/auth/callback?token=` | Consume a login token |
 
 Timezone is detected client-side and posted with the booking; a visible selector allows override. On-site selection **MUST** show `clinic_onsite_url`.
+
+A message *about a request* **MUST** link to `/r/{uuid}` carrying a `view_request` token (§6.2), so following it opens the request rather than a sign-in form. Consuming that token starts a client session, which is what makes the link still work when it is opened a second time — the token itself is single-use, as §6.2 requires of every token.
 
 ### 12.2 Admin routes
 

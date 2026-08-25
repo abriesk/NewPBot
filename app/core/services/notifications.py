@@ -29,13 +29,14 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.enums import Channel, Modality, OutboxStatus
+from app.core.enums import Channel, Modality, OutboxStatus, TokenPurpose
 from app.core.events import (
     DomainEvent,
     RequestCancelled,
     RequestConfirmed,
     RequestCounter,
     RequestExpired,
+    RequestNote,
     RequestProposal,
     RequestRejected,
     RequestSubmitted,
@@ -49,9 +50,10 @@ from app.core.models import (
     Identity,
     OutboxMessage,
     SessionType,
-    Slot,
     WaitlistEntry,
 )
+from app.core.services import booking
+from app.core.services.clients import issue_token
 from app.core.services.settings import get_practice
 
 logger = logging.getLogger(__name__)
@@ -94,16 +96,6 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
-async def _slot_start(session: AsyncSession, slot_id: int | None) -> datetime | None:
-    """When the held slot begins. A slot request has no `scheduled_start` until
-    it is approved (§7.1), but the therapist is being asked about a time."""
-    if slot_id is None:
-        return None
-    return (
-        await session.execute(select(Slot.starts_at).where(Slot.id == slot_id))
-    ).scalar_one_or_none()
-
-
 async def _session_type_code(session: AsyncSession, session_type_id: int) -> str:
     return str(
         (
@@ -120,7 +112,7 @@ async def envelopes_for(session: AsyncSession, event: DomainEvent) -> list[Envel
         # the free-text path is the only one with `desired_time_text`, so a slot
         # booking has to name the slot it holds -- otherwise the therapist is
         # asked to approve a request whose time the message does not mention.
-        requested = request.scheduled_start or await _slot_start(session, request.slot_id)
+        requested = await booking.requested_start(session, request)
         return [
             Envelope(
                 "request.submitted.admin",
@@ -205,6 +197,19 @@ async def envelopes_for(session: AsyncSession, event: DomainEvent) -> list[Envel
                     "time": _iso(event.proposed_start),
                     "note": None,
                 },
+                request_id=request.id,
+            )
+        ]
+
+    if isinstance(event, RequestNote):
+        request = await _request(session, event.request_id)
+        return [
+            Envelope(
+                "request.note.admin",
+                Recipient.admin,
+                # §10: the identifier only. The note itself is read in the
+                # admin UI, like every other negotiation body (§13.4).
+                {"uuid": str(request.uuid), "name": request.display_name},
                 request_id=request.id,
             )
         ]
@@ -394,6 +399,17 @@ async def enqueue(session: AsyncSession, envelope: Envelope) -> list[OutboxMessa
             if channel == Channel.email
             else envelope.payload
         )
+        if channel == Channel.email and client_id is not None and envelope.request_id is not None:
+            # §12.1: an email about a request opens the request. Without this
+            # the link lands on the sign-in form, which is a dead end for the
+            # client it was sent to. Minted per row and single-use (§6.2);
+            # consuming it starts a session, so a second visit still works.
+            payload = {
+                **payload,
+                "view_token": await issue_token(
+                    session, TokenPurpose.view_request, client_id=client_id
+                ),
+            }
         dedupe = (
             f"{envelope.dedupe_scope}:{channel.value}:{address}" if envelope.dedupe_scope else None
         )

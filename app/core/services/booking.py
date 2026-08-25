@@ -53,12 +53,20 @@ from app.core.events import (
     RequestConfirmed,
     RequestCounter,
     RequestExpired,
+    RequestNote,
     RequestProposal,
     RequestRejected,
     RequestSubmitted,
     collect,
 )
-from app.core.models import AuditLog, BookingRequest, NegotiationMessage, Reminder, SessionType
+from app.core.models import (
+    AuditLog,
+    BookingRequest,
+    NegotiationMessage,
+    Reminder,
+    SessionType,
+    Slot,
+)
 from app.core.policies import now_utc, pending_expiry, reminder_schedule
 from app.core.services import slots as slot_service
 from app.core.services.settings import get_practice
@@ -69,6 +77,17 @@ from app.core.services.settings import get_practice
 #: it, not just the one that remembered to ask.
 SUBMISSIONS_PER_HOUR = 5
 SUBMISSION_WINDOW = timedelta(hours=1)
+
+#: §7.1: where a client note is accepted. Not part of `ALLOWED` on purpose --
+#: a note is not a transition, and putting it there would invite treating it
+#: like one.
+NOTE_STATUSES = frozenset(
+    {RequestStatus.pending, RequestStatus.negotiating, RequestStatus.confirmed}
+)
+
+#: Long enough for anything worth reading before a session, short enough that
+#: the column is not an essay box.
+NOTE_MAX_CHARS = 2000
 
 #: §7.1, as data. Keeping it declarative means a rejected transition is a
 #: lookup miss rather than a forgotten `elif`.
@@ -121,6 +140,22 @@ async def _get(session: AsyncSession, request_id: int) -> BookingRequest:
     if request is None:
         raise NotFound(f"booking request {request_id}")
     return request
+
+
+async def requested_start(session: AsyncSession, request: BookingRequest) -> datetime | None:
+    """The instant this request is about.
+
+    `scheduled_start` is only set at approval (§7.1), so before that the answer
+    is the slot being held. A free-text request has neither, and its wording
+    lives in `desired_time_text` -- the caller decides what to do with that.
+    """
+    if request.scheduled_start is not None:
+        return request.scheduled_start
+    if request.slot_id is None:
+        return None
+    return (
+        await session.execute(select(Slot.starts_at).where(Slot.id == request.slot_id))
+    ).scalar_one_or_none()
 
 
 async def get_by_uuid(session: AsyncSession, request_uuid: UUID) -> BookingRequest:
@@ -599,6 +634,40 @@ async def client_counter(
             request_id=request.id, request_uuid=request.uuid, proposed_start=proposed_start
         ),
     )
+    return request
+
+
+async def client_note(
+    session: AsyncSession, request_id: int, *, body_text: str
+) -> BookingRequest:
+    """§7.1: the client adds information. The status does not move.
+
+    Allowed while the therapist can still act on what it says, and refused once
+    the request is terminal -- a note on a rejected request would be read by
+    nobody. The body stays here and in the admin UI: §13.4 keeps negotiation
+    bodies out of email, and the notification only says a note arrived.
+    """
+    request = await _get(session, request_id)
+    if request.status not in NOTE_STATUSES:
+        raise InvalidTransition("booking_request", request.status.value, "client_note")
+
+    body = body_text.strip()
+    if not body:
+        raise InvalidTransition("booking_request", request.status.value, "client_note")
+
+    session.add(
+        NegotiationMessage(
+            request_id=request.id,
+            sender=SenderType.client,
+            kind=NegotiationKind.note,
+            body_text=body[:NOTE_MAX_CHARS],
+        )
+    )
+    await session.flush()
+
+    # Hard rule 8: the identifier, never the content.
+    await _audit(session, request, ActorType.client, "request.note")
+    collect(session, RequestNote(request_id=request.id, request_uuid=request.uuid))
     return request
 
 

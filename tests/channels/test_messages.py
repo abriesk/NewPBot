@@ -40,6 +40,7 @@ def test_every_intent_in_section_10_has_a_spec() -> None:
         "waitlist.joined.admin",
         "auth.login_link.client",
         "auth.link_channel.client",
+        "request.note.admin",
         "system.delivery_failed.admin",
     }
     assert set(CATALOGUE) == expected
@@ -49,8 +50,11 @@ def test_the_actions_match_section_10() -> None:
     assert spec_for("request.proposal.client").actions == ("accept", "counter", "decline")
     assert spec_for("request.submitted.admin").actions == ("approve", "propose", "reject")
     assert spec_for("request.counter.admin").actions == ("approve", "propose", "reject")
+    # §10 gives the client's own request messages a way back into the request.
+    for key in ("request.submitted.client", "request.confirmed.client", "reminder.client"):
+        assert spec_for(key).actions == ("open",)
     # These carry no actions in §10.
-    for key in ("request.confirmed.client", "reminder.client", "request.expired.client"):
+    for key in ("request.expired.client", "request.cancelled.client", "request.note.admin"):
         assert spec_for(key).actions == ()
 
 
@@ -175,6 +179,38 @@ async def test_a_telegram_message_without_a_request_gets_no_dead_buttons(
         channel=Channel.telegram,
         tz="UTC",
         base_url="https://example.test",
+    )
+    assert message.actions == []
+
+
+async def test_an_email_link_carries_the_view_token(db: AsyncSession) -> None:
+    """§12.1: following it opens the request instead of the sign-in form."""
+    message = await render(
+        db,
+        intent_key="request.confirmed.client",
+        payload={"uuid": "abc-123", "time": WHEN.isoformat(), "view_token": "tok en/+"},
+        locale="en",
+        channel=Channel.email,
+        tz="UTC",
+        base_url="https://example.test",
+    )
+    assert message.actions
+    # Percent-encoded: a raw token is url-safe base64, but the link must not
+    # break if that ever changes.
+    assert message.actions[0].url == "https://example.test/r/abc-123?token=tok%20en/%2B"
+
+
+async def test_the_same_intent_gets_no_open_button_on_telegram(db: AsyncSession) -> None:
+    """The bot is the interface there, and a Telegram client has no web session."""
+    message = await render(
+        db,
+        intent_key="request.confirmed.client",
+        payload={"uuid": "abc-123", "time": WHEN.isoformat()},
+        locale="en",
+        channel=Channel.telegram,
+        tz="UTC",
+        base_url="https://example.test",
+        request_id=7,
     )
     assert message.actions == []
 

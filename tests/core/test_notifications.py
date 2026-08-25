@@ -90,6 +90,74 @@ async def test_a_submission_names_the_time_it_is_asking_about(
         ), key
 
 
+async def test_a_note_tells_the_admin_without_carrying_what_it_says(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """§7.1 and §13.4: she is told a note arrived and opens it to read it."""
+    request = await _submit(db, client, session_type_id, future_slot)
+    await notifications.publish(db)
+    await booking.client_note(db, request.id, body_text="deeply private")
+    await notifications.publish(db)
+
+    rows = await _rows(db, "request.note.admin")
+    assert rows
+    for row in rows:
+        assert row.payload["uuid"] == str(request.uuid)
+        assert "deeply private" not in str(row.payload)
+
+
+async def test_an_email_about_a_request_carries_a_way_into_it(
+    db: AsyncSession,
+    client: Client,
+    session_type_id: int,
+    future_slot: Slot,
+    email_enabled: None,
+) -> None:
+    """§12.1: the link opens the request, not a sign-in form."""
+    from app.core.enums import TokenPurpose
+    from app.core.models import AuthToken
+
+    # An email-only client, since §13.3 would otherwise prefer Telegram.
+    by_email = await resolve_client(db, Channel.email, "viewer@example.test", verified=True)
+    await _submit(db, by_email, session_type_id, future_slot)
+    await notifications.publish(db)
+
+    emails = [
+        row for row in await _rows(db, "request.submitted.client") if row.channel is Channel.email
+    ]
+    assert emails
+    minted = (
+        (
+            await db.execute(
+                select(AuthToken).where(
+                    AuthToken.client_id == by_email.id,
+                    AuthToken.purpose == TokenPurpose.view_request,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(minted) == len(emails), "every email link needs its own single-use token"
+    assert all(row.payload.get("view_token") for row in emails)
+
+    assert client.id  # the Telegram half is the test below
+
+
+async def test_a_telegram_row_carries_no_view_token(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The bot is the interface there, and a token in a payload nobody follows
+    is a token to leak."""
+    await _submit(db, client, session_type_id, future_slot)
+    await notifications.publish(db)
+
+    rows = await _rows(db, "request.submitted.client")
+    telegram = [row for row in rows if row.channel is Channel.telegram]
+    assert telegram
+    assert all("view_token" not in row.payload for row in telegram)
+
+
 async def test_rows_are_written_in_the_same_transaction_as_the_change(
     db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
 ) -> None:

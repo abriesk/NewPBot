@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
+from urllib.parse import quote
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -151,6 +152,18 @@ async def _join_lines(
     return [await get_text(session, locale, key, **{**fmt, "url": url})]
 
 
+def _request_url(base_url: str, payload: dict[str, Any]) -> str:
+    """§12.1: a link about a request opens the request.
+
+    The `view_request` token the notification service minted rides along, so the
+    client is not sent to a sign-in form to reach their own booking. Without one
+    the link still works for anyone already signed in.
+    """
+    url = f"{base_url}/r/{payload.get('uuid', '')}"
+    token = payload.get("view_token")
+    return f"{url}?token={quote(str(token))}" if token else url
+
+
 async def _actions(
     session: AsyncSession,
     intent_key: str,
@@ -164,13 +177,17 @@ async def _actions(
     if not spec.actions:
         return []
 
-    request_uuid = payload.get("uuid", "")
     actions: list[Action] = []
 
     for key in spec.actions:
         label = await get_text(session, locale, action_label_key(intent_key, key))
 
         if channel == Channel.telegram:
+            # "Open your booking" is an email affordance (§13.4: email gets
+            # links, not interactivity). In Telegram the conversation is the
+            # interface, and a client there has no web session to open with.
+            if key == "open":
+                continue
             # §9: `<action>:<request_id>`, comfortably inside 64 bytes because
             # the id is short and the handler looks the rest up. Without the id
             # the router has nothing to act on and the button does nothing, so
@@ -182,6 +199,8 @@ async def _actions(
             )
         else:
             url = payload.get("url") if key == "open" else None
-            actions.append(Action(key=key, label=label, url=url or f"{base_url}/r/{request_uuid}"))
+            actions.append(
+                Action(key=key, label=label, url=url or _request_url(base_url, payload))
+            )
 
     return actions
