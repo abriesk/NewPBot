@@ -30,6 +30,9 @@ common:
 menu:
   consultation: "Запись на консультацию"
   home: "Домой"
+  appointments: "Мои записи"
+  appointments.none: "Сейчас у вас нет активных записей."
+  appointments.item: "{status} — {time}\n{session_type}, {modality}"
 
 content:
   topic.work_terms.title: "Условия работы"
@@ -86,6 +89,9 @@ auth:
 request:
   title: ""                                      # TODO: translate
   thread: ""                                     # TODO: translate
+  status.pending: "Ожидает подтверждения"
+  status.negotiating: "Согласование времени"
+  status.confirmed: "Подтверждена"
   open: "Открыть вашу заявку"
   add_note: "Добавить информацию"
   note_ask: "Хотите что-то сообщить перед консультацией?"

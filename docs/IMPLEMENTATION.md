@@ -751,7 +751,7 @@ All under `/admin`, session-authenticated, CSRF-protected.
 
 1. `/start` — resolve or create the client and Telegram identity. If a `link_<token>` payload is present, consume it and attach this Telegram identity to the existing client instead.
 2. Language selection (`Русский` / `Հայերեն`) on first contact only; stored on the client.
-3. Persistent main keyboard: one button per menu topic, plus Consultation.
+3. Persistent main keyboard: one button per menu topic, plus Consultation and My appointments.
 4. Topic button → send that topic's published blocks in order, as separate messages.
 5. Consultation → `resolve_booking_mode()` and follow the resolved path (slots picker / free-text / waitlist).
 6. Slot picker: inline keyboard grouped by day, times in the client's timezone; timezone chosen from `timezone_option` if unknown.
@@ -760,6 +760,9 @@ All under `/admin`, session-authenticated, CSRF-protected.
    - **Email** — ask for an address and reject anything not shaped like one. The address is **not** trusted on arrival: `auth.login_link.client` is sent to it, and following that link is what sets `verified_at` (§6.2). Once verified, §13.3 delivers confirmations and reminders to both channels. Verification is never a precondition for booking — the request is submitted either way.
    - **Other** — free text, stored in `contact_note` as before.
 8. Submit → confirmation carrying the request UUID.
+9. My appointments → every request of the client that is `pending`, `negotiating` or `confirmed`, newest first, at most three. Each shows its status, its time in the client's timezone, the session type and the modality; a confirmed online session also shows its join link (§10). `problem_text` is **MUST NOT** be echoed back (hard rule 8) — the client wrote it, but this service does not repeat it into a chat someone else may be reading over their shoulder. When exactly one of the listed requests is waiting on the client's answer, the message carries that request's accept / counter / decline buttons, so a proposal buried in the chat history is still answerable. This view changes nothing: no transition, no outbox row.
+
+A message whose text exactly matches a main-keyboard label is **navigation, not an answer**: any half-finished flow is abandoned and the button's action runs. Without this rule a client who taps a topic while being asked to describe their problem has the button's label stored as the problem, which is what the flow-step check would otherwise do with it.
 
 Multi-step input state is stored in the database against the client, **not** in aiogram FSM memory, so a restart does not lose a half-finished booking.
 

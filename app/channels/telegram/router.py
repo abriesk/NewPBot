@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels.telegram import keyboards as kb
 from app.config import get_settings
-from app.core.enums import Channel, Modality, TokenPurpose
+from app.core.enums import Channel, Modality, RequestStatus, SenderType, TokenPurpose
 from app.core.errors import DomainError, SlotUnavailable, TokenInvalid
 from app.core.models import BookingRequest, Client, Practice, SessionType, TimezoneOption
 from app.core.policies import BookingPath, now_utc, resolve_booking_mode
@@ -201,18 +201,35 @@ async def _start(session: AsyncSession, update: Update) -> Reply:
 async def _menu(
     session: AsyncSession, client: Client, *, greeting_key: str = "common.welcome"
 ) -> Reply:
-    """§13.1 step 3: one button per menu topic, plus Consultation."""
+    """§13.1 step 3: one button per menu topic, plus Consultation and My
+    appointments."""
     await flow.set_step(session, client.id, Channel.telegram, Step.idle, replace={})
-    topics = await content.list_menu_topics(session)
-    titles = [
-        await get_text(session, client.language, f"content.topic.{topic.code}.title")
-        for topic in topics
-    ]
-    consultation = await get_text(session, client.language, "menu.consultation")
+    titles = await _menu_labels(session, client)
     return Reply(
         await get_text(session, client.language, greeting_key),
-        keyboard=kb.main_menu(titles, consultation),
+        keyboard=kb.main_menu(
+            titles["topics"],
+            titles["consultation"],
+            titles["appointments"],
+        ),
     )
+
+
+async def _menu_labels(session: AsyncSession, client: Client) -> dict[str, Any]:
+    """Every label the main keyboard shows, in the client's language.
+
+    One source for both drawing the keyboard and recognising a press: §13.1
+    matches a button by its exact text, so the two must never drift.
+    """
+    topics = await content.list_menu_topics(session)
+    return {
+        "topics": [
+            await get_text(session, client.language, f"content.topic.{topic.code}.title")
+            for topic in topics
+        ],
+        "consultation": await get_text(session, client.language, "menu.consultation"),
+        "appointments": await get_text(session, client.language, "menu.appointments"),
+    }
 
 
 # --- Text -------------------------------------------------------------------
@@ -221,6 +238,13 @@ async def _menu(
 async def _text(session: AsyncSession, client: Client, update: Update) -> Reply | None:
     step = await flow.current_step(session, client.id, Channel.telegram)
     text = (update.text or "").strip()
+
+    # §13.1: a main-keyboard label is navigation, not an answer. The step checks
+    # below would otherwise store "Условия работы" as the client's problem text
+    # for anyone who tapped a topic while being asked to describe it.
+    if step is not Step.idle and await _is_menu_label(session, client, text):
+        await flow.clear(session, client.id, Channel.telegram)
+        return await _menu_selection(session, client, text)
 
     if step is Step.entering_problem:
         await flow.remember(session, client.id, Channel.telegram, problem=text)
@@ -273,10 +297,18 @@ async def _text(session: AsyncSession, client: Client, update: Update) -> Reply 
     return await _menu_selection(session, client, text)
 
 
+async def _is_menu_label(session: AsyncSession, client: Client, text: str) -> bool:
+    labels = await _menu_labels(session, client)
+    return text in {labels["consultation"], labels["appointments"], *labels["topics"]}
+
+
 async def _menu_selection(session: AsyncSession, client: Client, text: str) -> Reply | None:
-    consultation = await get_text(session, client.language, "menu.consultation")
-    if text == consultation:
+    labels = await _menu_labels(session, client)
+    if text == labels["consultation"]:
         return await _begin_consultation(session, client)
+
+    if text == labels["appointments"]:
+        return await _my_appointments(session, client)
 
     for topic in await content.list_menu_topics(session):
         title = await get_text(session, client.language, f"content.topic.{topic.code}.title")
@@ -284,6 +316,94 @@ async def _menu_selection(session: AsyncSession, client: Client, text: str) -> R
             return await _send_topic(session, client, topic.code)
 
     return None
+
+
+#: §13.1 step 9. Three is enough to answer "what do I have booked" without
+#: turning the reply into a history dump.
+APPOINTMENTS_SHOWN = 3
+
+
+async def _my_appointments(session: AsyncSession, client: Client) -> Reply:
+    """§13.1 step 9: everything still live, newest first.
+
+    Read-only by construction: no transition, no outbox row. The one thing it
+    adds is the buttons of a proposal still waiting on this client, because the
+    message those buttons came in may be a long way up the chat by now.
+    """
+    requests = await booking.active_for_client(session, client.id, limit=APPOINTMENTS_SHOWN)
+    if not requests:
+        return Reply(await get_text(session, client.language, "menu.appointments.none"))
+
+    practice = await get_practice(session)
+    lines: list[str] = []
+    awaiting: list[BookingRequest] = []
+
+    for request in requests:
+        when = await booking.requested_start(session, request)
+        session_type = await get_text(
+            session,
+            client.language,
+            f"booking.type.{await _session_type_code(session, request.session_type_id)}",
+        )
+        lines.append(
+            await get_text(
+                session,
+                client.language,
+                "menu.appointments.item",
+                status=await get_text(
+                    session, client.language, f"request.status.{request.status.value}"
+                ),
+                # Hard rule 8: status and time, never the problem text.
+                time=_local(when, client, practice) or (request.desired_time_text or ""),
+                session_type=session_type,
+                modality=await get_text(
+                    session, client.language, f"booking.modality.{request.modality.value}"
+                ),
+            )
+        )
+        if request.status is RequestStatus.negotiating:
+            if await booking.whose_turn(session, request.id) is SenderType.client:
+                awaiting.append(request)
+
+        join = await notifications.join_info(session, request)
+        if request.status is RequestStatus.confirmed and join:
+            lines.append(
+                await get_text(
+                    session,
+                    client.language,
+                    "intent.request.confirmed.client.join_online",
+                    url=join,
+                )
+            )
+
+    keyboard = None
+    if len(awaiting) == 1:
+        # With two proposals open the buttons could not say which they answer,
+        # and each proposal message still carries its own.
+        keyboard = kb.negotiation_keyboard(
+            awaiting[0].id,
+            {
+                kb.ACCEPT: await get_text(
+                    session, client.language, "intent.request.proposal.client.action.accept"
+                ),
+                kb.COUNTER: await get_text(
+                    session, client.language, "intent.request.proposal.client.action.counter"
+                ),
+                kb.DECLINE: await get_text(
+                    session, client.language, "intent.request.proposal.client.action.decline"
+                ),
+            },
+        )
+
+    return Reply("\n\n".join(lines), keyboard=keyboard)
+
+
+async def _session_type_code(session: AsyncSession, session_type_id: int) -> str:
+    return str(
+        (
+            await session.execute(select(SessionType.code).where(SessionType.id == session_type_id))
+        ).scalar_one()
+    )
 
 
 async def _send_topic(session: AsyncSession, client: Client, topic_code: str) -> Reply:

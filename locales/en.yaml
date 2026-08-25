@@ -40,6 +40,9 @@ common:
 menu:
   consultation: "Book a consultation"
   home: "Home"
+  appointments: "My appointments"
+  appointments.none: "You have nothing booked at the moment."
+  appointments.item: "{status} — {time}\n{session_type}, {modality}"
 
 content:
   topic.work_terms.title: "How I work"
@@ -97,6 +100,9 @@ auth:
 request:
   title: "Your request"
   thread: "Conversation"
+  status.pending: "Waiting for confirmation"
+  status.negotiating: "Choosing a time"
+  status.confirmed: "Confirmed"
   open: "Open your booking"
   add_note: "Add information"
   note_ask: "Anything you would like me to know before the session?"

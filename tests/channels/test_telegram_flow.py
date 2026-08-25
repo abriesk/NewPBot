@@ -10,6 +10,7 @@ nothing but the database carries state across, which is the point of §13.1's
 from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 from sqlalchemy import select
@@ -19,7 +20,7 @@ from app.channels.telegram import keyboards as kb
 from app.channels.telegram.router import Reply, Update, handle
 from app.core.enums import Channel, Modality, RequestStatus, SlotStatus, TokenPurpose
 from app.core.models import BookingRequest, Client, FlowState, Practice, Slot, WaitlistEntry
-from app.core.services import content, flow
+from app.core.services import booking, content, flow
 from app.core.services.clients import issue_token, resolve_client
 from app.core.services.flow import Step
 
@@ -190,6 +191,146 @@ async def test_the_answers_reach_the_request(
     assert request.modality is Modality.onsite
     assert request.source_channel is Channel.telegram
     assert request.client_timezone == "Europe/Moscow"
+
+
+# --- My appointments (§13.1 step 9) -----------------------------------------
+
+
+async def _appointments_label(db: AsyncSession) -> str:
+    from app.core.services.translations import get_text
+
+    return await get_text(db, "ru", "menu.appointments")
+
+
+async def _book_and_return_to_menu(
+    db: AsyncSession, slot: Slot, session_type_id: int
+) -> BookingRequest:
+    client = await _walk_to_slot_pick(db, slot)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
+    await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))  # problem
+    await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))  # name
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.CONTACT}:{kb.CONTACT_TELEGRAM}"))
+    return (
+        await db.execute(select(BookingRequest).where(BookingRequest.client_id == client.id))
+    ).scalar_one()
+
+
+async def test_the_main_keyboard_offers_my_appointments(db: AsyncSession) -> None:
+    """§13.1 step 3."""
+    await handle(db, Update(chat_id=CHAT, text="/start"))
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.LANG}:ru"))
+
+    assert reply is not None
+    labels = {button.text for row in reply.keyboard.keyboard for button in row}
+    assert await _appointments_label(db) in labels
+
+
+async def test_a_client_with_nothing_booked_is_told_so(db: AsyncSession) -> None:
+    await handle(db, Update(chat_id=CHAT, text="/start"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.LANG}:ru"))
+
+    reply = await handle(db, Update(chat_id=CHAT, text=await _appointments_label(db)))
+
+    from app.core.services.translations import get_text
+
+    assert reply is not None
+    assert reply.text == await get_text(db, "ru", "menu.appointments.none")
+
+
+async def test_an_active_request_is_listed_without_its_problem_text(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    """Hard rule 8: the status and the time, never what they wrote."""
+    client = await _walk_to_slot_pick(db, future_slot)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
+    await handle(db, Update(chat_id=CHAT, text="something I would not want repeated"))
+    await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))  # name
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.CONTACT}:{kb.CONTACT_TELEGRAM}"))
+
+    reply = await handle(db, Update(chat_id=CHAT, text=await _appointments_label(db)))
+
+    assert reply is not None
+    assert "something I would not want repeated" not in reply.text
+    # The slot's time, in the client's zone, even though nothing is approved yet.
+    local = future_slot.starts_at.astimezone(ZoneInfo("Europe/Moscow"))
+    assert local.strftime("%Y-%m-%d %H:%M") in reply.text
+    assert client.id
+
+
+async def test_finished_requests_are_not_listed(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    """A client asking what they have booked is not asking about a rejection."""
+    request = await _book_and_return_to_menu(db, future_slot, session_type_id)
+    await booking.admin_reject(db, request.id)
+
+    reply = await handle(db, Update(chat_id=CHAT, text=await _appointments_label(db)))
+
+    from app.core.services.translations import get_text
+
+    assert reply is not None
+    assert reply.text == await get_text(db, "ru", "menu.appointments.none")
+
+
+async def test_a_proposal_awaiting_the_client_is_answerable_from_the_list(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    """§13.1 step 9: the proposal's own message may be far up the chat by now."""
+    request = await _book_and_return_to_menu(db, future_slot, session_type_id)
+    await booking.admin_propose(
+        db, request.id, proposed_start=datetime.now(UTC) + timedelta(days=8)
+    )
+
+    reply = await handle(db, Update(chat_id=CHAT, text=await _appointments_label(db)))
+
+    assert reply is not None
+    data = {b.callback_data for row in reply.keyboard.inline_keyboard for b in row}
+    assert data == {
+        f"{kb.ACCEPT}:{request.id}",
+        f"{kb.COUNTER}:{request.id}",
+        f"{kb.DECLINE}:{request.id}",
+    }
+
+    # And the button works, through the handler that already existed.
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.ACCEPT}:{request.id}"))
+    await db.refresh(request)
+    assert request.status is RequestStatus.confirmed
+
+
+async def test_looking_at_appointments_changes_nothing(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    request = await _book_and_return_to_menu(db, future_slot, session_type_id)
+    before = request.status
+
+    await handle(db, Update(chat_id=CHAT, text=await _appointments_label(db)))
+
+    await db.refresh(request)
+    assert request.status is before
+    assert await flow.current_step(db, request.client_id, Channel.telegram) is Step.idle
+
+
+async def test_a_menu_button_mid_flow_is_navigation_not_an_answer(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    """§13.1: without this the label lands in `problem_text`."""
+    client = await _walk_to_slot_pick(db, future_slot)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.entering_problem
+
+    reply = await handle(db, Update(chat_id=CHAT, text=await _appointments_label(db)))
+
+    assert reply is not None
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.idle
+    booked = (
+        (await db.execute(select(BookingRequest).where(BookingRequest.client_id == client.id)))
+        .scalars()
+        .all()
+    )
+    assert booked == []  # the half-finished booking was abandoned, not submitted
 
 
 # --- The contact step (§13.1 step 7) ----------------------------------------

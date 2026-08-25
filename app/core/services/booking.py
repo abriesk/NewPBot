@@ -78,12 +78,16 @@ from app.core.services.settings import get_practice
 SUBMISSIONS_PER_HOUR = 5
 SUBMISSION_WINDOW = timedelta(hours=1)
 
-#: §7.1: where a client note is accepted. Not part of `ALLOWED` on purpose --
-#: a note is not a transition, and putting it there would invite treating it
-#: like one.
-NOTE_STATUSES = frozenset(
+#: A request the therapist can still act on: not yet answered, being negotiated,
+#: or booked. Everything else is history.
+ACTIVE_STATUSES = frozenset(
     {RequestStatus.pending, RequestStatus.negotiating, RequestStatus.confirmed}
 )
+
+#: §7.1: where a client note is accepted -- the same set, for the same reason.
+#: Not part of `ALLOWED` on purpose: a note is not a transition, and putting it
+#: there would invite treating it like one.
+NOTE_STATUSES = ACTIVE_STATUSES
 
 #: Long enough for anything worth reading before a session, short enough that
 #: the column is not an essay box.
@@ -140,6 +144,29 @@ async def _get(session: AsyncSession, request_id: int) -> BookingRequest:
     if request is None:
         raise NotFound(f"booking request {request_id}")
     return request
+
+
+async def active_for_client(
+    session: AsyncSession, client_id: UUID, *, limit: int = 3
+) -> list[BookingRequest]:
+    """§13.1 step 9: what this client currently has booked or pending.
+
+    Newest first, because the one they just made is the one they are asking
+    about. Terminal requests are history and are left out: a client looking for
+    "my appointment" is not asking to be reminded of a rejection.
+    """
+    rows = (
+        await session.execute(
+            select(BookingRequest)
+            .where(
+                BookingRequest.client_id == client_id,
+                BookingRequest.status.in_(ACTIVE_STATUSES),
+            )
+            .order_by(BookingRequest.created_at.desc(), BookingRequest.id.desc())
+            .limit(limit)
+        )
+    ).scalars()
+    return list(rows.all())
 
 
 async def requested_start(session: AsyncSession, request: BookingRequest) -> datetime | None:

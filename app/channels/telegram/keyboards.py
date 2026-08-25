@@ -68,11 +68,31 @@ def language_keyboard() -> InlineKeyboardMarkup:
     )
 
 
-def main_menu(topic_titles: list[str], consultation_label: str) -> ReplyKeyboardMarkup:
-    """§13.1 step 3: one button per menu topic, plus Consultation."""
+def main_menu(
+    topic_titles: list[str], consultation_label: str, appointments_label: str
+) -> ReplyKeyboardMarkup:
+    """§13.1 step 3: one button per menu topic, plus Consultation and My
+    appointments."""
     rows = [[KeyboardButton(text=title)] for title in topic_titles]
     rows.append([KeyboardButton(text=consultation_label)])
+    rows.append([KeyboardButton(text=appointments_label)])
     return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
+
+
+def negotiation_keyboard(request_id: int, labels: dict[str, str]) -> InlineKeyboardMarkup:
+    """§13.1 step 9: the proposal's own buttons, offered again.
+
+    Same callback data the notification carries (`<action>:<request_id>`), so
+    the router answers it with the handler that already exists.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(text=labels[action], callback_data=f"{action}:{request_id}")
+                for action in (ACCEPT, COUNTER, DECLINE)
+            ]
+        ]
+    )
 
 
 def timezone_keyboard(options: list[tuple[str, str]]) -> InlineKeyboardMarkup:

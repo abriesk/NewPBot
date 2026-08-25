@@ -33,6 +33,9 @@ common:
 menu:
   consultation: "Գրանցվել խորհրդատվության"
   home: "Գլխավոր"
+  appointments: ""                               # TODO: translate
+  appointments.none: ""                          # TODO: translate
+  appointments.item: ""                          # TODO: translate
 
 content:
   topic.work_terms.title: "Աշխատանքի պայմաններ"
@@ -89,6 +92,9 @@ auth:
 request:
   title: ""                                      # TODO: translate
   thread: ""                                     # TODO: translate
+  status.pending: ""                             # TODO: translate
+  status.negotiating: ""                         # TODO: translate
+  status.confirmed: ""                           # TODO: translate
   open: ""                                       # TODO: translate
   add_note: ""                                   # TODO: translate
   note_ask: ""                                   # TODO: translate
