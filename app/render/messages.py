@@ -54,8 +54,14 @@ async def render(
     channel: Channel,
     tz: str,
     base_url: str,
+    request_id: int | None = None,
 ) -> RenderedMessage:
-    """Build the message one transport is about to send."""
+    """Build the message one transport is about to send.
+
+    `request_id` is what a Telegram button carries back (§9). It is a column on
+    the outbox row, not a payload field -- §10's payload schemas do not list it
+    -- so the caller has to hand it over.
+    """
     spec = spec_for(intent_key)
     fmt = _format_args(payload, tz)
 
@@ -68,7 +74,7 @@ async def render(
 
     lines.extend(await _join_lines(session, intent_key, payload, locale, channel, fmt))
 
-    actions = await _actions(session, spec.key, payload, locale, channel, base_url)
+    actions = await _actions(session, spec.key, payload, locale, channel, base_url, request_id)
     subject = (
         await get_text(session, locale, spec.email_subject_key)
         if channel == Channel.email and spec.email_subject_key
@@ -152,6 +158,7 @@ async def _actions(
     locale: str,
     channel: Channel,
     base_url: str,
+    request_id: int | None = None,
 ) -> list[Action]:
     spec = spec_for(intent_key)
     if not spec.actions:
@@ -165,10 +172,14 @@ async def _actions(
 
         if channel == Channel.telegram:
             # §9: `<action>:<request_id>`, comfortably inside 64 bytes because
-            # the id is short and the handler looks the rest up.
-            request_id = payload.get("request_id")
-            data = f"{key}:{request_id}" if request_id is not None else key
-            actions.append(Action(key=key, label=label, callback_data=data))
+            # the id is short and the handler looks the rest up. Without the id
+            # the router has nothing to act on and the button does nothing, so
+            # an intent with actions and no request is not worth a keyboard.
+            if request_id is None:
+                continue
+            actions.append(
+                Action(key=key, label=label, callback_data=f"{key}:{request_id}")
+            )
         else:
             url = payload.get("url") if key == "open" else None
             actions.append(Action(key=key, label=label, url=url or f"{base_url}/r/{request_uuid}"))

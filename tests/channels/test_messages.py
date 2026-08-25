@@ -151,15 +151,32 @@ async def test_telegram_actions_become_callback_data(db: AsyncSession) -> None:
     message = await render(
         db,
         intent_key="request.proposal.client",
-        payload={"uuid": "abc", "time": WHEN.isoformat(), "request_id": 42},
+        payload={"uuid": "abc", "time": WHEN.isoformat()},
+        locale="en",
+        channel=Channel.telegram,
+        tz="UTC",
+        base_url="https://example.test",
+        request_id=42,
+    )
+    assert [a.key for a in message.actions] == ["accept", "counter", "decline"]
+    assert all(a.callback_data and a.url is None for a in message.actions)
+    assert message.actions[0].callback_data == "accept:42"
+
+
+async def test_a_telegram_message_without_a_request_gets_no_dead_buttons(
+    db: AsyncSession,
+) -> None:
+    """A button whose callback carries no id is one the router cannot act on."""
+    message = await render(
+        db,
+        intent_key="request.proposal.client",
+        payload={"uuid": "abc", "time": WHEN.isoformat()},
         locale="en",
         channel=Channel.telegram,
         tz="UTC",
         base_url="https://example.test",
     )
-    assert [a.key for a in message.actions] == ["accept", "counter", "decline"]
-    assert all(a.callback_data and a.url is None for a in message.actions)
-    assert message.actions[0].callback_data == "accept:42"
+    assert message.actions == []
 
 
 async def test_email_actions_become_links(db: AsyncSession) -> None:

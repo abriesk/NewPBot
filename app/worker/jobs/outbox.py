@@ -101,6 +101,10 @@ async def deliver_one(
             channel=message.channel,
             tz=await _recipient_timezone(session, message),
             base_url=settings.base_url,
+            # §9: what the Telegram buttons carry back. It lives on the row,
+            # not in the payload, so it has to be handed over explicitly --
+            # without it every inline button arrives with nothing to act on.
+            request_id=message.request_id,
         )
     except KeyError as exc:
         # An intent with no spec is a bug, not a transient condition.

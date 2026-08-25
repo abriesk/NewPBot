@@ -379,6 +379,52 @@ async def test_a_client_cannot_act_on_someone_elses_request(
     assert victim.status is RequestStatus.negotiating  # untouched
 
 
+async def test_the_approve_button_the_worker_renders_actually_approves(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The seam between §10's outbox row and §13.2's handler.
+
+    Both halves were covered and the join was not: the payload never carried a
+    request id, so every inline button arrived as a bare action word and the
+    handler had nothing to act on. This presses the button as delivered.
+    """
+    from app.render.messages import render
+
+    request = await _book(db, client, session_type_id, future_slot, Channel.web)
+
+    row = (
+        await db.execute(
+            select(OutboxMessage)
+            .where(
+                OutboxMessage.intent_key == "request.submitted.admin",
+                OutboxMessage.channel == Channel.telegram,
+            )
+            .order_by(OutboxMessage.id.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+
+    # Exactly the call app/worker/jobs/outbox.py:deliver_one makes.
+    rendered = await render(
+        db,
+        intent_key=row.intent_key,
+        payload=row.payload,
+        locale=row.locale,
+        channel=row.channel,
+        tz="UTC",
+        base_url="https://example.test",
+        request_id=row.request_id,
+    )
+    approve = next(a for a in rendered.actions if a.key == kb.APPROVE)
+    assert approve.callback_data == f"{kb.APPROVE}:{request.id}"
+
+    reply = await handle(db, Update(chat_id=1, callback_data=approve.callback_data))
+
+    assert reply is not None
+    await db.refresh(request)
+    assert request.status is RequestStatus.confirmed
+
+
 async def test_admin_actions_are_gated_by_configuration(
     db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
 ) -> None:
