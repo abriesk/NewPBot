@@ -180,7 +180,10 @@ async def test_the_answers_reach_the_request(
     await handle(db, Update(chat_id=CHAT, text="Anna"))
     await handle(db, Update(chat_id=CHAT, text="telegram is fine"))
 
-    request = (await db.execute(select(BookingRequest))).scalars().all()[-1]
+    client = await _client(db)
+    request = (
+        await db.execute(select(BookingRequest).where(BookingRequest.client_id == client.id))
+    ).scalar_one()
     assert request.problem_text == "work stress"
     assert request.display_name == "Anna"
     assert request.contact_note == "telegram is fine"
@@ -397,7 +400,10 @@ async def test_optional_answers_are_skippable(
     await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))  # name
     await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))  # contact
 
-    request = (await db.execute(select(BookingRequest))).scalars().all()[-1]
+    client = await _client(db)
+    request = (
+        await db.execute(select(BookingRequest).where(BookingRequest.client_id == client.id))
+    ).scalar_one()
     assert request.status is RequestStatus.pending
     assert request.problem_text is None
 
