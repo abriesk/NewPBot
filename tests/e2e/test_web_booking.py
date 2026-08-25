@@ -405,15 +405,29 @@ def test_an_invalid_login_token_is_refused(web: TestClient) -> None:
     assert response.status_code == 400
 
 
-def test_the_sign_in_page_says_the_same_thing_for_any_address(web: TestClient) -> None:
+async def test_the_sign_in_page_says_the_same_thing_for_any_address(
+    web: TestClient, committed: AsyncSession
+) -> None:
     """Whether an address is known here is not something an unauthenticated
     caller should learn."""
+    stranger = "nobody@example.test"
     web.get("/auth/email")
     known = web.post("/auth/email", data={"csrf_token": _csrf(web), "email": EMAIL})
-    unknown = web.post(
-        "/auth/email", data={"csrf_token": _csrf(web), "email": "nobody@example.test"}
-    )
+    unknown = web.post("/auth/email", data={"csrf_token": _csrf(web), "email": stranger})
     assert known.status_code == unknown.status_code == 200
+
+    # Asking for a link now really does queue one, so the stranger this test
+    # invents has to be cleared up like any other committed row.
+    rows = await committed.execute(
+        select(Identity.client_id).where(Identity.external_id == stranger)
+    )
+    client_ids = rows.scalars().all()
+    if client_ids:
+        await committed.execute(delete(OutboxMessage).where(OutboxMessage.address == stranger))
+        await committed.execute(delete(AuthToken).where(AuthToken.client_id.in_(client_ids)))
+        await committed.execute(delete(Identity).where(Identity.client_id.in_(client_ids)))
+        await committed.execute(delete(Client).where(Client.id.in_(client_ids)))
+        await committed.commit()
 
 
 # --- Authorisation ----------------------------------------------------------
