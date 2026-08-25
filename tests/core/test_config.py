@@ -10,7 +10,16 @@ from tests.conftest import TEST_ENV
 
 
 def _settings(**overrides: str) -> Settings:
-    return Settings(**{**{k.lower(): v for k, v in TEST_ENV.items()}, **overrides})  # type: ignore[arg-type]
+    """Settings as the tests mean them, not as this machine happens to be set up.
+
+    The SMTP pair is blanked unless a test asks for it: init arguments outrank
+    the environment in pydantic-settings, so a deployment that really does
+    configure Gmail would otherwise decide what §4's tests observe.
+    """
+    base = {k.lower(): v for k, v in TEST_ENV.items()}
+    base["smtp_host"] = ""
+    base["smtp_from"] = ""
+    return Settings(**{**base, **overrides})  # type: ignore[arg-type]
 
 
 def test_defaults_match_the_specification() -> None:

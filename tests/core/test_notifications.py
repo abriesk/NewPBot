@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
-from sqlalchemy import select
+import pytest_asyncio
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import Channel, Modality, OutboxStatus
@@ -21,8 +23,24 @@ from app.core.services.notifications import (
 LATER = datetime.now(UTC) + timedelta(days=10)
 
 
+#: Rows already in the table when a test starts. `db` rolls back and ids only
+#: climb, so anything above this line is the test's own work -- everything below
+#: belongs to the e2e suite or to the deployment sharing this database, and
+#: asserting over it would make these tests fail for reasons of their own.
+_BASELINE = 0
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _outbox_baseline(db: AsyncSession) -> AsyncIterator[None]:
+    global _BASELINE
+    _BASELINE = (
+        await db.execute(select(func.coalesce(func.max(OutboxMessage.id), 0)))
+    ).scalar_one()
+    yield
+
+
 async def _rows(db: AsyncSession, intent_key: str | None = None) -> list[OutboxMessage]:
-    stmt = select(OutboxMessage)
+    stmt = select(OutboxMessage).where(OutboxMessage.id > _BASELINE)
     if intent_key:
         stmt = stmt.where(OutboxMessage.intent_key == intent_key)
     return list((await db.execute(stmt.order_by(OutboxMessage.id))).scalars().all())
