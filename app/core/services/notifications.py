@@ -49,6 +49,7 @@ from app.core.models import (
     Identity,
     OutboxMessage,
     SessionType,
+    Slot,
     WaitlistEntry,
 )
 from app.core.services.settings import get_practice
@@ -93,6 +94,16 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
+async def _slot_start(session: AsyncSession, slot_id: int | None) -> datetime | None:
+    """When the held slot begins. A slot request has no `scheduled_start` until
+    it is approved (§7.1), but the therapist is being asked about a time."""
+    if slot_id is None:
+        return None
+    return (
+        await session.execute(select(Slot.starts_at).where(Slot.id == slot_id))
+    ).scalar_one_or_none()
+
+
 async def _session_type_code(session: AsyncSession, session_type_id: int) -> str:
     return str(
         (
@@ -105,6 +116,11 @@ async def envelopes_for(session: AsyncSession, event: DomainEvent) -> list[Envel
     """Map one domain event onto the intents in §10's catalogue."""
     if isinstance(event, RequestSubmitted):
         request = await _request(session, event.request_id)
+        # §10's "requested time". `scheduled_start` is only set at approval, and
+        # the free-text path is the only one with `desired_time_text`, so a slot
+        # booking has to name the slot it holds -- otherwise the therapist is
+        # asked to approve a request whose time the message does not mention.
+        requested = request.scheduled_start or await _slot_start(session, request.slot_id)
         return [
             Envelope(
                 "request.submitted.admin",
@@ -114,7 +130,7 @@ async def envelopes_for(session: AsyncSession, event: DomainEvent) -> list[Envel
                     "name": request.display_name,
                     "session_type": await _session_type_code(session, request.session_type_id),
                     "modality": request.modality.value,
-                    "time": _iso(request.scheduled_start) or request.desired_time_text,
+                    "time": _iso(requested) or request.desired_time_text,
                     "problem": request.problem_text,
                 },
                 request_id=request.id,
@@ -126,7 +142,7 @@ async def envelopes_for(session: AsyncSession, event: DomainEvent) -> list[Envel
                 {
                     "uuid": str(request.uuid),
                     "session_type": await _session_type_code(session, request.session_type_id),
-                    "time": _iso(request.scheduled_start) or request.desired_time_text,
+                    "time": _iso(requested) or request.desired_time_text,
                 },
                 request_id=request.id,
                 dedupe_scope=f"submitted-client:{request.id}",

@@ -73,6 +73,23 @@ async def test_submission_notifies_both_the_client_and_the_admin(
     assert "request.submitted.admin" in keys
 
 
+async def test_a_submission_names_the_time_it_is_asking_about(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """§10's "requested time". A slot request has no `scheduled_start` until it
+    is approved, so without the slot the therapist was asked to approve a
+    request whose message ended "requested ."."""
+    await _submit(db, client, session_type_id, future_slot)
+    await notifications.publish(db)
+
+    for key in ("request.submitted.admin", "request.submitted.client"):
+        rows = await _rows(db, key)
+        assert rows
+        assert all(
+            row.payload["time"] == future_slot.starts_at.isoformat() for row in rows
+        ), key
+
+
 async def test_rows_are_written_in_the_same_transaction_as_the_change(
     db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
 ) -> None:
