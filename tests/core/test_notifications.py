@@ -439,3 +439,85 @@ async def test_the_delivery_failure_alert_names_the_address_not_the_body(
 
 async def test_recipient_enum_has_exactly_two_values() -> None:
     assert {r.value for r in Recipient} == {"admin", "client"}
+
+
+# --- §13.5 calendar attachment, end to end ----------------------------------
+
+
+async def test_a_confirmed_email_is_delivered_with_its_calendar_file(
+    db: AsyncSession,
+    session_type_id: int,
+    future_slot: Slot,
+    email_enabled: None,
+) -> None:
+    """M12 acceptance, through the real outbox rather than the renderer alone.
+
+    The scrub runs when the row is written, so this is the only test that
+    proves the file the client actually receives has no meeting room in it.
+    """
+    from email import message_from_bytes
+    from email.message import EmailMessage
+    from email.policy import default as default_policy
+
+    from app.channels.base import DeliveryResult, RenderedMessage
+    from app.channels.email.transport import EmailTransport
+    from app.worker.jobs.outbox import deliver_one
+
+    recipient = await resolve_client(db, Channel.email, "ics@example.test")
+    await link_identity(db, recipient.id, Channel.email, "ics@example.test", verified=True)
+
+    request = await booking.submit_slot_request(
+        db,
+        client_id=recipient.id,
+        slot_id=future_slot.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        source_channel=Channel.web,
+        problem_text="deeply private",
+    )
+    await booking.admin_approve(db, request.id, meeting_url="https://meet.example.test/room")
+    await notifications.publish(db)
+
+    row = next(
+        r
+        for r in await _rows(db, "request.confirmed.client")
+        if r.channel == Channel.email and r.status == OutboxStatus.pending
+    )
+
+    captured: list[RenderedMessage] = []
+
+    class Capture(EmailTransport):
+        async def send(self, address: str, message: RenderedMessage) -> DeliveryResult:
+            captured.append(message)
+            return DeliveryResult.success()
+
+    result = await deliver_one(db, row, {Channel.email: Capture()})
+    assert result.ok
+
+    rendered = captured[0]
+    assert len(rendered.attachments) == 1
+    ics = rendered.attachments[0].content
+    assert "BEGIN:VEVENT" in ics
+    assert "METHOD:PUBLISH" in ics
+    assert "ATTENDEE" not in ics
+    # Hard rule 8 and §13.5: neither the problem text nor the meeting room.
+    assert "deeply private" not in ics
+    assert "meet.example.test" not in ics
+    assert str(request.uuid) in ics
+
+    # And it survives MIME assembly as its own text/calendar part.
+    mail = EmailMessage()
+    mail["From"] = "practice@example.test"
+    mail["To"] = "ics@example.test"
+    mail["Subject"] = rendered.subject or ""
+    mail.set_content(rendered.text)
+    for attachment in rendered.attachments:
+        mail.add_attachment(
+            attachment.content, subtype=attachment.subtype, filename=attachment.filename
+        )
+
+    parsed = message_from_bytes(mail.as_bytes(), policy=default_policy)
+    parts = [p for p in parsed.walk() if p.get_content_type() == "text/calendar"]
+    assert len(parts) == 1
+    assert parts[0].get_filename() == "session.ics"
+    assert "BEGIN:VCALENDAR" in parts[0].get_content()

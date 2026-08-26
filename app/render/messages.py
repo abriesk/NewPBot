@@ -12,14 +12,15 @@ from __future__ import annotations
 
 from datetime import datetime
 from typing import Any
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit
 from zoneinfo import ZoneInfo
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.channels.base import Action, RenderedMessage
+from app.channels.base import Action, Attachment, RenderedMessage
 from app.core.enums import Channel
 from app.core.services.translations import get_text
+from app.render.calendar import ICS_FILENAME, ICS_SUBTYPE, session_ics
 from app.render.intents import action_label_key, body_key_for, spec_for
 from app.render.markdown import escape_telegram
 
@@ -75,6 +76,12 @@ async def render(
 
     lines.extend(await _join_lines(session, intent_key, payload, locale, channel, fmt))
 
+    if intent_key == "request.cancelled.client" and channel == Channel.email:
+        # §13.5: the confirmation attached a calendar file and nothing withdraws
+        # it, so the cancellation has to ask. Email only, because that is the
+        # only channel the file went out on.
+        lines.append(await get_text(session, locale, "intent.request.cancelled.client.calendar"))
+
     actions = await _actions(session, spec.key, payload, locale, channel, base_url, request_id)
     subject = (
         await get_text(session, locale, spec.email_subject_key)
@@ -96,7 +103,13 @@ async def render(
         # arrived at all.
         footer = await get_text(session, locale, "email.footer")
         text = "\n\n".join([*lines, *[f"{a.label}: {a.url}" for a in actions if a.url], footer])
-        return RenderedMessage(parts=[text], subject=subject, actions=actions, parse_mode=None)
+        return RenderedMessage(
+            parts=[text],
+            subject=subject,
+            actions=actions,
+            parse_mode=None,
+            attachments=await _calendar_attachment(session, intent_key, payload, locale, base_url),
+        )
 
     return RenderedMessage(
         parts=["\n\n".join(lines)], subject=subject, actions=actions, parse_mode=None
@@ -150,6 +163,55 @@ async def _join_lines(
         else "intent.request.confirmed.client.join_online"
     )
     return [await get_text(session, locale, key, **{**fmt, "url": url})]
+
+
+async def _calendar_attachment(
+    session: AsyncSession,
+    intent_key: str,
+    payload: dict[str, Any],
+    locale: str,
+    base_url: str,
+) -> list[Attachment]:
+    """§13.5's `.ics`, on the one intent and the one channel that carry it.
+
+    Built from `payload`, which for an email row the notification service has
+    already scrubbed (§13.4) -- so an online session simply has no join link
+    here to leak, rather than this having to remember not to write one.
+    """
+    if intent_key != "request.confirmed.client":
+        return []
+
+    start = _instant(payload.get("time"))
+    duration = payload.get("duration_min")
+    if start is None or not duration:
+        # A time this service could not parse is free text the client typed,
+        # and there is no honest DTSTART to make out of "some evening".
+        return []
+
+    onsite = payload.get("modality") == "onsite"
+    location = (
+        str(payload.get("join_url") or "")
+        if onsite
+        else await get_text(session, locale, "calendar.location.online")
+    )
+    ics = session_ics(
+        uid=f"{payload.get('uuid', '')}@{urlsplit(base_url).hostname or 'localhost'}",
+        start=start,
+        duration_min=int(duration),
+        summary=await get_text(session, locale, "calendar.summary"),
+        location=location,
+    )
+    return [Attachment(filename=ICS_FILENAME, content=ics, subtype=ICS_SUBTYPE)]
+
+
+def _instant(value: Any) -> datetime | None:
+    """The payload's stored instant, or None when it was never one."""
+    if not isinstance(value, str):
+        return value if isinstance(value, datetime) else None
+    try:
+        return datetime.fromisoformat(value)
+    except ValueError:
+        return None
 
 
 def _request_url(base_url: str, payload: dict[str, Any]) -> str:

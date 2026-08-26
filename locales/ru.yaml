@@ -142,6 +142,7 @@ intent:
   request.expired.client.body: "Заявка {uuid} истекла без ответа. Вы можете оставить новую."   # TODO
   request.cancelled.client.body: "Консультация {time} отменена."                # TODO
   request.cancelled.client.reason: "Причина: {reason}"                          # TODO
+  request.cancelled.client.calendar: "Если вы добавили эту встречу в календарь, удалите её оттуда."   # TODO
 
   reminder.client.body: ""                       # TODO: translate
   reminder.client.body.24h: "Напоминание: ваша консультация завтра, {time}."
@@ -162,3 +163,7 @@ email:
   subject.reminder: "Напоминание о консультации"                                # TODO
   subject.request_cancelled: "Консультация отменена"                            # TODO
   footer: "Вы получили это письмо, потому что оставили заявку на консультацию."  # TODO
+
+calendar:
+  summary: "Консультация"                        # TODO
+  location.online: "Онлайн"                      # TODO

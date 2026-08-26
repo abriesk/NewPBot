@@ -52,6 +52,14 @@ class EmailTransport:
         mail["To"] = address
         mail["Subject"] = message.subject or ""
         mail.set_content(message.text)
+        for attachment in message.attachments:
+            # §13.5. `str` content makes this a text/<subtype> part in UTF-8,
+            # which is what an .ics needs and what the renderer produces.
+            mail.add_attachment(
+                attachment.content,
+                subtype=attachment.subtype,
+                filename=attachment.filename,
+            )
 
         try:
             await aiosmtplib.send(

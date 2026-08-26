@@ -62,10 +62,11 @@ GROUPS: tuple[Group, ...] = (
     ),
     Group(
         slug="email",
-        title="Email subjects and footer",
+        title="Email subjects, footer and calendar file",
         blurb="Kept together on purpose: a subject line is the one part of an "
-        "email a stranger can read, so these stay neutral (§13.4).",
-        prefixes=("email.",),
+        "email a stranger can read, and the calendar wording ends up on a "
+        "client's lock screen, so these stay neutral (§13.4, §13.5).",
+        prefixes=("email.", "calendar."),
     ),
     Group(
         slug="chrome",

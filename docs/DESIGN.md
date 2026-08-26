@@ -427,11 +427,12 @@ Roughly in the order they would be worth doing:
 1. Client-initiated cancellation and rescheduling
 2. WhatsApp adapter (Cloud API; note the 24-hour window and template approval)
 3. Payments and payment instructions per language
-4. Calendar export and synchronisation (`.ics` first, CalDAV later)
-5. Recurring clients: session history, prepaid packages
-6. Client self-study materials as a content type
-7. Multi-practice operation (§18)
-8. Statistics for the therapist: conversion, no-shows, load by weekday
+4. **The therapist's** calendar: export and synchronisation of her whole schedule (a subscribable `.ics` feed first, CalDAV later). Not to be confused with the per-session file a client gets attached to a confirmation email, which is built (IMPLEMENTATION.md §13.5)
+5. The same per-session calendar file on Telegram, which needs `send_document` and a transport that can carry an attachment. Worth doing only after checking the hand-off: an `.ics` sent into a Telegram chat opens in a calendar app reliably on iOS and unreliably on Android, and a file the client cannot open is worse than no file
+6. Recurring clients: session history, prepaid packages
+7. Client self-study materials as a content type
+8. Multi-practice operation (§18)
+9. Statistics for the therapist: conversion, no-shows, load by weekday
 
 ---
 

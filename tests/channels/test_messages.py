@@ -356,3 +356,144 @@ def test_the_transport_registry_includes_email_when_enabled(email_enabled: None)
     from app.worker.transports import build_transports
 
     assert Channel.email in build_transports()
+
+
+# --- §13.5 calendar attachment ----------------------------------------------
+
+
+CONFIRMED = {
+    "uuid": "8b1f0c3e-0000-4000-8000-000000000001",
+    "time": WHEN.isoformat(),
+    "duration_min": 50,
+    "session_type": "individual",
+    "modality": "online",
+}
+
+
+async def _confirmed(db: AsyncSession, channel: Channel, **payload: object) -> RenderedMessage:
+    return await render(
+        db,
+        intent_key="request.confirmed.client",
+        payload={**CONFIRMED, **payload},
+        locale="en",
+        channel=channel,
+        tz="Asia/Yerevan",
+        base_url="https://booking.example.test",
+    )
+
+
+async def test_a_confirmation_by_email_carries_one_calendar_file(db: AsyncSession) -> None:
+    message = await _confirmed(db, Channel.email)
+
+    assert len(message.attachments) == 1
+    attachment = message.attachments[0]
+    assert attachment.filename == "session.ics"
+    assert attachment.subtype == "calendar"
+    assert "BEGIN:VEVENT" in attachment.content
+
+
+async def test_the_event_matches_the_request_in_utc(db: AsyncSession) -> None:
+    ics = (await _confirmed(db, Channel.email)).attachments[0].content
+
+    assert "DTSTART:20260915T143000Z" in ics
+    assert "DTEND:20260915T152000Z" in ics
+    assert "TZID" not in ics
+
+
+async def test_the_uid_is_stable_across_redeliveries(db: AsyncSession) -> None:
+    """§13.5: an outbox retry must update the entry, not add a second one."""
+    first = (await _confirmed(db, Channel.email)).attachments[0].content
+    second = (await _confirmed(db, Channel.email)).attachments[0].content
+
+    uid = f"UID:{CONFIRMED['uuid']}@booking.example.test"
+    assert uid in first
+    assert uid in second
+
+
+async def test_no_other_channel_attaches_anything(db: AsyncSession) -> None:
+    for channel in (Channel.telegram, Channel.web):
+        assert (await _confirmed(db, channel)).attachments == []
+
+
+async def test_no_other_intent_attaches_anything(db: AsyncSession) -> None:
+    for intent_key in ("reminder.client", "request.cancelled.client", "request.rejected.client"):
+        message = await render(
+            db,
+            intent_key=intent_key,
+            payload=CONFIRMED,
+            locale="en",
+            channel=Channel.email,
+            tz="UTC",
+            base_url="https://booking.example.test",
+        )
+        assert message.attachments == []
+
+
+async def test_an_online_session_names_no_meeting_room(db: AsyncSession) -> None:
+    """§13.5: the join link must not ride out inside the file either."""
+    message = await _confirmed(
+        db, Channel.email, join_url="https://meet.example.test/private-room"
+    )
+
+    ics = message.attachments[0].content
+    assert "meet.example.test" not in ics
+    assert "LOCATION:Online" in ics
+
+
+async def test_an_onsite_session_carries_the_clinic_link(db: AsyncSession) -> None:
+    message = await _confirmed(
+        db, Channel.email, modality="onsite", join_url="https://clinic.example.test/where"
+    )
+
+    assert "LOCATION:https://clinic.example.test/where" in message.attachments[0].content
+
+
+async def test_a_free_text_time_produces_no_file(db: AsyncSession) -> None:
+    """There is no honest DTSTART to make out of "some evening next week"."""
+    message = await _confirmed(db, Channel.email, time="some evening next week")
+
+    assert message.attachments == []
+
+
+async def test_a_missing_duration_produces_no_file(db: AsyncSession) -> None:
+    payload = {k: v for k, v in CONFIRMED.items() if k != "duration_min"}
+    message = await render(
+        db,
+        intent_key="request.confirmed.client",
+        payload=payload,
+        locale="en",
+        channel=Channel.email,
+        tz="UTC",
+        base_url="https://booking.example.test",
+    )
+
+    assert message.attachments == []
+
+
+async def test_a_cancellation_email_asks_for_the_entry_to_be_removed(db: AsyncSession) -> None:
+    """§13.5: nothing withdraws the event, so the message has to say so."""
+    message = await render(
+        db,
+        intent_key="request.cancelled.client",
+        payload={"uuid": "abc", "time": WHEN.isoformat()},
+        locale="en",
+        channel=Channel.email,
+        tz="UTC",
+        base_url="https://booking.example.test",
+    )
+
+    assert "calendar" in message.text.lower()
+
+
+async def test_telegram_is_not_told_about_a_calendar_it_never_got(db: AsyncSession) -> None:
+    message = await render(
+        db,
+        intent_key="request.cancelled.client",
+        payload={"uuid": "abc", "time": WHEN.isoformat()},
+        locale="en",
+        channel=Channel.telegram,
+        tz="UTC",
+        base_url="https://booking.example.test",
+    )
+
+    assert "calendar" not in message.text.lower()

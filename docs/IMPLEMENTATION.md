@@ -685,7 +685,7 @@ Each intent has a key, a recipient, a payload schema, and available actions. Tra
 | `request.submitted.client` | client | uuid, session type, requested time | open |
 | `request.proposal.client` | client | uuid, proposed_start, note | accept, counter, decline |
 | `request.counter.admin` | admin | uuid, proposed_start, note, thread | approve, propose, reject |
-| `request.confirmed.client` | client | uuid, scheduled_start, session type, modality, join info | open |
+| `request.confirmed.client` | client | uuid, scheduled_start, duration_min, session type, modality, join info | open |
 | `request.confirmed.admin` | admin | uuid, scheduled_start, client | — |
 | `request.rejected.client` | client | uuid, reason | — |
 | `request.expired.client` | client | uuid | — |
@@ -861,6 +861,23 @@ For each intent and client, deliver to: the Telegram identity if one exists; oth
 ### 13.4 Email content restriction
 
 Outbox rows with `channel='email'` **MUST NOT** include `problem_text`, negotiation bodies, or session-type-derived clinical wording in `payload`. Subject lines **MUST** be neutral and configurable via translation keys. Reminder emails **MUST** include the date and time in the body.
+
+### 13.5 Calendar attachment
+
+A confirmation delivered by email carries one iCalendar file, so a client who keeps a calendar can add the session in a single action rather than retyping it. This is the only attachment the service produces, on any channel.
+
+- Only `request.confirmed.client` on `channel='email'` attaches anything. Every other intent and every other channel attaches nothing. The Telegram equivalent is deferred (DESIGN.md §20).
+- The file is `text/calendar; charset=utf-8`, named `session.ics`: one `VCALENDAR`, `VERSION:2.0`, `METHOD:PUBLISH`, containing exactly one `VEVENT`.
+- `METHOD:REQUEST` **MUST NOT** be used and the event **MUST NOT** carry an `ATTENDEE`. Either one turns the entry into an invitation the client can accept or decline inside their calendar — an answer this service would never hear, on a channel that does not exist. Client-initiated cancellation is out of scope (§21). What is sent is a copy to keep, not a negotiation.
+- `UID` is `{booking_request.uuid}@{host of BASE_URL}`, stable across redeliveries, so an outbox retry updates the entry the client already added instead of producing a second one. `SEQUENCE` is `0`.
+- `DTSTART` and `DTEND` are UTC (`…Z` form). `TZID` **MUST NOT** be used and no `VTIMEZONE` is emitted: every client converts to the viewer's own zone, and storage is UTC already (hard rule 4).
+- `DTEND` is `DTSTART` plus `booking_request.scheduled_duration_min`, falling back to the request's session type `duration_min`.
+- `SUMMARY` comes from a translation key in the client's language and **MUST** be neutral in §13.4's sense. Once the client adds it, that string sits on a lock screen and on any calendar they share.
+- `LOCATION` is `practice.clinic_onsite_url` for `modality='onsite'` (§10 permits that link by email) and a translated word for "online" for `modality='online'`. The online join link **MUST NOT** appear: §10's restriction follows the file, which is more exposed than the message carrying it, not less.
+- `DESCRIPTION` is omitted. There is nothing to put in it the body does not already say better.
+- The file **MUST** be built from the payload *after* §13.4's scrub, never from `booking_request` directly, so the attachment cannot become a second way around the scrub.
+- Encoding follows RFC 5545: CRLF line endings, lines folded at 75 octets, and `\`, `;`, `,` and newlines escaped in text values.
+- A cancelled session is **not** withdrawn from the client's calendar: no `METHOD:CANCEL` counterpart is sent, since that would require the invitation form ruled out above. `request.cancelled.client` **MUST** therefore say in words that a calendar entry added earlier needs removing by hand.
 
 ---
 
@@ -1312,6 +1329,9 @@ Each milestone ends with its acceptance criteria passing in CI.
 
 **M11 — Health signal.** `error_event` (§6.9) and its recorders in `web` and `worker`; the checks in §16.9; the `write_status` and `prune_error_events` jobs (§14); the status file (§16.8); the dot and `/admin/status` (§12.2); health notifications (§16.10); dump verification in `backup.sh` (§16.6); README and admin-guide sections including the external uptime check.
 *Accept:* with everything healthy the dot is green on every admin page and `status.json` lists every check in §16.9 as `ok`; stopping the `worker` container turns the dot red within 4 minutes with `worker_alive` failing, without any admin page erroring; a `dead` outbox row turns it red and writes exactly one `system.health.degraded` outbox row, and a second `dead` row within the hour writes none; an unhandled exception in a request creates an `error_event` carrying the exception class and location and **no** message or traceback; removing the newest dump and ageing the rest turns `backup_fresh` amber; a corrupt dump fails `backup_verified`; a check whose query raises reports `warn` and the other checks still write; `status.json` is readable and parseable with the application stopped.
+
+**M12 — Calendar attachment.** The iCalendar file in §13.5: `duration_min` on the `request.confirmed.client` payload (§10), an attachment field on the connector contract (§9), the emitter, the SMTP attachment, and the cancellation wording in all three locale files.
+*Accept:* a confirmed booking delivered by email arrives with exactly one `session.ics` that a strict RFC 5545 reader parses; its start and end match the request in UTC with no `VTIMEZONE` and no `TZID`; two delivery attempts of the same row carry the same `UID`, so the client's calendar holds one entry; the file carries no online join link and no problem text for either modality; an onsite session's `LOCATION` is the clinic link and an online session's is the translated word; a summary containing a comma, a backslash and Armenian text survives folding and escaping intact; no other intent and no other channel produces an attachment; `request.cancelled.client` tells the client to remove the entry by hand.
 
 ---
 

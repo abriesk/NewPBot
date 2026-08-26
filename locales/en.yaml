@@ -158,6 +158,7 @@ intent:
   request.expired.client.body: "Your request {uuid} expired without a reply. You are welcome to make a new one."
   request.cancelled.client.body: "Your session on {time} has been cancelled."
   request.cancelled.client.reason: "Reason: {reason}"
+  request.cancelled.client.calendar: "If you added this session to your calendar, please remove it there."
 
   reminder.client.body: "Reminder: your session is at {time}."
   reminder.client.body.24h: "Reminder: your session is tomorrow, {time}."
@@ -179,6 +180,10 @@ email:
   subject.request_cancelled: "Your session has been cancelled"
   footer: "You are receiving this because you requested a consultation. Reply to this address if you did not."
 
+
+calendar:
+  summary: "Consultation"
+  location.online: "Online"
 # --- Admin surface. English only; never translated. -------------------------
 admin:
   login.title: "Sign in"

@@ -145,6 +145,7 @@ intent:
   request.expired.client.body: ""                # TODO: translate
   request.cancelled.client.body: ""              # TODO: translate
   request.cancelled.client.reason: ""            # TODO: translate
+  request.cancelled.client.calendar: ""          # TODO: translate
 
   reminder.client.body: ""                       # TODO: translate
   reminder.client.body.24h: "Հիշեցում՝ Ձեր խորհրդատվությունը վաղն է, {time}։"
@@ -165,3 +166,7 @@ email:
   subject.reminder: ""                           # TODO: translate
   subject.request_cancelled: ""                  # TODO: translate
   footer: ""                                     # TODO: translate
+
+calendar:
+  summary: ""                                    # TODO: translate
+  location.online: ""                            # TODO: translate

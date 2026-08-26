@@ -104,6 +104,23 @@ async def _session_type_code(session: AsyncSession, session_type_id: int) -> str
     )
 
 
+async def _duration_min(session: AsyncSession, request: BookingRequest) -> int:
+    """§13.5's `duration_min`: what was agreed, else what the product says.
+
+    `scheduled_duration_min` is nullable -- a session agreed in free text may
+    never have had one set -- and a calendar entry with no end is not an entry.
+    """
+    if request.scheduled_duration_min:
+        return request.scheduled_duration_min
+    return int(
+        (
+            await session.execute(
+                select(SessionType.duration_min).where(SessionType.id == request.session_type_id)
+            )
+        ).scalar_one()
+    )
+
+
 async def envelopes_for(session: AsyncSession, event: DomainEvent) -> list[Envelope]:
     """Map one domain event onto the intents in §10's catalogue."""
     if isinstance(event, RequestSubmitted):
@@ -151,6 +168,7 @@ async def envelopes_for(session: AsyncSession, event: DomainEvent) -> list[Envel
                 {
                     "uuid": str(request.uuid),
                     "time": _iso(event.scheduled_start),
+                    "duration_min": await _duration_min(session, request),
                     "session_type": await _session_type_code(session, request.session_type_id),
                     "modality": request.modality.value,
                     "join_url": join,

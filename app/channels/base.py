@@ -43,6 +43,21 @@ class Action:
 
 
 @dataclass(frozen=True, slots=True)
+class Attachment:
+    """A file riding along with a message (§13.5).
+
+    Text and UTF-8, because the one thing this service attaches is an iCalendar
+    file. `subtype` is the `text/<subtype>` half of the media type. A transport
+    that cannot carry files ignores these rather than failing: the message still
+    says everything the attachment does.
+    """
+
+    filename: str
+    content: str
+    subtype: str = "calendar"
+
+
+@dataclass(frozen=True, slots=True)
 class RenderedMessage:
     """What a transport is handed.
 
@@ -54,6 +69,7 @@ class RenderedMessage:
     subject: str | None = None  # email only
     actions: list[Action] = field(default_factory=list)
     parse_mode: str | None = None
+    attachments: list[Attachment] = field(default_factory=list)  # email only, §13.5
 
     @property
     def text(self) -> str:
