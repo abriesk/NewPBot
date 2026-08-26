@@ -538,7 +538,9 @@ async def admin_reject(
     return request
 
 
-async def admin_cancel(session: AsyncSession, request_id: int, *, reason: str) -> BookingRequest:
+async def admin_cancel(
+    session: AsyncSession, request_id: int, *, reason: str | None = None
+) -> BookingRequest:
     """confirmed -> cancelled.
 
     Not optional and not gated on `cancel_window_hours`: without it a confirmed

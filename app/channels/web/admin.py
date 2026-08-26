@@ -315,7 +315,7 @@ def build_router() -> APIRouter:
                     await booking.admin_reject(session, booking_request.id, reason=reason or None)
                 elif action == "cancel":
                     await booking.admin_cancel(
-                        session, booking_request.id, reason=reason or "cancelled"
+                        session, booking_request.id, reason=reason or None
                     )
                 else:
                     return Response(status_code=404)
