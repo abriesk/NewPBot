@@ -27,6 +27,28 @@ common:
   error.not_found: "Не найдено."                                        # TODO
   error.rate_limited: "Слишком много попыток. Попробуйте позже."        # TODO
 
+date:
+  weekday.0: "пн"
+  weekday.1: "вт"
+  weekday.2: "ср"
+  weekday.3: "чт"
+  weekday.4: "пт"
+  weekday.5: "сб"
+  weekday.6: "вс"
+  month.1: "янв"
+  month.2: "фев"
+  month.3: "мар"
+  month.4: "апр"
+  month.5: "мая"
+  month.6: "июн"
+  month.7: "июл"
+  month.8: "авг"
+  month.9: "сен"
+  month.10: "окт"
+  month.11: "ноя"
+  month.12: "дек"
+  day: "{weekday} {day} {month}"
+
 menu:
   consultation: "Запись на консультацию"
   home: "Домой"
@@ -92,6 +114,10 @@ request:
   status.pending: "Ожидает подтверждения"
   status.negotiating: "Согласование времени"
   status.confirmed: "Подтверждена"
+  status.rejected: "Не согласована"
+  status.expired: "Истекла без ответа"
+  status.cancelled: "Отменена"
+  status.completed: "Завершена"
   open: "Открыть вашу заявку"
   add_note: "Добавить информацию"
   note_ask: "Хотите что-то сообщить перед консультацией?"

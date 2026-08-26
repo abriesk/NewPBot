@@ -8,7 +8,6 @@ made decisions into buttons.
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import date
 from zoneinfo import ZoneInfo
 
 from aiogram.types import (
@@ -148,11 +147,18 @@ def timezone_keyboard(options: list[tuple[str, str]]) -> InlineKeyboardMarkup:
     )
 
 
-def slot_keyboard(slots: list[SlotView], tz: str) -> InlineKeyboardMarkup:
+def slot_keyboard(
+    slots: list[SlotView], tz: str, day_labels: dict[str, str]
+) -> InlineKeyboardMarkup:
     """§13.1 step 6: grouped by day, times in the client's timezone.
 
     A day header row is a disabled-looking button rather than a message, so the
     whole picker stays one editable message.
+
+    `day_labels` maps `YYYY-MM-DD` to the heading for that day. They arrive
+    already written because this module is synchronous and holds no session,
+    and a translated name needs both (§15) -- which is why the headings used to
+    come out of `strftime` in English whatever the client's language was.
     """
     zone = ZoneInfo(tz)
     by_day: dict[str, list[SlotView]] = defaultdict(list)
@@ -161,7 +167,9 @@ def slot_keyboard(slots: list[SlotView], tz: str) -> InlineKeyboardMarkup:
 
     rows: list[list[InlineKeyboardButton]] = []
     for day in sorted(by_day):
-        rows.append([InlineKeyboardButton(text=_day_label(day), callback_data="noop")])
+        rows.append(
+            [InlineKeyboardButton(text=day_labels.get(day, day), callback_data="noop")]
+        )
         times = by_day[day]
         # Three times per row keeps the buttons readable on a phone.
         for start in range(0, len(times), 3):
@@ -175,13 +183,6 @@ def slot_keyboard(slots: list[SlotView], tz: str) -> InlineKeyboardMarkup:
                 ]
             )
     return InlineKeyboardMarkup(inline_keyboard=rows)
-
-
-def _day_label(day: str) -> str:
-    # A calendar date, not an instant: the zone was already applied when the
-    # key was built, so attaching one here would be meaningless.
-    parsed = date.fromisoformat(day)
-    return parsed.strftime("%a %d %b")
 
 
 def choice_keyboard(action: str, options: list[tuple[str, str]]) -> InlineKeyboardMarkup:

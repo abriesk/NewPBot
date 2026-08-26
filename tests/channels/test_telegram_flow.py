@@ -967,11 +967,13 @@ def test_slot_buttons_are_grouped_by_day_in_the_client_timezone() -> None:
         )
         for n in range(4)
     ]
-    markup = kb.slot_keyboard(slots, "Asia/Yerevan")
+    markup = kb.slot_keyboard(slots, "Asia/Yerevan", {"2026-09-15": "вт 15 сен"})
     labels = [b.text for row in markup.inline_keyboard for b in row]
 
     assert any(":" in label for label in labels)
-    assert any("Sep" in label for label in labels)  # a day header
+    # The heading is whatever the router wrote in the client's language; this
+    # module no longer has an opinion about the wording (§15).
+    assert "вт 15 сен" in labels
 
 
 @pytest.mark.parametrize("action", [kb.SLOT, kb.STYPE, kb.MODE, kb.TZ, kb.LANG])

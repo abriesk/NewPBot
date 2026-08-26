@@ -42,6 +42,7 @@ from app.core.services.notifications import Envelope, Recipient
 from app.core.services.settings import get_practice
 from app.core.services.slots import list_available_slots
 from app.core.services.translations import get_text
+from app.render.dates import day_label
 from app.render.markdown import escape_telegram
 
 logger = logging.getLogger(__name__)
@@ -507,9 +508,18 @@ async def _show_slots(session: AsyncSession, client: Client) -> Reply:
         return Reply(await get_text(session, client.language, "booking.slot.none_available"))
 
     await flow.set_step(session, client.id, Channel.telegram, Step.choosing_slot)
+    # The picker's day headings are written here, where there is a session and a
+    # language to write them in (§15).
+    zone = ZoneInfo(tz)
+    labels = {}
+    for slot in slots:
+        day = slot.starts_at_utc.astimezone(zone).strftime("%Y-%m-%d")
+        if day not in labels:
+            labels[day] = await day_label(session, client.language, slot.starts_at_utc, tz)
+
     return Reply(
         await get_text(session, client.language, "booking.choose_slot", timezone=tz),
-        keyboard=kb.slot_keyboard(slots, tz),
+        keyboard=kb.slot_keyboard(slots, tz, labels),
     )
 
 

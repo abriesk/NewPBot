@@ -30,6 +30,28 @@ common:
   error.not_found: ""                            # TODO: translate
   error.rate_limited: ""                         # TODO: translate
 
+date:
+  weekday.0: ""                                  # TODO: translate
+  weekday.1: ""                                  # TODO: translate
+  weekday.2: ""                                  # TODO: translate
+  weekday.3: ""                                  # TODO: translate
+  weekday.4: ""                                  # TODO: translate
+  weekday.5: ""                                  # TODO: translate
+  weekday.6: ""                                  # TODO: translate
+  month.1: ""                                    # TODO: translate
+  month.2: ""                                    # TODO: translate
+  month.3: ""                                    # TODO: translate
+  month.4: ""                                    # TODO: translate
+  month.5: ""                                    # TODO: translate
+  month.6: ""                                    # TODO: translate
+  month.7: ""                                    # TODO: translate
+  month.8: ""                                    # TODO: translate
+  month.9: ""                                    # TODO: translate
+  month.10: ""                                   # TODO: translate
+  month.11: ""                                   # TODO: translate
+  month.12: ""                                   # TODO: translate
+  day: ""                                        # TODO: translate
+
 menu:
   consultation: "Գրանցվել խորհրդատվության"
   home: "Գլխավոր"
@@ -95,6 +117,10 @@ request:
   status.pending: ""                             # TODO: translate
   status.negotiating: ""                         # TODO: translate
   status.confirmed: ""                           # TODO: translate
+  status.rejected: ""                            # TODO: translate
+  status.expired: ""                             # TODO: translate
+  status.cancelled: ""                           # TODO: translate
+  status.completed: ""                           # TODO: translate
   open: ""                                       # TODO: translate
   add_note: ""                                   # TODO: translate
   note_ask: ""                                   # TODO: translate

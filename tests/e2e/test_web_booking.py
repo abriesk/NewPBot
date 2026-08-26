@@ -653,6 +653,69 @@ def test_the_booking_page_detects_and_offers_a_timezone(web: TestClient) -> None
     assert "Europe/Moscow" in body
 
 
+def test_the_slot_picker_heads_its_days_in_the_clients_language(
+    web: TestClient, web_slot: int
+) -> None:
+    """§15: `strftime` speaks the process locale, so these read "Thursday 27
+    August" to a Russian client until the names came from the catalogue."""
+    partial = web.get(
+        "/book/slots",
+        params={"session_type_id": 1, "modality": "online", "tz": "Europe/Moscow"},
+    )
+
+    assert partial.status_code == 200
+    assert re.search(r"(янв|фев|мар|апр|мая|июн|июл|авг|сен|окт|ноя|дек)", partial.text)
+    assert not re.search(r"(January|February|August|September|October)", partial.text)
+
+
+async def test_the_request_page_names_the_status_in_words(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """§15: `pending` is a database word, not something to show a client."""
+    from app.core.services.clients import issue_token
+    from app.core.services.translations import get_text
+
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+    web.get("/book")
+    web.post(
+        "/book/hold",
+        data={
+            "csrf_token": _csrf(web),
+            "slot_id": web_slot,
+            "session_type_id": session_type_id,
+            "modality": "online",
+            "tz": "Europe/Moscow",
+        },
+        follow_redirects=False,
+    )
+    web.get("/book/details")
+    web.post("/book", data={"csrf_token": _csrf(web), "problem": "x", "email": EMAIL})
+    await committed.rollback()
+
+    identity = (
+        await committed.execute(select(Identity).where(Identity.external_id == EMAIL))
+    ).scalar_one()
+    request = (
+        await committed.execute(
+            select(BookingRequest).where(BookingRequest.client_id == identity.client_id)
+        )
+    ).scalar_one()
+    raw = await issue_token(
+        committed, TokenPurpose.view_request, client_id=identity.client_id
+    )
+    await committed.commit()
+
+    web.cookies.delete(CLIENT_COOKIE)
+    page = web.get(f"/r/{request.uuid}", params={"token": raw})
+
+    expected = await get_text(committed, "ru", "request.status.pending")
+    assert expected in page.text
+    assert ">pending<" not in page.text
+    web.cookies.delete(CLIENT_COOKIE)
+
+
 def test_the_booking_page_fills_its_placeholders(web: TestClient) -> None:
     """§15: a placeholder must never reach a client's screen unfilled."""
     body = web.get("/book", params={"tz": "Europe/Berlin"}).text

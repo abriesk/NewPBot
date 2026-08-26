@@ -52,6 +52,7 @@ from app.core.services.settings import get_practice
 from app.core.services.slots import list_available_slots
 from app.core.services.translations import get_text
 from app.db import unit_of_work
+from app.render.dates import day_label
 from app.render.markdown import to_web_html
 
 logger = logging.getLogger(__name__)
@@ -376,18 +377,27 @@ def build_router() -> APIRouter:
                 tz=zone,
             )
 
+            # Grouped by the calendar date, not by the heading it will be given:
+            # keying a structure on rendered text is how two days quietly become
+            # one when the wording changes.
             grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+            starts: dict[str, datetime] = {}
             for slot in slots:
                 local = slot.starts_at_utc.astimezone(ZoneInfo(zone))
-                grouped[local.strftime("%A %d %B")].append(
-                    {"id": slot.id, "label": local.strftime("%H:%M")}
-                )
+                day = local.date().isoformat()
+                starts.setdefault(day, slot.starts_at_utc)
+                grouped[day].append({"id": slot.id, "label": local.strftime("%H:%M")})
+
+            days = [
+                (await day_label(session, lang, starts[day], zone), times)
+                for day, times in grouped.items()
+            ]
 
             return _render(
                 "partials/slots.html",
                 {
                     "request": request,
-                    "days": list(grouped.items()),
+                    "days": days,
                     "t": await _labels(session, lang),
                     "csrf_token": csrf_token_for(request),
                     "session_type_id": session_type_id or "",
@@ -676,7 +686,13 @@ def build_router() -> APIRouter:
                 {
                     **context,
                     "req": booking_request,
-                    "status_label": booking_request.status.value,
+                    # The enum value is a database word, not a client-facing one
+                    # (§15): the page used to read "pending" in every language.
+                    "status_label": await get_text(
+                        session,
+                        context["lang"],
+                        f"request.status.{booking_request.status.value}",
+                    ),
                     "when": _format(when, context, zone) or booking_request.desired_time_text,
                     "join_url": await notifications.join_info(session, booking_request)
                     if booking_request.status.value == "confirmed"

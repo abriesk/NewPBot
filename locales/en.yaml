@@ -37,6 +37,33 @@ common:
   error.not_found: "That was not found."
   error.rate_limited: "Too many attempts. Please try again later."
 
+# Day and month names for the slot pickers. Abbreviated on purpose: a full
+# month name has to decline in Russian and Armenian ("27 августа", not
+# "27 август"), and a format string cannot know that. Abbreviations are
+# case-neutral in all three languages. `weekday` is Monday-indexed, as
+# `datetime.weekday()` counts.
+date:
+  weekday.0: "Mon"
+  weekday.1: "Tue"
+  weekday.2: "Wed"
+  weekday.3: "Thu"
+  weekday.4: "Fri"
+  weekday.5: "Sat"
+  weekday.6: "Sun"
+  month.1: "Jan"
+  month.2: "Feb"
+  month.3: "Mar"
+  month.4: "Apr"
+  month.5: "May"
+  month.6: "Jun"
+  month.7: "Jul"
+  month.8: "Aug"
+  month.9: "Sep"
+  month.10: "Oct"
+  month.11: "Nov"
+  month.12: "Dec"
+  day: "{weekday} {day} {month}"
+
 menu:
   consultation: "Book a consultation"
   home: "Home"
@@ -103,6 +130,10 @@ request:
   status.pending: "Waiting for confirmation"
   status.negotiating: "Choosing a time"
   status.confirmed: "Confirmed"
+  status.rejected: "Not scheduled"
+  status.expired: "Expired without an answer"
+  status.cancelled: "Cancelled"
+  status.completed: "Finished"
   open: "Open your booking"
   add_note: "Add information"
   note_ask: "Anything you would like me to know before the session?"
