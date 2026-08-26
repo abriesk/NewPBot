@@ -28,6 +28,7 @@ from app.core.models import (
 )
 from app.core.policies import now_utc
 from app.core.services import booking, notifications, translations
+from app.core.services import slots as slot_service
 from app.core.services.content import MAX_REVISIONS
 from app.core.services.notifications import Recipient
 from app.core.services.settings import get_practice
@@ -48,14 +49,20 @@ ERROR_EVENT_RETENTION = timedelta(days=30)
 async def expire_slot_holds() -> int:
     """`slot.status='held' AND hold_expires_at < now()` -> available.
 
-    The hold exists to stop two clients picking the same slot while one is still
-    typing; when it lapses the slot must come back (DESIGN.md §8).
+    A hold lapses when the window it was given runs out: the client's
+    form-filling one for a slot nobody has submitted against, the request's own
+    `expires_at` once they have (§7.2).
+
+    The transition is `slot_service.expire_hold` rather than three assignments
+    here. Written out a second time, this job and the service were free to
+    disagree about what expiring a hold means, and only one of them is the state
+    machine.
     """
     async with unit_of_work() as session:
-        slots = (
+        slot_ids = (
             (
                 await session.execute(
-                    select(Slot)
+                    select(Slot.id)
                     .where(
                         Slot.status == SlotStatus.held,
                         Slot.hold_expires_at < now_utc(),
@@ -67,13 +74,11 @@ async def expire_slot_holds() -> int:
             .scalars()
             .all()
         )
-        for slot in slots:
-            slot.status = SlotStatus.available
-            slot.hold_expires_at = None
-            slot.held_by_request = None
-        if slots:
-            logger.info("released %d lapsed slot hold(s)", len(slots))
-        return len(slots)
+        for slot_id in slot_ids:
+            await slot_service.expire_hold(session, slot_id)
+        if slot_ids:
+            logger.info("released %d lapsed slot hold(s)", len(slot_ids))
+        return len(slot_ids)
 
 
 async def expire_requests() -> int:

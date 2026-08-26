@@ -546,7 +546,10 @@ async def submit_slot_request(
         client_timezone=client_timezone,
     )
 
-    slot = await slot_service.hold_slot(session, slot_id, request.id)
+    # The hold lasts as long as the request can stay undecided, not
+    # `slot_hold_minutes`: this request is submitted, so the window it needs is
+    # the therapist's, not the client's form-filling one (§7.2).
+    slot = await slot_service.hold_slot(session, slot_id, request.id, until=request.expires_at)
 
     if practice.auto_confirm_slots:
         # One line of policy, off by default: keeping the therapist in the loop
@@ -669,6 +672,12 @@ async def admin_propose(
         if held is None or held.starts_at != proposed_start:
             await slot_service.release_slot(session, request.slot_id)
             request.slot_id = None
+        else:
+            # Keeping the slot means keeping it held, and a negotiation has no
+            # expiry of its own (§7.1 expires only `pending`). Re-stamped from
+            # the proposal, so the hold follows the conversation rather than
+            # lapsing on a clock started at submission.
+            await slot_service.extend_hold(session, request.slot_id, pending_expiry(practice))
 
     session.add(
         NegotiationMessage(

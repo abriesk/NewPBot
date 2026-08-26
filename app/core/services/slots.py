@@ -112,8 +112,25 @@ async def list_available_slots(
     ]
 
 
-async def hold_slot(session: AsyncSession, slot_id: int, request_id: int) -> Slot:
-    """available -> held. Takes the row lock first."""
+async def hold_slot(
+    session: AsyncSession,
+    slot_id: int,
+    request_id: int,
+    *,
+    until: datetime | None = None,
+) -> Slot:
+    """available -> held. Takes the row lock first.
+
+    `until` is how long the hold lasts. The default is `slot_hold_minutes`, the
+    window a client has to finish a form; a request that has been *submitted*
+    passes its own `expires_at` instead, so the slot stays held for exactly as
+    long as the request can stay undecided. One timer serving both meant a
+    request lived 48 hours while the slot behind it went back on the picker
+    after 15 minutes, still pointed at by the request (§7.2).
+
+    Never None: §6.4 makes `status='held'` ⟺ `hold_expires_at IS NOT NULL`, so
+    "held indefinitely" is not a state this schema has.
+    """
     slot = await _lock(session, slot_id)
 
     if slot.status != SlotStatus.available:
@@ -123,9 +140,23 @@ async def hold_slot(session: AsyncSession, slot_id: int, request_id: int) -> Slo
 
     practice = await get_practice(session)
     slot.status = SlotStatus.held
-    slot.hold_expires_at = hold_expiry(practice)
+    slot.hold_expires_at = until or hold_expiry(practice)
     slot.held_by_request = request_id
     await session.flush()
+    return slot
+
+
+async def extend_hold(session: AsyncSession, slot_id: int, until: datetime) -> Slot:
+    """Push a live hold's expiry out. Anything but `held` is left alone.
+
+    A negotiation keeps a slot held while nobody has expired -- §7.1 expires
+    only `pending`, so without this the hold inherited from submission lapses
+    mid-conversation and the time under discussion goes back on the picker.
+    """
+    slot = await _lock(session, slot_id)
+    if slot.status is SlotStatus.held:
+        slot.hold_expires_at = until
+        await session.flush()
     return slot
 
 

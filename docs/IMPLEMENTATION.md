@@ -579,6 +579,7 @@ A **client note** is deliberately not in the table, because it is not a transiti
 | `available` | `hold(request)` | `held` | Row lock; `starts_at > now()` |
 | `held` | `release` | `available` | — |
 | `held` | `expire` (worker) | `available` | `hold_expires_at < now()` |
+| `held` | `extend(until)` | `held` | Re-stamps `hold_expires_at`; anything but `held` is left alone |
 | `held` | `book(request)` | `booked` | `held_by_request = request.id` |
 | `available` | `book(request)` | `booked` | Row lock (admin approving a free-text request onto a slot) |
 | `booked` | `release` | `available` | Request left `confirmed` |
@@ -586,6 +587,8 @@ A **client note** is deliberately not in the table, because it is not a transiti
 | `blocked` | `unblock` | `available` | Admin |
 
 `hold` and `book` **MUST** execute `SELECT … FROM slot WHERE id = :id FOR UPDATE` before checking status. This is the only place where a lost update would double-book.
+
+**A hold lasts as long as whatever it is protecting.** `slot_hold_minutes` is the window a *client* has to finish a form, and it applies only until the request exists. `submit_slot_request` holds until the request's own `expires_at` instead: the request stays `pending` for `pending_expiry_hours`, and a slot released ahead of that goes back on the picker while the request still points at it. A proposal that keeps its slot re-stamps the hold (`extend`), because §7.1 expires only `pending` — a negotiation has no expiry of its own, so a hold inherited from submission would lapse mid-conversation. `hold_expires_at` is never NULL while `held`; §6.4 makes that a biconditional.
 
 ---
 
@@ -1251,6 +1254,7 @@ Normative. A check not in this table does not exist; thresholds are not tuning k
 | `outbox_dead` | ≥1 `dead` in the last 7 days | — | Somebody never got a confirmation or reminder |
 | `outbox_failing` | — | ≥3 `failed` in the last hour | Wrong SMTP credentials, a blocked bot, Telegram throttling |
 | `outbox_stalled` | `pending` with `next_attempt_at` overdue by >15 min | — | Dispatch is not running even though the worker is |
+| `outbox_stuck` | `sending` for >15 min | — | A process died between the claim and the transport (§14). Deliberately not retried: whether the message arrived is precisely what is unknown, and a sweep that guessed would reintroduce the duplicate `sending` exists to prevent |
 | `reminders_overdue` | `scheduled` with `due_at` overdue by >15 min | — | As above, on the reminder path |
 | `web_errors` | ≥10 in the last hour | ≥1 in the last hour | Unhandled exception in a request — otherwise invisible (§6.9) |
 | `worker_errors` | same job in ≥3 consecutive passes | ≥1 in the last hour | A job failing silently behind §14's per-job `except` |
