@@ -125,6 +125,10 @@ All configuration is environment variables, loaded through Pydantic settings. `.
 | `ACME_EMAIL` | conditional | — | Let's Encrypt contact address; required by the `tls` profile |
 | `TUNNEL_TOKEN` | conditional | — | Required by the `cloudflared` profile only |
 | `TRUST_PROXY_HEADERS` | no | `true` | Honour `X-Forwarded-Proto` / `X-Forwarded-For` |
+| `BACKUP_DIR` | no | `./backups` | Compose only — host path bind-mounted into `backup` (read-write) and `web` (read-only) |
+| `BACKUP_PATH` | no | `/backups` | Container path `web` lists dumps from; the other end of the same mount |
+| `BACKUP_HOUR_UTC` | no | `3` | Compose only — hour of day the sidecar dumps; `0`–`23` |
+| `BACKUP_RETENTION_DAYS` | no | `30` | Compose only — dumps older than this are pruned after each successful run |
 
 If `SMTP_HOST` is unset the email channel **MUST** be disabled cleanly: no email identities can be created, the web UI **MUST** require Telegram login, and outbox rows for the `email` channel **MUST NOT** be created.
 
@@ -735,7 +739,22 @@ A message *about a request* **MUST** link to `/r/{uuid}` carrying a `view_reques
 
 All under `/admin`, session-authenticated, CSRF-protected.
 
-`/admin/login`, `/admin/requests`, `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`.
+`/admin/login`, `/admin/requests`, `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`).
+
+The maintenance page carries both halves of §16.7 and §16.6 and nothing else:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/admin/maintenance` | Config export/import panel; list of available dumps |
+| GET | `/admin/maintenance/config/export` | The config file as a JSON download (§16.7) |
+| POST | `/admin/maintenance/config/import` | Multipart upload; `apply=0` previews, `apply=1` writes |
+| GET | `/admin/maintenance/backups/{filename}` | Stream one dump from `BACKUP_PATH` |
+
+The import route is one route with two modes on purpose: a preview that runs different code from the apply is a preview of nothing. Both parse and validate identically; `apply=0` rolls the transaction back and renders the counts.
+
+`{filename}` **MUST** be validated against `^psychobooking-\d{4}-\d{2}-\d{2}(-\d{6})?\.dump$` and resolved inside `BACKUP_PATH`; anything else returns 404 without touching the filesystem. The response **MUST** stream rather than read the file into memory.
+
+Uploads **MUST** be capped (5 MB) and rejected above it before parsing.
 
 `/admin/content/preview` **MUST** render a block exactly as each channel would, side by side.
 
@@ -974,6 +993,8 @@ services:
 
 Under `tls`, `web` is reachable only on the internal network; Caddy is the sole ingress.
 
+The base file also defines `backup` (§16.6), which is not behind a profile and runs in every deployment.
+
 ### 16.4 `Caddyfile`
 
 ```
@@ -995,26 +1016,110 @@ Certificate issuance, renewal, and the HTTP→HTTPS redirect are automatic. No c
 
 ### 16.6 Backup and restore
 
-Backup is a host cron entry, not a container:
+Backup is a `backup` service in the same Compose file, on the same `postgres:16` image as `db` so that `pg_dump` can never be older than the server it dumps. It **MUST NOT** be behind a profile: profiles select the ingress (§16.1), and a backup that has to be switched on is a backup most installs do not have.
 
-```bash
-docker compose exec -T db pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB" \
-  > "/backups/psychobooking-$(date +%F).dump"
+The service sleeps until `BACKUP_HOUR_UTC`, dumps, prunes, and sleeps again:
+
+```yaml
+  backup:
+    image: postgres:16
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ${BACKUP_DIR:-./backups}:/backups
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?required}
+    entrypoint: ["/bin/sh", "/backup.sh"]
+    restart: unless-stopped
 ```
 
-- Nightly, retained 30 days, **encrypted and copied off-host** — the dump contains clients' problem text.
-- With content in the database and no application volumes, this dump plus `.env` is the complete state of the service.
+Requirements on the script:
 
-Restore:
+- `pg_dump -h db -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"` — custom format, so `pg_restore` can be selective.
+- Write to a temporary name in the same directory and `mv` into place, so a half-written dump is never named like a complete one and never listed by the admin UI.
+- Name `psychobooking-YYYY-MM-DD.dump`, matching the pattern §12.2 validates. A second run on the same day appends `-HHMMSS` rather than overwriting.
+- On success, delete dumps older than `BACKUP_RETENTION_DAYS`. **Never** prune when the dump failed — that is the run whose predecessors matter most.
+- Exit non-zero and log on failure; `restart: unless-stopped` retries. Failure **MUST NOT** be silent.
+- Compute the sleep from the wall clock each iteration, not by sleeping 86400 seconds, so a restart does not permanently shift the hour.
+
+The directory is bind-mounted from the host, so dumps are reachable by `scp` without Docker. `web` mounts the same directory **read-only** at `BACKUP_PATH` and serves it per §12.2 for a therapist with no shell access.
+
+The dump contains clients' problem text (§17, DESIGN.md §16). The directory **MUST** be created with restrictive permissions, and encrypting it and copying it off-host remains the operator's responsibility — the README **MUST** say so, and **MUST NOT** imply the container has done it.
+
+Restore is a CLI procedure and **MUST NOT** be exposed in the admin UI:
 
 ```bash
-docker compose down web worker
+docker compose stop web worker
 docker compose exec -T db pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
   --clean --if-exists < backup.dump
-docker compose up -d web worker
+docker compose start web worker
 ```
 
 The README **MUST** document a restore rehearsal onto a scratch database. A backup that has never been restored is a hypothesis.
+
+### 16.7 Configuration export and import
+
+A JSON file holding everything the therapist typed into the admin UI, and no client data (DESIGN.md §21). Logic lives in `app/core/services/config_io.py` — `export_config()` and `import_config()` — and the routes in §12.2 are thin.
+
+**Scope.** Included: the `practice` row, `session_type`, `timezone_option`, `content_topic`, `content_block`, `translation`. Excluded: clients, identities, requests, negotiation, waitlist, outbox, reminders, audit log, flow state, admin users, auth tokens, content revisions, and **slots** (dated availability, not configuration).
+
+**Format.** Version 1:
+
+```json
+{
+  "format": "psychobooking.config",
+  "version": 1,
+  "exported_at": "2026-08-26T09:00:00+00:00",
+  "practice": { "name": "…", "timezone": "Europe/Moscow", "…": "MUTABLE_FIELDS only" },
+  "session_types": [
+    {"code": "individual", "duration_min": 60, "price_amount_minor": 5000,
+     "price_currency": "AMD", "price_display_override": null,
+     "is_active": true, "sort_order": 0}
+  ],
+  "timezone_options": [
+    {"iana_name": "Asia/Yerevan", "display_name": "Yerevan, Tbilisi, Dubai",
+     "sort_order": 0, "is_active": true}
+  ],
+  "content": [
+    {"code": "work_terms", "sort_order": 0, "show_in_menu": true, "is_active": true,
+     "blocks": [
+       {"lang": "ru", "position": 0, "kind": "text", "body_md": "…",
+        "link_url": null, "is_published": true}
+     ]}
+  ],
+  "translations": { "ru": {"key": "value"}, "hy": {}, "en": {} }
+}
+```
+
+- Database ids, `practice_id`, and timestamps are **never** written. Rows match on natural keys: `session_type.code`, `timezone_option.iana_name`, `content_topic.code`, `(topic.code, lang, position)` for blocks, `(lang, key)` for translations.
+- `practice` carries exactly `MUTABLE_FIELDS` from `app/core/services/settings.py` — no more, so that adding a settings field does not silently widen what an import can rewrite.
+- Keys are sorted and the file is written with `indent=2`, so two exports diff usefully in a text editor.
+
+**Import semantics.**
+
+- **Merge, never delete.** Rows present in the database and absent from the file are left untouched. There is no replace mode (DESIGN.md §21.3).
+- One transaction. Any validation failure aborts the whole import; nothing partial is written.
+- A changed `content_block.body_md` **MUST** go through the same path as the editor — previous body into `content_block_revision`, `version` incremented — so an unwanted import is undone per block from the existing revisions page.
+- A block whose body is unchanged **MUST NOT** write a revision or bump `version`.
+- `practice` changes go through `update_settings()`, not a direct `UPDATE`, so its validation applies.
+- Import **MUST NOT** touch `admin_user`, and a file containing such a key is rejected rather than ignored.
+
+**Validation — the whole file is rejected on any of these:**
+
+- `format` is not `psychobooking.config`, or `version` is not one this build knows.
+- A language outside `ru`, `hy`, `en`. `am` therefore cannot enter through an import (hard rule 5).
+- A `practice` field outside `MUTABLE_FIELDS`, or a value `update_settings()` refuses.
+- An unknown enum value (`booking_mode`, `content_block.kind`).
+- `body_md` that fails the §11.1 Markdown subset check — the same validation the editor applies.
+- Two blocks claiming the same `(topic, lang, position)`, or two translations the same `(lang, key)`.
+
+A translation key absent from the code's catalogue is **reported and skipped**, not fatal: it usually means the file came from a newer build, and writing a key no renderer reads is dead weight.
+
+**Preview.** `apply=0` runs the identical code path inside a transaction that is rolled back, and returns counts per section — created, updated, unchanged, skipped. The apply step re-parses the uploaded file; nothing is carried between the two requests in server state.
+
+**Audit.** `config.export` and `config.import` rows in `audit_log`, with per-section counts in `meta`. `meta` **MUST NOT** contain content bodies or translation values — counts and keys only.
 
 ---
 
@@ -1027,9 +1132,10 @@ The README **MUST** document a restore rehearsal onto a scratch database. A back
 - Telegram webhook secret header checked before body parsing.
 - All web-rendered content passes the sanitiser.
 - SQL exclusively through SQLAlchemy; no string-built queries.
-- Logging: **MUST NOT** log `problem_text`, negotiation bodies, tokens, or message payloads. Log identifiers.
 - `.env` git-ignored; `.env.example` committed with placeholders.
-- Uploads: none in this version. If content import is added, accept `.md` only, 1 MB limit.
+- Logging: **MUST NOT** log `problem_text`, negotiation bodies, tokens, or message payloads. Log identifiers.
+- Uploads: exactly one — the config file at `/admin/maintenance/config/import` (§16.7). `application/json`, 5 MB cap enforced before parsing, admin session and CSRF required, never written to disk. Clients upload nothing.
+- Backup dumps contain `problem_text`. The backup directory **MUST** be created `0700`; `web` mounts it read-only; the download route requires an admin session and validates the filename against a fixed pattern (§12.2). Hard rule 8 is unaffected — a dump reaching the therapist through the admin UI has not left it.
 
 ---
 
@@ -1045,6 +1151,9 @@ Required before a milestone is complete:
 - **Reminder tests** using `time-machine`: creation on confirmation, cancellation on cancel, `skipped` when already past.
 - **Retention test:** purge nulls content and preserves rows.
 - **E2E:** book via web → approve via admin → reminder fires → cancel; and the same via a simulated Telegram update.
+- **Config round-trip test:** export → import into a freshly seeded database → export again produces a byte-identical file; the second import writes no revisions and reports every section as unchanged.
+- **Config rejection tests:** unknown language (including `am`), unknown settings field, unknown enum value, invalid Markdown, duplicate natural key — each aborts the whole import with the database untouched.
+- **Backup download tests:** traversal (`../`), an absolute path, and a name outside the dump pattern all return 404; a valid name streams the file.
 
 Tests run against a real PostgreSQL (Compose service or testcontainers). SQLite **MUST NOT** be used — the schema depends on native enums, arrays, and `FOR UPDATE SKIP LOCKED`.
 
@@ -1084,6 +1193,9 @@ Each milestone ends with its acceptance criteria passing in CI.
 **M9 — Hardening.** Rate limits, audit log coverage, retention purge, client export and erasure, backup documentation, README with setup and operations.
 *Accept:* security checklist in §17 verified item by item; retention test passes; a backup taken per §16.6 is restored onto a scratch database and the application starts against it; a fresh clone reaches a working deployment following only the README.
 
+**M10 — Portability and backups.** Config export and import (§16.7) with the maintenance page from §12.2; the `backup` sidecar and dump download (§16.6); README operations section covering both.
+*Accept:* exporting from a configured install and importing into a freshly seeded one reproduces its settings, session types, timezones, topics, blocks, and translations, and creates no clients or requests; re-importing the same file is a no-op that writes no content revisions; a file naming an unknown language, an unknown settings field, or invalid Markdown is rejected whole, leaving the database unchanged; the preview reports the same counts the apply performs; the `backup` container produces a restorable dump on schedule, prunes past the retention window, and never leaves a partial file visible; the download route rejects `../` and any name outside the dump pattern with 404.
+
 ---
 
 ## 20. Seed data
@@ -1101,3 +1213,5 @@ Each milestone ends with its acceptance criteria passing in CI.
 ## 21. Explicitly out of scope
 
 Do not implement, even if it seems natural: payments, client-initiated cancellation, calendar synchronisation, WhatsApp, multi-practice onboarding, session notes, file uploads from clients, analytics beyond the audit log. `practice_id` exists on every table but only one practice is served; do not build practice switching.
+
+Also not to be built, now that §16.6 and §16.7 exist: a restore button or any other write path for dumps in the admin UI; a "back up now" trigger; a replace-mode config import that deletes rows absent from the file; slots in the config file; scheduled or automatic import from a watched file.

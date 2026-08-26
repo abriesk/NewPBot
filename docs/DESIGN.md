@@ -377,7 +377,7 @@ The webhook is verified with a secret header token and its URL contains a random
 
 Configuration is entirely environment variables, with `.env.example` committed and `.env` **git-ignored** — the one operational fix carried over from v1.0, where `.env` was tracked. Values there are placeholders today, but a tracked `.env` becomes a leak the first time someone fills it in and runs `git add .`.
 
-Backups: nightly `pg_dump`, retained off-host. With content in the database, that single dump is now the complete state of the service.
+Backups: a `backup` sidecar container takes a nightly `pg_dump` into a directory bind-mounted from the host, prunes by age, and nothing on the host has to be configured for that to happen (§21). With content in the database, that single dump is the complete state of the service. Copying it off-host and encrypting it remains the operator's job — the container cannot know where "off-host" is.
 
 ---
 
@@ -407,6 +407,10 @@ What would still be required to serve several therapists — and is therefore *n
 | Prices as structured amount plus currency | Free-text `"50 USD / 60 min"` | Nearly free now, and required the moment payments appear |
 | Caddy with automatic Let's Encrypt as the default ingress | Nginx Proxy Manager, as in v1.0 | NPM was manual setup work; a four-line Caddyfile replaces it, and a tunnel or an existing proxy stay available as profiles |
 | Practice-wide meeting room with a per-request override | A single fixed room; or a link entered every time | Covers both a therapist with one standing room and one who generates a link per session |
+| Configuration export as JSON with natural keys | A database dump used for both purposes | A dump carries clients' problem text; a config file must be safe to email to whoever is rebuilding the install |
+| Import merges, never deletes | Replace-the-world import | A file from an older install would silently delete a topic the therapist added afterwards |
+| A `backup` sidecar container | A host cron entry (the original §17 answer); a worker sweep job | The operator should not have to configure anything on the host; and a backup that stops when the app crashes is a backup that stops when you need it |
+| Restore by CLI only | A restore button in the admin UI | One click that overwrites the database has no safe failure mode, and restore happens once a decade under supervision |
 
 ---
 
@@ -422,3 +426,57 @@ Roughly in the order they would be worth doing:
 6. Client self-study materials as a content type
 7. Multi-practice operation (§18)
 8. Statistics for the therapist: conversion, no-shows, load by weekday
+
+---
+
+## 21. Portable configuration and backups
+
+Two different problems get confused with each other, so this section separates them before answering either.
+
+**The first problem is moving an installation's *character* to another installation.** Everything the therapist typed into the admin UI — the settings, the session types, the timezone list, the topics and their blocks in three languages, the edited translations — represents weeks of writing that exists nowhere else. A fresh `docker compose up` produces a working service with seed defaults and none of that voice. Rebuilding on a new VPS, standing up a staging copy, or handing the install to someone else should not mean retyping it.
+
+**The second problem is losing the database.** That is not about voice; it is about clients, bookings, and the audit trail. It needs a periodic physical dump, and the dump contains health-related free text.
+
+### 21.1 Why these are two mechanisms, not one
+
+The obvious economy is to use one thing for both: take `pg_dump` and call it the export. It is wrong for the first problem in two ways.
+
+A dump carries `problem_text`. The whole point of §16 is that this field travels as little as possible; a "config export" that a therapist might email to whoever is helping them migrate cannot contain it. The config export contains no client data at all, which is what makes it safe to keep in a password manager or attach to a message.
+
+A dump also carries primary keys, sequences, and the schema of the version that produced it. Restoring one into a newer install means matching migration state. The config file matches on **natural keys** instead — a topic by its `code`, a translation by `(lang, key)`, a block by `(topic, lang, position)` — so a file exported before three migrations still imports afterwards, and rows that gained a column simply take its default.
+
+Hence: a small, human-readable, client-data-free **config file** for the first problem, and physical **dumps** for the second.
+
+### 21.2 What the config file is, and what it deliberately is not
+
+It holds the practice settings, session types, timezone options, content topics and blocks, and translations. It does not hold clients, requests, waitlist entries, outbox rows, reminders, the audit log, admin credentials, or content revision history.
+
+It also does not hold **slots**. Slots look like configuration from the admin page but they are dated availability: importing last winter's Tuesday afternoons into a fresh install in August produces garbage, and a booked slot cannot be transplanted away from the request that holds it. The therapist recreates a week of slots in one bulk action, which is cheaper than making the file mean two things.
+
+### 21.3 Why import merges and never deletes
+
+Import upserts what the file names and leaves everything else alone. The alternative — make the database match the file exactly — is a better clone and a worse tool. Files are kept and reused; the moment someone imports a six-month-old file to restore one topic's wording, replace-semantics would silently delete every topic added since. Merge fails in the recoverable direction: the worst outcome is stale text that can be edited, rather than absent text that has to be rewritten.
+
+Two things make merge safe to run on a live install. It applies in a single transaction, so a file that fails validation halfway leaves nothing behind. And a changed content block writes a revision through the same path the editor uses, so the existing per-block rollback undoes a bad import without any new machinery.
+
+Validation is strict on arrival and rejects the whole file rather than importing part of it: an unrecognised format or version, a language outside `ru`/`hy`/`en`, a settings field that `update_settings` would refuse, an unknown enum value. A translation key that does not exist in the code's catalogue is reported and skipped rather than being written — a key no renderer reads is dead weight, and its presence usually means the file came from a *newer* version than this one.
+
+### 21.4 Why backups are a container and not a host cron entry
+
+The original answer was a documented `crontab` line on the host. It works and costs nothing to specify, which is exactly why it was chosen — and it fails in practice for the operator this project actually has: one person, one VPS, who installed with `docker compose up` and has no reason to know that a second, invisible piece of setup exists on the host. A backup that depends on the operator remembering to configure it is a backup most installs do not have.
+
+A sidecar service in the same Compose file is set up by the same command that starts everything else. It runs the same `postgres:16` image as the database, so `pg_dump` and the server can never drift apart in version — the most common way a dump turns out to be unrestorable. It writes to a host bind mount, so the files are reachable both through the filesystem and through the admin UI, and prunes beyond the retention window.
+
+The rejected alternative was a job in the worker loop, which would have obeyed the "no scheduling outside a database sweep" rule literally and could have recorded each run in a table. It loses on independence: the worker is application code that can crash-loop on a bad deploy, and the backup is precisely what you want to still be running when it does. That rule exists so that *domain* work — reminders, expiry — survives a restart with its state in the database. A dump has no such state; the evidence that it ran is the file.
+
+### 21.5 Why the admin UI downloads dumps but cannot make or restore them
+
+Downloading matters: the therapist may not have shell access to the VPS, and "the backups exist but only root can see them" is not a recovery plan. The admin page therefore lists what is in the directory and streams a file back, read-only.
+
+There is no "back up now" button. It would put the web container in the backup path for a case the config export already covers — the reason to want one is almost always "I am about to change a lot of text", and a config export is the right snapshot for that, being smaller, safer, and readable.
+
+There is no restore button either, and this one is not a matter of cost. Restore overwrites every booking made since the dump. It is a supervised operation that happens once a decade, it needs the application stopped first, and a control that does it behind one click in a browser is a hazard with no compensating benefit. Restore stays a documented CLI procedure, and the README keeps requiring a rehearsal onto a scratch database — an untested backup is a hypothesis.
+
+### 21.6 The consequence for data protection
+
+The dumps contain problem text, so the backup directory is a new place where §16's sensitive field lives at rest. That is stated rather than avoided: the directory needs restrictive permissions, the download route is behind admin authentication over TLS, and encrypting and copying off-host remains the operator's responsibility. The config file, by contrast, is designed to carry nothing sensitive at all — which is the whole reason it exists separately.
