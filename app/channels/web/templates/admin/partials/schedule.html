@@ -1,0 +1,51 @@
+{# The week schedule (§12.2). Seven day columns in the practice timezone, each
+   holding its day in time order. Read-only by design: a cell is a link to the
+   request, and the request page keeps the actions (DESIGN.md §15). #}
+<p class="weeknav">
+  <a href="/admin/requests?view=grid&amp;start={{ prev }}">&larr; previous</a>
+  <strong>{{ week_from }} &ndash; {{ week_to }}</strong>
+  <a href="/admin/requests?view=grid&amp;start={{ next }}">next &rarr;</a>
+  {% if not is_this_week %}
+    <a class="on" href="/admin/requests?view=grid&amp;start={{ this_week }}">this week</a>
+  {% endif %}
+</p>
+
+<div class="scroll">
+<div class="week">
+  {% for day in days %}
+    <section class="wday{% if day.today %} is-today{% endif %}">
+      <h3>{{ day.label }}</h3>
+      {% for entry in day.entries %}
+        {# No problem_text here, ever (hard rule 8). Time, who, and status. #}
+        <a class="entry {{ entry.status }}" href="/admin/requests/{{ entry.uuid }}">
+          <span class="at">{{ entry.time }}</span>
+          <span class="who">{{ entry.name }}</span>
+          <span class="badge {{ entry.status }}">{{ entry.status }}</span>
+        </a>
+      {% else %}
+        <p class="muted empty">&mdash;</p>
+      {% endfor %}
+    </section>
+  {% endfor %}
+</div>
+</div>
+
+{# A free-text request has wording rather than an instant, so there is no
+   honest cell for it. Listed rather than dropped: these are the ones most in
+   need of an answer (DESIGN.md §15). #}
+<h2>Unscheduled <span class="count">{{ unscheduled | length }}</span></h2>
+{% if unscheduled %}
+  <ul class="unscheduled">
+    {% for entry in unscheduled %}
+      <li>
+        <a href="/admin/requests/{{ entry.uuid }}">
+          <span class="badge {{ entry.status }}">{{ entry.status }}</span>
+          <span class="who">{{ entry.name }}</span>
+        </a>
+        {% if entry.wanted %}<span class="muted wanted">{{ entry.wanted }}</span>{% endif %}
+      </li>
+    {% endfor %}
+  </ul>
+{% else %}
+  <p class="muted">Nothing waiting without a time.</p>
+{% endif %}

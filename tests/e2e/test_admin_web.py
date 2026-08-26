@@ -10,6 +10,7 @@ from __future__ import annotations
 
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, date, datetime, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 import pytest_asyncio
@@ -736,8 +737,16 @@ async def test_a_translation_still_saves_from_the_grouped_page(
     web: TestClient, committed: AsyncSession
 ) -> None:
     """The grouping is presentation; the form it wraps is the one that worked
-    before."""
+    before.
+
+    The wording saved has to *differ* from the seeded one, or the assertion
+    passes whether or not the form did anything.
+    """
     from app.core.services.translations import get_text, invalidate_cache
+    from app.seed import load_locale_catalogue
+
+    seeded = load_locale_catalogue()["ru"]["request.thread"]
+    edited = f"{seeded} (edited)"
 
     _sign_in(web)
     web.get("/admin/translations", params={"lang": "ru"})
@@ -747,7 +756,7 @@ async def test_a_translation_still_saves_from_the_grouped_page(
             "csrf_token": _csrf(web),
             "lang": "ru",
             "key": "request.thread",
-            "value": "Переписка",
+            "value": edited,
         },
         follow_redirects=False,
     )
@@ -755,10 +764,16 @@ async def test_a_translation_still_saves_from_the_grouped_page(
 
     await committed.rollback()
     invalidate_cache()
-    assert await get_text(committed, "ru", "request.thread") == "Переписка"
+    assert await get_text(committed, "ru", "request.thread") == edited
 
+    # Restored, not deleted: `request.thread` is a seeded key (§20), so
+    # removing the row leaves the database one short of the catalogue. That
+    # fails the seed tests on the *next* run rather than this one, which is
+    # about as unhelpful as a failure gets.
     await committed.execute(
-        delete(Translation).where(Translation.lang == "ru", Translation.key == "request.thread")
+        update(Translation)
+        .where(Translation.lang == "ru", Translation.key == "request.thread")
+        .values(value=seeded)
     )
     await committed.execute(delete(AdminSession))
     await committed.commit()
@@ -800,3 +815,405 @@ async def test_a_timezone_must_be_an_iana_name(web: TestClient, committed: Async
     await committed.rollback()
     await committed.execute(delete(AdminSession))
     await committed.commit()
+
+
+# --- The week schedule (§12.2, M13) -----------------------------------------
+
+#: A client that belongs to these tests alone, so teardown can be exact.
+SCHEDULE_TG = "700800901"
+
+#: Written into every request the grid fixture makes. Hard rule 8 says it must
+#: never reach this surface, so it has to be present to be worth asserting on.
+PRIVATE = "a private matter, never on the grid"
+
+
+def _day_sections(html: str) -> list[str]:
+    """The seven day columns, each bounded by its own `</section>`.
+
+    Bounded rather than split on the next opening tag: the unscheduled list
+    follows the last column, and an unbounded final chunk would swallow it --
+    making everything listed *beside* the grid look as though it were on it.
+    """
+    grid = html.split("<h2>Unscheduled")[0]
+    return [chunk.split("</section>")[0] for chunk in grid.split('<section class="wday')[1:]]
+
+
+def _columns(html: str) -> list[str]:
+    """The day headings the grid rendered, in order."""
+    return [
+        section.split("</h3>")[0].split("<h3>")[-1].strip() for section in _day_sections(html)
+    ]
+
+
+def _column_holding(html: str, uuid: object) -> str | None:
+    """Which day column carries a link to this request, by its heading."""
+    for section in _day_sections(html):
+        if str(uuid) in section:
+            return section.split("</h3>")[0].split("<h3>")[-1].strip()
+    return None
+
+
+def _beside_the_grid(html: str) -> str:
+    return html.split("<h2>Unscheduled")[-1]
+
+
+@pytest_asyncio.fixture
+async def schedule_week(committed: AsyncSession) -> AsyncIterator[dict[str, object]]:
+    """One request per interesting status, at known local times this week.
+
+    Placed through the practice's own clock rather than in UTC: the whole point
+    of the view is that the therapist sees her own Wednesday afternoon, so the
+    fixture has to speak the way she does.
+    """
+    practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
+    session_type_id = int(
+        (
+            await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+        ).scalar_one()
+    )
+    zone = ZoneInfo(practice.timezone)
+
+    # Idempotent setup: a run that died before teardown must not block the next.
+    stale = (
+        (
+            await committed.execute(
+                select(Identity.client_id).where(Identity.external_id == SCHEDULE_TG)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if stale:
+        await committed.execute(
+            update(Slot)
+            .where(
+                Slot.held_by_request.in_(
+                    select(BookingRequest.id).where(BookingRequest.client_id.in_(stale))
+                )
+            )
+            .values(status=SlotStatus.available, hold_expires_at=None, held_by_request=None)
+        )
+        await committed.execute(delete(BookingRequest).where(BookingRequest.client_id.in_(stale)))
+        await committed.execute(delete(Identity).where(Identity.client_id.in_(stale)))
+        await committed.execute(delete(Client).where(Client.id.in_(stale)))
+        await committed.commit()
+
+    client = Client(practice_id=practice.id, language="ru", display_name="Grid Client")
+    committed.add(client)
+    await committed.flush()
+    committed.add(
+        Identity(
+            practice_id=practice.id,
+            client_id=client.id,
+            channel=Channel.telegram,
+            external_id=SCHEDULE_TG,
+            verified_at=datetime.now(UTC),
+        )
+    )
+
+    today = datetime.now(UTC).astimezone(zone).date()
+    monday = today - timedelta(days=today.weekday())
+
+    def instant(offset: int, hour: int) -> datetime:
+        """A local wall-clock time this week, as the instant it really is."""
+        return datetime.combine(
+            monday + timedelta(days=offset),
+            datetime.min.time().replace(hour=hour),
+            tzinfo=zone,
+        ).astimezone(UTC)
+
+    def make(status: RequestStatus, *, at: datetime | None = None, wanted: str | None = None):
+        request = BookingRequest(
+            practice_id=practice.id,
+            client_id=client.id,
+            session_type_id=session_type_id,
+            modality=Modality.online,
+            status=status,
+            source_channel=Channel.web,
+            scheduled_start=at,
+            confirmed_at=datetime.now(UTC) if at is not None else None,
+            desired_time_text=wanted,
+            problem_text=PRIVATE,
+        )
+        committed.add(request)
+        return request
+
+    confirmed = make(RequestStatus.confirmed, at=instant(2, 14))  # Wed 14:00
+    completed = make(RequestStatus.completed, at=instant(0, 10))  # Mon 10:00
+    rejected = make(RequestStatus.rejected, at=instant(3, 11))  # Thu 11:00, must not show
+    timeless = make(RequestStatus.pending, wanted="some evening next week?")
+
+    # A negotiating request that is still on its slot: `admin_propose` keeps
+    # `slot_id` when the proposal names the time the client already holds.
+    talking = make(RequestStatus.negotiating)
+    # A negotiating request that is not: proposing a *different* time releases
+    # the slot (§7.1), and the proposed instant lives on the negotiation
+    # message rather than on the request, so nothing places this one.
+    countered = make(RequestStatus.negotiating)
+
+    # A pending request holds a slot rather than a schedule: §7.1 sets
+    # `scheduled_start` only at approval.
+    slots = [
+        Slot(
+            practice_id=practice.id,
+            starts_at=at,
+            duration_min=60,
+            status=SlotStatus.available,
+        )
+        for at in (instant(4, 9), instant(1, 16))  # Fri 09:00, Tue 16:00
+    ]
+    for row in slots:
+        committed.add(row)
+    await committed.flush()
+
+    holding = make(RequestStatus.pending)
+    await committed.flush()
+    for request, slot in ((holding, slots[0]), (talking, slots[1])):
+        request.slot_id = slot.id
+        slot.status = SlotStatus.held
+        slot.held_by_request = request.id
+        slot.hold_expires_at = datetime.now(UTC) + timedelta(minutes=30)
+
+    await committed.flush()
+    for row in (confirmed, completed, rejected, timeless, holding, talking, countered):
+        await committed.refresh(row)
+    await committed.commit()
+
+    yield {
+        "monday": monday.isoformat(),
+        "confirmed": str(confirmed.uuid),
+        "completed": str(completed.uuid),
+        "rejected": str(rejected.uuid),
+        "timeless": str(timeless.uuid),
+        "holding": str(holding.uuid),
+        "talking": str(talking.uuid),
+        "countered": str(countered.uuid),
+        "client_id": client.id,
+        "session_type_id": session_type_id,
+        "practice_id": int(practice.id),
+    }
+
+    slot_ids = [int(row.id) for row in slots]
+    await committed.rollback()
+    await committed.execute(
+        update(Slot)
+        .where(Slot.id.in_(slot_ids))
+        .values(status=SlotStatus.available, hold_expires_at=None, held_by_request=None)
+    )
+    await committed.execute(delete(BookingRequest).where(BookingRequest.client_id == client.id))
+    await committed.execute(delete(Slot).where(Slot.id.in_(slot_ids)))
+    await committed.execute(delete(Identity).where(Identity.client_id == client.id))
+    await committed.execute(delete(Client).where(Client.id == client.id))
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
+def test_the_schedule_draws_seven_days_of_the_current_week(
+    web: TestClient, schedule_week: dict[str, object]
+) -> None:
+    _sign_in(web)
+    page = web.get("/admin/requests?view=grid")
+
+    assert page.status_code == 200
+    assert len(_columns(page.text)) == 7
+
+
+def test_every_kind_of_live_request_with_a_time_is_on_the_grid(
+    web: TestClient, schedule_week: dict[str, object]
+) -> None:
+    """Confirmed, completed and slot-holding requests all carry a time, so all
+    three belong in a column -- and a rejected one belongs nowhere."""
+    _sign_in(web)
+    html = web.get("/admin/requests?view=grid").text
+
+    assert _column_holding(html, schedule_week["confirmed"]) is not None
+    assert _column_holding(html, schedule_week["completed"]) is not None
+    assert _column_holding(html, schedule_week["holding"]) is not None
+    assert str(schedule_week["rejected"]) not in html
+
+
+def test_a_negotiation_still_sitting_on_its_slot_is_on_the_grid(
+    web: TestClient, schedule_week: dict[str, object]
+) -> None:
+    """`admin_propose` keeps `slot_id` when the proposal names the time the
+    client already holds, so this one has an instant to be placed by."""
+    _sign_in(web)
+    html = web.get("/admin/requests?view=grid").text
+
+    assert _column_holding(html, schedule_week["talking"]) == _columns(html)[1]  # Tue
+
+
+def test_a_countered_negotiation_falls_to_the_list_with_nothing_to_show(
+    web: TestClient, schedule_week: dict[str, object]
+) -> None:
+    """Proposing a *different* time releases the slot (§7.1) and records the
+    instant on the negotiation message, not on the request. Nothing places it,
+    so it lands beside the grid -- and because it came through the slot path it
+    has no `desired_time_text` either, leaving the row with only a name.
+
+    This is the current, specified behaviour rather than a desirable one; it is
+    asserted so that changing it has to be a decision.
+    """
+    _sign_in(web)
+    html = web.get("/admin/requests?view=grid").text
+
+    assert _column_holding(html, schedule_week["countered"]) is None
+    assert str(schedule_week["countered"]) in _beside_the_grid(html)
+
+
+def test_a_session_lands_on_the_weekday_it_is_actually_on(
+    web: TestClient, schedule_week: dict[str, object]
+) -> None:
+    _sign_in(web)
+    html = web.get("/admin/requests?view=grid").text
+    columns = _columns(html)
+
+    assert _column_holding(html, schedule_week["completed"]) == columns[0]  # Mon
+    assert _column_holding(html, schedule_week["confirmed"]) == columns[2]  # Wed
+    assert _column_holding(html, schedule_week["holding"]) == columns[4]  # Fri
+
+
+def test_a_finished_session_still_appears_so_the_week_is_not_a_lie(
+    web: TestClient, schedule_week: dict[str, object]
+) -> None:
+    """The worker sweeps confirmed to completed once the end passes (§14); a
+    grid without them renders every past week empty."""
+    _sign_in(web)
+
+    assert str(schedule_week["completed"]) in web.get("/admin/requests?view=grid").text
+
+
+def test_a_request_with_only_wording_is_listed_beside_the_grid(
+    web: TestClient, schedule_week: dict[str, object]
+) -> None:
+    _sign_in(web)
+    html = web.get("/admin/requests?view=grid").text
+
+    assert _column_holding(html, schedule_week["timeless"]) is None
+    beside = _beside_the_grid(html)
+    assert str(schedule_week["timeless"]) in beside
+    assert "some evening next week?" in beside
+
+
+def test_start_moves_a_whole_week_at_a_time(
+    web: TestClient, schedule_week: dict[str, object]
+) -> None:
+    _sign_in(web)
+    monday = date.fromisoformat(str(schedule_week["monday"]))
+
+    here = web.get(f"/admin/requests?view=grid&start={monday.isoformat()}").text
+    ahead = web.get(
+        f"/admin/requests?view=grid&start={(monday + timedelta(days=7)).isoformat()}"
+    ).text
+
+    assert str(schedule_week["confirmed"]) in here
+    assert str(schedule_week["confirmed"]) not in ahead
+    assert len(_columns(ahead)) == 7
+
+
+def test_a_date_mid_week_is_snapped_back_to_its_monday(
+    web: TestClient, schedule_week: dict[str, object]
+) -> None:
+    """§12.2: a hand-edited URL lands on a whole week, not a seven-day window
+    that starts on a Thursday."""
+    _sign_in(web)
+    monday = date.fromisoformat(str(schedule_week["monday"]))
+
+    from_monday = web.get(f"/admin/requests?view=grid&start={monday.isoformat()}").text
+    from_thursday = web.get(
+        f"/admin/requests?view=grid&start={(monday + timedelta(days=3)).isoformat()}"
+    ).text
+
+    assert _columns(from_monday) == _columns(from_thursday)
+
+
+def test_a_start_that_is_not_a_date_falls_back_to_this_week(
+    web: TestClient, schedule_week: dict[str, object]
+) -> None:
+    """The parameter is navigation, not input: nonsense lands somewhere useful."""
+    _sign_in(web)
+
+    nonsense = web.get("/admin/requests?view=grid&start=next-tuesday-ish")
+
+    assert nonsense.status_code == 200
+    assert _columns(nonsense.text) == _columns(web.get("/admin/requests?view=grid").text)
+
+
+def test_an_unknown_view_is_the_list_rather_than_an_error(
+    web: TestClient, schedule_week: dict[str, object]
+) -> None:
+    _sign_in(web)
+
+    page = web.get("/admin/requests?view=gantt")
+
+    assert page.status_code == 200
+    assert "<table>" in page.text
+
+
+def test_the_schedule_never_renders_problem_text(
+    web: TestClient, schedule_week: dict[str, object]
+) -> None:
+    """Hard rule 8, guarded on a new surface that renders request data."""
+    _sign_in(web)
+
+    for url in ("/admin/requests?view=grid", "/admin/requests"):
+        assert PRIVATE not in web.get(url).text
+
+
+def test_the_toggle_leaves_the_list_view_exactly_as_it_was(
+    web: TestClient, schedule_week: dict[str, object]
+) -> None:
+    _sign_in(web)
+
+    default = web.get("/admin/requests").text
+    explicit = web.get("/admin/requests?view=list").text
+    filtered = web.get("/admin/requests?status=confirmed")
+
+    assert "<table>" in default
+    assert "<table>" in explicit
+    assert 'class="filters"' in default
+    assert filtered.status_code == 200
+    assert str(schedule_week["confirmed"]) in filtered.text
+    # A second view of the same route, reachable from the first.
+    assert 'href="/admin/requests?view=grid"' in default
+
+
+async def test_a_week_that_loses_an_hour_still_has_seven_days(
+    web: TestClient, committed: AsyncSession, schedule_week: dict[str, object]
+) -> None:
+    """A week containing a DST transition is not 168 hours long.
+
+    Placing entries by arithmetic on the week's first instant walks a day's
+    worth of them across the boundary; placing them by local wall-clock date
+    does not. Europe/Berlin falls back on Sunday 25 October 2026.
+    """
+    practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
+    practice.timezone = "Europe/Berlin"
+    request = BookingRequest(
+        practice_id=schedule_week["practice_id"],
+        client_id=schedule_week["client_id"],
+        session_type_id=schedule_week["session_type_id"],
+        modality=Modality.online,
+        status=RequestStatus.confirmed,
+        source_channel=Channel.web,
+        # 10:00 on the fall-back Sunday, in her clock: 09:00 UTC, because the
+        # zone is back on UTC+1 by then.
+        scheduled_start=datetime(2026, 10, 25, 10, 0, tzinfo=ZoneInfo("Europe/Berlin")).astimezone(
+            UTC
+        ),
+        confirmed_at=datetime.now(UTC),
+    )
+    committed.add(request)
+    await committed.flush()
+    await committed.refresh(request)
+    await committed.commit()
+
+    _sign_in(web)
+    html = web.get("/admin/requests?view=grid&start=2026-10-19").text
+
+    columns = _columns(html)
+    assert len(columns) == 7
+    assert _column_holding(html, request.uuid) == columns[6], "the fall-back Sunday"
+    # Her clock, not the stored instant: 10:00 local is 09:00 UTC that day.
+    assert "10:00" in _day_sections(html)[6]
+    assert "09:00" not in _day_sections(html)[6]

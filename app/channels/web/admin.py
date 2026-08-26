@@ -16,7 +16,7 @@ into app/core/services/.
 from __future__ import annotations
 
 import logging
-from datetime import date, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -229,11 +229,27 @@ def build_router() -> APIRouter:
         return _back("/admin/requests")
 
     @router.get("/requests", response_class=HTMLResponse, include_in_schema=False)
-    async def requests_list(request: Request, status: str = "") -> Response:
+    async def requests_list(
+        request: Request, status: str = "", view: str = "", start: str = ""
+    ) -> Response:
+        """§12.2: two views of one query, chosen by `?view=`.
+
+        Anything other than `grid` is the list, including nonsense: the
+        parameter is navigation, not input, so a bad one lands somewhere useful
+        rather than on an error page.
+        """
         async with unit_of_work() as session:
             admin = await current_admin(session, request)
             if admin is None:
                 return _back("/admin/login")
+
+            if view == "grid":
+                return _render(
+                    "admin/requests.html",
+                    await _context(
+                        session, request, admin, view="grid", **await _schedule(session, start)
+                    ),
+                )
 
             stmt = select(BookingRequest).order_by(BookingRequest.created_at.desc())
             if status:
@@ -249,6 +265,7 @@ def build_router() -> APIRouter:
                     session,
                     request,
                     admin,
+                    view="list",
                     rows=[await _summary(session, r) for r in rows],
                     statuses=[s.value for s in RequestStatus],
                     active=status,
@@ -1242,6 +1259,91 @@ def build_router() -> APIRouter:
 
 
 # --- Helpers ----------------------------------------------------------------
+
+
+def _week_start(value: str, zone: ZoneInfo) -> date:
+    """The Monday of the week `value` names, in the practice's own clock.
+
+    §12.2: a date that will not parse means the current week, and a date that
+    is not a Monday is snapped to the one before it -- so a hand-edited URL
+    lands on a whole week rather than on a seven-day window starting Thursday.
+    """
+    try:
+        anchor = date.fromisoformat(value)
+    except ValueError:
+        anchor = datetime.now(UTC).astimezone(zone).date()
+    return anchor - timedelta(days=anchor.weekday())
+
+
+async def _schedule(session: AsyncSession, start: str) -> dict[str, Any]:
+    """§12.2's week schedule: seven day columns, plus what has no cell.
+
+    Entries are placed by the **local wall-clock date** of their start, never by
+    an offset from the week's first instant. A week containing a DST transition
+    is not 168 hours long, and arithmetic on the instant quietly moves a day's
+    worth of sessions across the boundary twice a year.
+    """
+    practice = await get_practice(session)
+    zone = ZoneInfo(practice.timezone)
+    monday = _week_start(start, zone)
+
+    # Widened a day at each end, then filtered by local date below: a zone whose
+    # midnight moves must not be able to clip the first or the last column.
+    entries = await booking.scheduled_in_window(
+        session,
+        window_from=datetime.combine(monday - timedelta(days=1), time.min, tzinfo=zone).astimezone(
+            UTC
+        ),
+        window_to=datetime.combine(monday + timedelta(days=8), time.min, tzinfo=zone).astimezone(
+            UTC
+        ),
+    )
+
+    columns: dict[date, list[dict[str, Any]]] = {
+        monday + timedelta(days=offset): [] for offset in range(7)
+    }
+    for entry in entries:
+        if entry.starts_at is None:  # not possible from this query; not worth a crash
+            continue
+        local = entry.starts_at.astimezone(zone)
+        day = columns.get(local.date())
+        if day is None:  # the widened edge; belongs to a neighbouring week
+            continue
+        day.append(
+            {
+                "uuid": str(entry.uuid),
+                "time": local.strftime("%H:%M"),
+                "name": entry.display_name or "no name",
+                "status": entry.status.value,
+            }
+        )
+
+    today = datetime.now(UTC).astimezone(zone).date()
+    return {
+        "days": [
+            {
+                "label": day.strftime("%a %d %b"),
+                "today": day == today,
+                "entries": rows,
+            }
+            for day, rows in columns.items()
+        ],
+        "unscheduled": [
+            {
+                "uuid": str(entry.uuid),
+                "name": entry.display_name or "no name",
+                "status": entry.status.value,
+                "wanted": entry.desired_time_text or "",
+            }
+            for entry in await booking.unscheduled_for_admin(session)
+        ],
+        "week_from": monday.strftime("%d %b"),
+        "week_to": (monday + timedelta(days=6)).strftime("%d %b %Y"),
+        "prev": (monday - timedelta(days=7)).isoformat(),
+        "next": (monday + timedelta(days=7)).isoformat(),
+        "this_week": _week_start("", zone).isoformat(),
+        "is_this_week": monday == _week_start("", zone),
+    }
 
 
 async def _summary(session: AsyncSession, request: BookingRequest) -> dict[str, Any]:
