@@ -11,17 +11,26 @@ pollutes the state machine (DESIGN.md §2).
 
 from __future__ import annotations
 
+from datetime import timedelta
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import ActorType, WaitlistStatus
-from app.core.errors import InvalidTransition, NotFound
+from app.core.errors import InvalidTransition, NotFound, RateLimited
 from app.core.events import WaitlistJoined, collect
 from app.core.models import AuditLog, WaitlistEntry
 from app.core.policies import now_utc
 from app.core.services.settings import get_practice
+
+#: §17 caps booking submission at 5 an hour per client, and §8 lists
+#: `join_waitlist` among the booking submissions. It was the one submission path
+#: with nothing in front of it: when availability is off the waitlist is the
+#: *only* thing the client is offered (DESIGN.md §6), so it is exactly the form
+#: somebody bored can hold down, and every entry pages the therapist.
+JOINS_PER_HOUR = 5
+JOIN_WINDOW = timedelta(hours=1)
 
 ALLOWED: dict[WaitlistStatus, frozenset[WaitlistStatus]] = {
     WaitlistStatus.new: frozenset({WaitlistStatus.contacted, WaitlistStatus.closed}),
@@ -40,6 +49,26 @@ async def _get(session: AsyncSession, entry_id: int) -> WaitlistEntry:
     return entry
 
 
+async def _enforce_join_rate(session: AsyncSession, client_id: UUID) -> None:
+    """§17's submission limit, counted over waitlist entries.
+
+    Every status counts, closed ones included: an entry the therapist has
+    already dealt with still cost her the reading of it.
+    """
+    recent = (
+        await session.execute(
+            select(func.count())
+            .select_from(WaitlistEntry)
+            .where(
+                WaitlistEntry.client_id == client_id,
+                WaitlistEntry.created_at >= now_utc() - JOIN_WINDOW,
+            )
+        )
+    ).scalar_one()
+    if int(recent) >= JOINS_PER_HOUR:
+        raise RateLimited(f"{JOINS_PER_HOUR} waitlist joins an hour is the limit")
+
+
 async def join_waitlist(
     session: AsyncSession,
     *,
@@ -52,6 +81,8 @@ async def join_waitlist(
     Deliberately not gated on `availability_on`: the waitlist is precisely what
     the client is offered when availability is off (DESIGN.md §6).
     """
+    await _enforce_join_rate(session, client_id)
+
     practice = await get_practice(session)
     entry = WaitlistEntry(
         practice_id=practice.id,

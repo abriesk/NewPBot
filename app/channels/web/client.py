@@ -605,12 +605,26 @@ def build_router() -> APIRouter:
                     session, Channel.email, email, language=context["lang"]
                 )
 
-            await waitlist.join_waitlist(
-                session,
-                client_id=client.id,
-                problem_text=problem or None,
-                contact_note=contact or None,
-            )
+            try:
+                await waitlist.join_waitlist(
+                    session,
+                    client_id=client.id,
+                    problem_text=problem or None,
+                    contact_note=contact or None,
+                )
+            except DomainError:
+                # §17's limit reaches here. Without the catch it would leave the
+                # ASGI handler to turn a rate limit into a 500 and an
+                # `error_event` -- a refusal is not a fault.
+                return _render(
+                    "error.html",
+                    {
+                        **context,
+                        "heading": context["t"]["error"],
+                        "message": context["t"]["unavailable"],
+                    },
+                    status_code=409,
+                )
             await notifications.publish(session)
 
             return _render(
