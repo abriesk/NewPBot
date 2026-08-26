@@ -929,25 +929,39 @@ async def schedule_week(committed: AsyncSession) -> AsyncIterator[dict[str, obje
     rejected = make(RequestStatus.rejected, at=instant(3, 11))  # Thu 11:00, must not show
     timeless = make(RequestStatus.pending, wanted="some evening next week?")
 
+    # A negotiating request that is still on its slot: `admin_propose` keeps
+    # `slot_id` when the proposal names the time the client already holds.
+    talking = make(RequestStatus.negotiating)
+    # A negotiating request that is not: proposing a *different* time releases
+    # the slot (§7.1), and the proposed instant lives on the negotiation
+    # message rather than on the request, so nothing places this one.
+    countered = make(RequestStatus.negotiating)
+
     # A pending request holds a slot rather than a schedule: §7.1 sets
     # `scheduled_start` only at approval.
-    slot = Slot(
-        practice_id=practice.id,
-        starts_at=instant(4, 9),  # Fri 09:00
-        duration_min=60,
-        status=SlotStatus.available,
-    )
-    committed.add(slot)
+    slots = [
+        Slot(
+            practice_id=practice.id,
+            starts_at=at,
+            duration_min=60,
+            status=SlotStatus.available,
+        )
+        for at in (instant(4, 9), instant(1, 16))  # Fri 09:00, Tue 16:00
+    ]
+    for row in slots:
+        committed.add(row)
     await committed.flush()
+
     holding = make(RequestStatus.pending)
     await committed.flush()
-    holding.slot_id = slot.id
-    slot.status = SlotStatus.held
-    slot.held_by_request = holding.id
-    slot.hold_expires_at = datetime.now(UTC) + timedelta(minutes=30)
+    for request, slot in ((holding, slots[0]), (talking, slots[1])):
+        request.slot_id = slot.id
+        slot.status = SlotStatus.held
+        slot.held_by_request = request.id
+        slot.hold_expires_at = datetime.now(UTC) + timedelta(minutes=30)
 
     await committed.flush()
-    for row in (confirmed, completed, rejected, timeless, holding):
+    for row in (confirmed, completed, rejected, timeless, holding, talking, countered):
         await committed.refresh(row)
     await committed.commit()
 
@@ -958,19 +972,22 @@ async def schedule_week(committed: AsyncSession) -> AsyncIterator[dict[str, obje
         "rejected": str(rejected.uuid),
         "timeless": str(timeless.uuid),
         "holding": str(holding.uuid),
+        "talking": str(talking.uuid),
+        "countered": str(countered.uuid),
         "client_id": client.id,
         "session_type_id": session_type_id,
         "practice_id": int(practice.id),
     }
 
+    slot_ids = [int(row.id) for row in slots]
     await committed.rollback()
     await committed.execute(
         update(Slot)
-        .where(Slot.id == slot.id)
+        .where(Slot.id.in_(slot_ids))
         .values(status=SlotStatus.available, hold_expires_at=None, held_by_request=None)
     )
     await committed.execute(delete(BookingRequest).where(BookingRequest.client_id == client.id))
-    await committed.execute(delete(Slot).where(Slot.id == slot.id))
+    await committed.execute(delete(Slot).where(Slot.id.in_(slot_ids)))
     await committed.execute(delete(Identity).where(Identity.client_id == client.id))
     await committed.execute(delete(Client).where(Client.id == client.id))
     await committed.execute(delete(AdminSession))
@@ -999,6 +1016,35 @@ def test_every_kind_of_live_request_with_a_time_is_on_the_grid(
     assert _column_holding(html, schedule_week["completed"]) is not None
     assert _column_holding(html, schedule_week["holding"]) is not None
     assert str(schedule_week["rejected"]) not in html
+
+
+def test_a_negotiation_still_sitting_on_its_slot_is_on_the_grid(
+    web: TestClient, schedule_week: dict[str, object]
+) -> None:
+    """`admin_propose` keeps `slot_id` when the proposal names the time the
+    client already holds, so this one has an instant to be placed by."""
+    _sign_in(web)
+    html = web.get("/admin/requests?view=grid").text
+
+    assert _column_holding(html, schedule_week["talking"]) == _columns(html)[1]  # Tue
+
+
+def test_a_countered_negotiation_falls_to_the_list_with_nothing_to_show(
+    web: TestClient, schedule_week: dict[str, object]
+) -> None:
+    """Proposing a *different* time releases the slot (§7.1) and records the
+    instant on the negotiation message, not on the request. Nothing places it,
+    so it lands beside the grid -- and because it came through the slot path it
+    has no `desired_time_text` either, leaving the row with only a name.
+
+    This is the current, specified behaviour rather than a desirable one; it is
+    asserted so that changing it has to be a decision.
+    """
+    _sign_in(web)
+    html = web.get("/admin/requests?view=grid").text
+
+    assert _column_holding(html, schedule_week["countered"]) is None
+    assert str(schedule_week["countered"]) in _beside_the_grid(html)
 
 
 def test_a_session_lands_on_the_weekday_it_is_actually_on(
