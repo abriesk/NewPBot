@@ -30,15 +30,29 @@ async def test_the_day_is_the_one_the_client_is_living_in(db: AsyncSession) -> N
     assert await day_label(db, "en", late, "Asia/Yerevan") == "Fri 28 Aug"
 
 
+async def test_the_day_is_written_in_armenian_too(db: AsyncSession) -> None:
+    """hy used to fall back to Russian here because its `date.` keys were
+    empty. It has its own words now, and a heading that quietly reverts to
+    another language is the thing this file exists to catch."""
+    label = await day_label(db, "hy", WHEN, "Asia/Yerevan")
+
+    assert label == "Հնգ 27 Օգս"
+    assert label != await day_label(db, "ru", WHEN, "Asia/Yerevan")
+
+
 async def test_an_untranslated_language_falls_back_whole(db: AsyncSession) -> None:
     """§15's chain, applied to every part: a half-Russian half-English heading
-    would be worse than either."""
-    label = await day_label(db, "hy", WHEN, "Asia/Yerevan")
+    would be worse than either.
+
+    Asked of a language the catalogue does not carry at all, rather than of hy,
+    which used to serve as the example and is now complete.
+    """
+    label = await day_label(db, "xx", WHEN, "Asia/Yerevan")
 
     assert label == await day_label(db, "ru", WHEN, "Asia/Yerevan")
 
 
-@pytest.mark.parametrize("lang", ["ru", "en"])
+@pytest.mark.parametrize("lang", ["ru", "en", "hy"])
 async def test_every_month_and_weekday_has_a_word(db: AsyncSession, lang: str) -> None:
     """A missing key renders as the key itself, in front of a client."""
     for month in range(1, 13):

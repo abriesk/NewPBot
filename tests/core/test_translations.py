@@ -51,9 +51,14 @@ async def test_a_missing_key_is_logged_once_per_process(db: AsyncSession, caplog
 async def test_an_untranslated_key_falls_back_to_the_default_language(
     db: AsyncSession,
 ) -> None:
-    """hy ships some entries empty behind a `# TODO`, so they are not seeded.
-    The lookup must fall through rather than return ""."""
-    value = await get_text(db, "hy", "common.error.not_found")
+    """A key with no row for the requested language must fall through to the
+    practice default rather than return "".
+
+    Asked of a language the catalogue does not carry. hy used to be the
+    example, because it shipped entries empty behind a `# TODO`; it is
+    complete now, and the chain still has to work for the next gap.
+    """
+    value = await get_text(db, "xx", "common.error.not_found")
     assert value.strip()
     assert value == await get_text(db, "ru", "common.error.not_found")
 
@@ -100,10 +105,16 @@ async def test_missing_keys_ignores_the_english_only_admin_namespace(
         assert not key.startswith("admin.")
 
 
-async def test_missing_keys_reports_the_untranslated_armenian_entries(
-    db: AsyncSession,
-) -> None:
-    missing = await missing_keys(db, "hy")
-    # hy.yaml still carries `# TODO` entries, which are not seeded.
+async def test_a_complete_language_reports_nothing_missing(db: AsyncSession) -> None:
+    """hy is fully seeded. This is the regression guard on hard rule 10: add an
+    `en` key without its Armenian counterpart and the page starts flagging it."""
+    assert await missing_keys(db, "hy") == []
+
+
+async def test_missing_keys_reports_a_language_with_nothing_seeded(db: AsyncSession) -> None:
+    """The other half of the above: a page that always reports nothing missing
+    would pass the test above while being broken."""
+    missing = await missing_keys(db, "xx")
+
     assert missing
     assert all(not key.startswith("admin.") for key in missing)

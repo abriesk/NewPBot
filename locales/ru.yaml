@@ -1,9 +1,14 @@
 # locales/ru.yaml
 #
 # Keys are normative and come from en.yaml — do not rename, do not omit.
-# Copy marked `# TODO` has no equivalent in the v1.0 deployment and needs the
-# therapist's own wording before launch. Everything unmarked is carried over
-# from v1.0 with Telegram HTML tags and layout emoji stripped (see §15).
+#
+# Markers:
+#   `# TODO: review`   — drafted here, not the therapist's own wording. Check
+#                        before launch.
+#   `# TODO`, `# TODO: confirm` — no equivalent in the v1.0 deployment; needs
+#                        her wording.
+#   unmarked           — carried over from v1.0 with Telegram HTML tags and
+#                        layout emoji stripped (see §15).
 
 lang:
   select: "Пожалуйста, выберите язык."
@@ -103,14 +108,14 @@ waitlist:
   submitted: "Спасибо. Ваша заявка принята, я свяжусь с вами."                  # TODO
 
 auth:
-  sign_in: ""                                    # TODO: translate
-  email_label: ""                                # TODO: translate
-  send_link: ""                                  # TODO: translate
-  link_sent: ""                                  # TODO: translate
+  sign_in: "Вход"                                # TODO: review
+  email_label: "Ваш адрес электронной почты"     # TODO: review
+  send_link: "Прислать ссылку"                   # TODO: review
+  link_sent: "Если этот адрес здесь известен, ссылка для входа уже отправлена."   # TODO: review
 
 request:
-  title: ""                                      # TODO: translate
-  thread: ""                                     # TODO: translate
+  title: "Ваша заявка"                           # TODO: review
+  thread: "Переписка"                            # TODO: review
   status.pending: "Ожидает подтверждения"
   status.negotiating: "Согласование времени"
   status.confirmed: "Подтверждена"
@@ -144,7 +149,7 @@ intent:
   request.cancelled.client.reason: "Причина: {reason}"                          # TODO
   request.cancelled.client.calendar: "Если вы добавили эту встречу в календарь, удалите её оттуда."   # TODO
 
-  reminder.client.body: ""                       # TODO: translate
+  reminder.client.body: "Напоминание: ваша консультация в {time}."   # TODO: review
   reminder.client.body.24h: "Напоминание: ваша консультация завтра, {time}."
   reminder.client.body.1h: "Напоминание: ваша консультация начнётся через час, в {time}."
 

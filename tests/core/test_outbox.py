@@ -116,6 +116,29 @@ async def test_giving_up_alerts_the_therapist(db: AsyncSession, practice: Practi
     assert alerts
 
 
+async def _alerts_after(db: AsyncSession, row: OutboxMessage) -> list[OutboxMessage]:
+    """Delivery-failure alerts raised *by this test*.
+
+    Scoped by id rather than counting every such row in the table: the suite
+    shares a database with the running deployment, whose worker writes real
+    alerts of its own for anything it cannot deliver. Without the bound, this
+    passes on a clean database and fails the first time the worker has had a
+    bad day -- which is not what either assertion is about.
+    """
+    return list(
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.intent_key == "system.delivery_failed.admin",
+                    OutboxMessage.id > row.id,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
 # --- Permanent failures do not retry ----------------------------------------
 
 
@@ -137,18 +160,7 @@ async def test_a_first_attempt_permanent_failure_alerts(
     row = await _row(db, practice)
     await record_outcome(db, row, DeliveryResult.permanent("blocked"))
 
-    alerts = (
-        (
-            await db.execute(
-                select(OutboxMessage).where(
-                    OutboxMessage.intent_key == "system.delivery_failed.admin"
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert alerts
+    assert await _alerts_after(db, row)
 
 
 async def test_a_permanent_failure_after_retries_does_not_alert(
@@ -162,18 +174,7 @@ async def test_a_permanent_failure_after_retries_does_not_alert(
     await record_outcome(db, row, DeliveryResult.permanent("blocked"))
 
     assert row.status is OutboxStatus.dead
-    alerts = (
-        (
-            await db.execute(
-                select(OutboxMessage).where(
-                    OutboxMessage.intent_key == "system.delivery_failed.admin"
-                )
-            )
-        )
-        .scalars()
-        .all()
-    )
-    assert not alerts
+    assert not await _alerts_after(db, row)
 
 
 # --- Success ----------------------------------------------------------------
