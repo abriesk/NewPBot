@@ -282,6 +282,7 @@ def test_scrub_removes_every_forbidden_field() -> None:
         "note": "negotiation body",
         "thread": "more",
         "contact_note": "phone",
+        "modality": "online",
         "join_url": "https://meet.example.test/room",
         "time": "2026-01-01T00:00:00+00:00",
     }
@@ -293,6 +294,25 @@ def test_scrub_removes_every_forbidden_field() -> None:
     assert "join_url" not in scrubbed
     assert scrubbed["uuid"] == "u"
     assert scrubbed["time"]
+
+
+def test_scrub_keeps_an_onsite_location() -> None:
+    """§10: the clinic link **MAY** be sent by email, unlike a meeting room."""
+    scrubbed = scrub_for_email(
+        "request.confirmed.client",
+        {"uuid": "u", "modality": "onsite", "join_url": "https://clinic.example.test/where"},
+    )
+
+    assert scrubbed["join_url"] == "https://clinic.example.test/where"
+
+
+def test_scrub_drops_the_link_when_modality_is_absent() -> None:
+    """An intent that carries no modality is treated as the private case."""
+    scrubbed = scrub_for_email(
+        "reminder.client", {"uuid": "u", "join_url": "https://meet.example.test/room"}
+    )
+
+    assert "join_url" not in scrubbed
 
 
 async def test_an_email_row_never_carries_problem_text(

@@ -303,11 +303,17 @@ def scrub_for_email(intent_key: str, payload: dict[str, Any]) -> dict[str, Any]:
     """§13.4. Strip anything that must not reach an inbox.
 
     Email is the least private channel here -- shared inboxes, lock-screen
-    previews, a partner reading over a shoulder. The join link goes too: for
-    email the client is sent to /r/{uuid} and sees it after authenticating.
+    previews, a partner reading over a shoulder. An online join link goes too:
+    for email the client is sent to /r/{uuid} and sees it after authenticating.
+
+    An *on-site* location survives, as §10 allows and `join_info` above already
+    says: a link to the clinic's public address is not a private meeting room,
+    and stripping it left an email-only client with nowhere to be told where to
+    go. Absent modality is treated as online -- the safer of the two.
     """
     scrubbed = {k: v for k, v in payload.items() if k not in EMAIL_FORBIDDEN_FIELDS}
-    scrubbed.pop("join_url", None)
+    if scrubbed.get("modality") != Modality.onsite.value:
+        scrubbed.pop("join_url", None)
     return scrubbed
 
 
