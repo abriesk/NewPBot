@@ -32,6 +32,7 @@ from app.worker.jobs.sweeps import (
     prune_revisions,
     prune_tokens,
     purge_content,
+    refresh_translations,
 )
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,9 @@ JOBS: list[Job] = [
     expire_requests,
     complete_requests,
     fire_reminders,
+    # Before dispatch, so a string the therapist edited since the last pass is
+    # already in force for the messages this pass renders (§15).
+    refresh_translations,
     dispatch_outbox,
     purge_content,
     prune_tokens,

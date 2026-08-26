@@ -920,6 +920,7 @@ One loop, every `WORKER_POLL_SECONDS`. Each job claims rows with `FOR UPDATE SKI
 | `prune_revisions` | Blocks with more than 20 revisions | Delete the oldest |
 | `write_status` | The checks in §16.9 | Rewrite `STATE_PATH/status.json` atomically, **every pass**; on a transition into or out of `fail`, queue `system.health.degraded` / `system.health.recovered` (§16.10). **MUST NOT** raise: a failing check is a `warn` in the file, never a job that stops writing it |
 | `prune_error_events` | `error_event.at < now() - 30 days` | Delete |
+| `refresh_translations` | `max(translation.updated_at)` | Clear this process's UI-string cache if the mark has moved since the last pass (§15). Runs **before** `dispatch_outbox`, so an edit is in force for the messages that pass renders |
 
 Every job **MUST** be idempotent and safe to run concurrently with a second worker, even though only one is deployed.
 
@@ -939,6 +940,8 @@ Two rules on values:
 Anything that reads as practice *policy* rather than UI chrome — working hours, session length statements, cancellation terms — belongs in a content block (§6.7), not in a translation key. The v1.0 `ask_time` string hardcoded Yerevan time and Friday/Saturday availability into a UI label; that content is now a block.
 
 Lookup order in `get_text`: process cache → `translation` row → repository YAML → practice default language → the key itself. Cache invalidates on admin edit.
+
+The cache is **per process**, and an admin edit only clears the process serving that request. `web` and `worker` are separate processes (§3) and the worker renders every outbox message through the same cache, so the edit must reach it too: the `refresh_translations` job (§14) compares `max(translation.updated_at)` against the highest value that process has already applied and clears the cache when it moves. Staleness is therefore bounded by one worker pass. `translation.updated_at` **MUST** carry `onupdate` and not `server_default` alone — the seed inserts every key at boot, so an edit is always an UPDATE and a default-only column would never move.
 
 Language codes: `ru`, `hy`, `en`. `am` **MUST NOT** appear anywhere in the codebase.
 

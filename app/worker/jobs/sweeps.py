@@ -1,6 +1,6 @@
 """The database sweeps (IMPLEMENTATION.md §14).
 
-Seven jobs, all of the same shape: claim due rows with FOR UPDATE SKIP LOCKED,
+Nine jobs. Eight are the same shape: claim due rows with FOR UPDATE SKIP LOCKED,
 act, commit. Every one is idempotent and safe to run beside a second worker,
 even though only one is deployed.
 
@@ -27,7 +27,7 @@ from app.core.models import (
     Slot,
 )
 from app.core.policies import now_utc
-from app.core.services import booking, notifications
+from app.core.services import booking, notifications, translations
 from app.core.services.content import MAX_REVISIONS
 from app.core.services.notifications import Recipient
 from app.core.services.settings import get_practice
@@ -327,3 +327,23 @@ async def prune_error_events() -> int:
         if count:
             logger.info("pruned %d error event(s)", count)
         return count
+
+
+async def refresh_translations() -> int:
+    """Drop this process's UI-string cache when another one has edited it (§15).
+
+    The admin UI clears the cache it shares with the web process the moment the
+    therapist saves. The worker is a separate process and renders every outbox
+    message through the same cache, so without this the wording on the web
+    changes and the wording in Telegram and email does not -- until the
+    container happens to restart.
+
+    Runs before `dispatch_outbox` so an edit is picked up in the same pass that
+    renders the messages waiting behind it. The whole cost is one aggregate over
+    a few hundred short rows.
+    """
+    async with unit_of_work() as session:
+        dropped = await translations.invalidate_if_stale(session)
+    if dropped:
+        logger.info("translation cache refreshed: another process edited a string")
+    return int(dropped)
