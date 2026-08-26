@@ -737,8 +737,16 @@ async def test_a_translation_still_saves_from_the_grouped_page(
     web: TestClient, committed: AsyncSession
 ) -> None:
     """The grouping is presentation; the form it wraps is the one that worked
-    before."""
+    before.
+
+    The wording saved has to *differ* from the seeded one, or the assertion
+    passes whether or not the form did anything.
+    """
     from app.core.services.translations import get_text, invalidate_cache
+    from app.seed import load_locale_catalogue
+
+    seeded = load_locale_catalogue()["ru"]["request.thread"]
+    edited = f"{seeded} (edited)"
 
     _sign_in(web)
     web.get("/admin/translations", params={"lang": "ru"})
@@ -748,7 +756,7 @@ async def test_a_translation_still_saves_from_the_grouped_page(
             "csrf_token": _csrf(web),
             "lang": "ru",
             "key": "request.thread",
-            "value": "Переписка",
+            "value": edited,
         },
         follow_redirects=False,
     )
@@ -756,10 +764,16 @@ async def test_a_translation_still_saves_from_the_grouped_page(
 
     await committed.rollback()
     invalidate_cache()
-    assert await get_text(committed, "ru", "request.thread") == "Переписка"
+    assert await get_text(committed, "ru", "request.thread") == edited
 
+    # Restored, not deleted: `request.thread` is a seeded key (§20), so
+    # removing the row leaves the database one short of the catalogue. That
+    # fails the seed tests on the *next* run rather than this one, which is
+    # about as unhelpful as a failure gets.
     await committed.execute(
-        delete(Translation).where(Translation.lang == "ru", Translation.key == "request.thread")
+        update(Translation)
+        .where(Translation.lang == "ru", Translation.key == "request.thread")
+        .values(value=seeded)
     )
     await committed.execute(delete(AdminSession))
     await committed.commit()
