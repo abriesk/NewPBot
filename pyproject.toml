@@ -31,6 +31,10 @@ ignore = [
 # Same reason: a config file crosses installations with real Russian and
 # Armenian content inside it, and the tests say so in the content.
 "tests/core/test_config_io.py" = ["RUF001"]
+# The Armenian day heading is asserted letter for letter. Several of its
+# letters are confusable with Latin ones, which is exactly what the golden
+# test is there to catch -- the fix is not to write it in Latin.
+"tests/channels/test_dates.py" = ["RUF001"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "datetime.datetime.utcnow".msg = "Naive UTC is banned. Use datetime.now(UTC)."

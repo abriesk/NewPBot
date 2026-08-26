@@ -87,19 +87,25 @@ async def test_every_translated_locale_key_is_loaded(db: AsyncSession) -> None:
         assert not missing, f"{lang}: {len(missing)} key(s) not seeded, e.g. {sorted(missing)[:5]}"
 
 
-async def test_untranslated_keys_are_not_seeded(db: AsyncSession) -> None:
+async def test_untranslated_keys_are_not_seeded(db: AsyncSession, practice: Practice) -> None:
     """An empty row would satisfy the `translation` step of §15's lookup chain
     and return "" to the client. Leaving the row out lets the lookup fall
     through to the practice default language, which is the intended behaviour.
+
+    Driven by a synthetic catalogue rather than by whatever gaps the locale
+    files happen to have. This test used to assert that hy.yaml still carried
+    untranslated keys, which stopped being true the moment it was finished --
+    the property has to hold for the next key that arrives empty, not for the
+    state of the files on any particular day.
     """
-    catalogue = load_locale_catalogue()
-    untranslated = {
-        (lang, key)
-        for lang, entries in catalogue.items()
-        for key, value in entries.items()
-        if not value.strip()
-    }
-    assert untranslated, "expected hy.yaml to still carry untranslated keys"
+    from app.seed import _seed_translations
+
+    inserted = await _seed_translations(
+        db,
+        practice.id,
+        {"hy": {"test.seed.blank": "", "test.seed.spaces": "   ", "test.seed.filled": "value"}},
+    )
+    assert inserted == 1, "only the key with a value should have been written"
 
     empties = (
         await db.execute(select(Translation.lang, Translation.key).where(Translation.value == ""))

@@ -90,6 +90,12 @@ Not set, or a command that changes `requirements.txt`, `alembic.ini`,
 compose up -d web worker` first, and check the change is really in the container
 before believing a green suite.
 
+**Editing `locales/*.yaml` needs `docker compose restart web`.** The mount makes
+the files live, but seeding runs once at container start, so until you restart
+the `translation` rows still hold the old copy and the seed tests fail on a
+count that looks inexplicable. `docker compose logs web | grep "seed complete"`
+says how many rows the last boot actually wrote.
+
 ```bash
 # stack
 docker compose up -d                  # default profile: tls (needs DOMAIN, ACME_EMAIL)

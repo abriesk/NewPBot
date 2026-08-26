@@ -4,9 +4,17 @@
 # Amharic — that code must not appear anywhere in the new codebase.
 #
 # Keys are normative and come from en.yaml — do not rename, do not omit.
-# Copy marked `# TODO` has no equivalent in the v1.0 deployment and needs a
-# native speaker before launch. Unmarked copy is carried over from v1.0 with
-# Telegram HTML tags and layout emoji stripped (see §15).
+#
+# Markers:
+#   `# TODO: review`   — drafted here, not written by a native speaker. Reads
+#                        correctly but the register may not be what the
+#                        therapist would say. Check before launch.
+#   `# TODO: …`        — anything else still open on that line.
+#   unmarked           — carried over from the v1.0 deployment, with Telegram
+#                        HTML tags and layout emoji stripped (see §15).
+#
+# Sentence-final punctuation is `։` (U+0589) on drafted lines. The v1.0 copy
+# uses a plain `:` in places; that is worth normalising when someone reviews.
 
 lang:
   select: "Խնդրում ենք ընտրել լեզուն:"
@@ -16,157 +24,157 @@ lang:
 
 common:
   skip: "Բաց թողնել"
-  back: "Հետ"                                    # TODO: translate
-  cancel: "Չեղարկել"                             # TODO: translate
+  back: "Հետ"                                    # TODO: review
+  cancel: "Չեղարկել"                             # TODO: review
   home: "Գլխավոր"
-  yes: "Այո"                                     # TODO: translate
-  no: "Ոչ"                                       # TODO: translate
-  continue: "Շարունակել"                         # TODO: translate
-  open: "Բացել"                                  # TODO: translate
+  yes: "Այո"                                     # TODO: review
+  no: "Ոչ"                                       # TODO: review
+  continue: "Շարունակել"                         # TODO: review
+  open: "Բացել"                                  # TODO: review
   welcome: "Բարի գալուստ:"
   welcome_back: "Դուք վերադարձել եք գլխավոր մենյու:"
   error.generic: "Տեղի է ունեցել սխալ:"
-  error.expired_link: ""                         # TODO: translate
-  error.not_found: ""                            # TODO: translate
-  error.rate_limited: ""                         # TODO: translate
+  error.expired_link: "Այս հղումն այլևս վավեր չէ։ Խնդրում ենք նորը պահանջել։"   # TODO: review
+  error.not_found: "Չի գտնվել։"                  # TODO: review
+  error.rate_limited: "Չափազանց շատ փորձեր։ Խնդրում ենք փորձել մի փոքր ուշ։"   # TODO: review
 
 date:
-  weekday.0: ""                                  # TODO: translate
-  weekday.1: ""                                  # TODO: translate
-  weekday.2: ""                                  # TODO: translate
-  weekday.3: ""                                  # TODO: translate
-  weekday.4: ""                                  # TODO: translate
-  weekday.5: ""                                  # TODO: translate
-  weekday.6: ""                                  # TODO: translate
-  month.1: ""                                    # TODO: translate
-  month.2: ""                                    # TODO: translate
-  month.3: ""                                    # TODO: translate
-  month.4: ""                                    # TODO: translate
-  month.5: ""                                    # TODO: translate
-  month.6: ""                                    # TODO: translate
-  month.7: ""                                    # TODO: translate
-  month.8: ""                                    # TODO: translate
-  month.9: ""                                    # TODO: translate
-  month.10: ""                                   # TODO: translate
-  month.11: ""                                   # TODO: translate
-  month.12: ""                                   # TODO: translate
-  day: ""                                        # TODO: translate
+  weekday.0: "Երկ"                               # TODO: review
+  weekday.1: "Երք"                               # TODO: review
+  weekday.2: "Չրք"                               # TODO: review
+  weekday.3: "Հնգ"                               # TODO: review
+  weekday.4: "Ուրբ"                              # TODO: review
+  weekday.5: "Շբթ"                               # TODO: review
+  weekday.6: "Կիր"                               # TODO: review
+  month.1: "Հնվ"                                 # TODO: review
+  month.2: "Փտվ"                                 # TODO: review
+  month.3: "Մրտ"                                 # TODO: review
+  month.4: "Ապր"                                 # TODO: review
+  month.5: "Մյս"                                 # TODO: review
+  month.6: "Հնս"                                 # TODO: review
+  month.7: "Հլս"                                 # TODO: review
+  month.8: "Օգս"                                 # TODO: review
+  month.9: "Սեպ"                                 # TODO: review
+  month.10: "Հոկ"                                # TODO: review
+  month.11: "Նոյ"                                # TODO: review
+  month.12: "Դեկ"                                # TODO: review
+  day: "{weekday} {day} {month}"                 # TODO: review
 
 menu:
   consultation: "Գրանցվել խորհրդատվության"
   home: "Գլխավոր"
-  appointments: ""                               # TODO: translate
-  appointments.none: ""                          # TODO: translate
-  appointments.item: ""                          # TODO: translate
+  appointments: "Իմ հանդիպումները"               # TODO: review
+  appointments.none: "Այս պահին ամրագրված հանդիպում չունեք։"   # TODO: review
+  appointments.item: "{status} — {time}\n{session_type}, {modality}"   # TODO: review
 
 content:
   topic.work_terms.title: "Աշխատանքի պայմաններ"
   topic.qualification.title: "Մասնագետի որակավորում"
   topic.about_psychotherapy.title: "Հոգեթերապիայի մասին"
-  topic.references.title: ""                     # TODO: translate
+  topic.references.title: "Այլ մասնագետներ"      # TODO: review
   empty: "Տեղեկատվությունը դեռ ավելացված չէ:"
 
 booking:
-  choose_modality: ""                            # TODO: translate
+  choose_modality: "Ինչպե՞ս կցանկանաք հանդիպել։"   # TODO: review
   modality.online: "Առցանց խորհրդատվություն"
   modality.onsite: "Առկա խորհրդատվություն"
-  onsite_info: ""                                # TODO: translate
-  choose_type: ""                                # TODO: translate
+  onsite_info: "Առկա հանդիպումներն անցկացվում են այստեղ՝ {url}"   # TODO: review
+  choose_type: "Ի՞նչ տեսակի հանդիպում։"          # TODO: review
   type.individual: "Անհատական խորհրդատվություն"
   type.couple: "Զույգերի խորհրդատվություն"
   type.with_price: "{name} — {duration} րոպե ({price})"
   type.without_price: "{name} — {duration} րոպե"
   choose_timezone: "Նշեք ձեր ժամային գոտին:"
-  timezone.detected: ""                          # TODO: translate
-  choose_slot: ""                                # TODO: translate
-  slot.none_available: ""                        # TODO: translate
-  slot.held: ""                                  # TODO: translate
+  timezone.detected: "Հայտնաբերվեց {timezone}։ Ճի՞շտ է։"   # TODO: review
+  choose_slot: "Ընտրեք ձեզ հարմար ժամանակը։ Ժամերը ցուցադրված են {timezone} գոտով։"   # TODO: review
+  slot.none_available: "Այս պահին ազատ ժամեր չկան։"   # TODO: review
+  slot.held: "Այս ժամը ամրագրված է ձեզ համար {minutes} րոպեով, մինչև ավարտեք։"   # TODO: review
   slot.taken: "Ցավոք, այդ ժամանակը արդեն զբաղված է: Խնդրում ենք ընտրել այլ ժամանակ:"
-  slot.hold_expired: ""                          # TODO: translate
-  ask_desired_time: ""                           # TODO: translate
+  slot.hold_expired: "Ձեր ամրագրման ժամկետը լրացավ։ Խնդրում ենք նորից ընտրել ժամանակ։"   # TODO: review
+  ask_desired_time: "Ե՞րբ կլիներ ձեզ հարմար։ Գրեք ձեր բառերով՝ օր, օրվա հատված կամ կոնկրետ ժամ։"   # TODO: review
   ask_problem: "Եթե ցանկանաք, կարող եք կարճ նկարագրել այն հարցը, որով ցանկանում եք դիմել։"
   ask_name: "Ինչպե՞ս կարելի է ձեզ դիմել։"
   ask_contact: "Ո՞ր կապի եղանակն է ձեզ համար նախընտրելի։"
   contact.telegram: "Telegram"
   contact.email: "Email"
-  contact.other: ""                              # TODO: translate
-  ask_contact_other: ""                          # TODO: translate
-  ask_email: ""                                  # TODO: translate
-  contact.email_invalid: ""                      # TODO: translate
-  contact.email_taken: ""                         # TODO: translate
-  contact.email_sent: ""                         # TODO: translate
-  submitted: "Ձեր հայտը ուղարկված է: Ես կկապնվեմ ձեզ հետ:"   # TODO: add {uuid}
+  contact.other: "Այլ եղանակ"                    # TODO: review
+  ask_contact_other: "Ինչպե՞ս կարող եմ ձեզ հետ կապվել։ Հեռախոսահամար, այլ մեսենջեր կամ օրվա հարմար ժամ։"   # TODO: review
+  ask_email: "Ո՞րն է ձեր էլ. փոստի հասցեն։"      # TODO: review
+  contact.email_invalid: "Սա էլ. փոստի հասցեի նման չէ։ Խնդրում ենք ստուգել և նորից ուղարկել։"   # TODO: review
+  contact.email_taken: "Այդ հասցեն արդեն կապված է այլ պրոֆիլի հետ։ Խնդրում ենք օգտագործել մեկ ուրիշը։"   # TODO: review
+  contact.email_sent: "Հաստատման հղումն ուղարկվեց {email} հասցեին։ Բացեք այն, և հաստատումներն ու հիշեցումները կհասնեն նաև էլ. փոստով։"   # TODO: review
+  submitted: "Շնորհակալություն։ Ձեր հայտն ուղարկված է, համարը՝ {uuid}։ Շուտով կկապվեմ ձեզ հետ։"   # TODO: review
   cancelled_by_user: "Ամրագրումը չեղարկվեց: Դուք վերադարձել եք գլխավոր մենյու:"
-  unavailable: ""                                # TODO: translate
+  unavailable: "Այս պահին նոր գրանցումները փակ են։"   # TODO: review
 
 waitlist:
   intro: "Ցավոք, այս պահին ազատ տեղեր չկան: Կարող եք գրանցվել սպասման ցուցակում:"
-  ask_problem: ""                                # TODO: translate
+  ask_problem: "Համառոտ՝ ի՞նչ հարցով կցանկանաք աշխատել։"   # TODO: review
   ask_contact: "Թողեք ձեր կոնտակտային տվյալները:"
-  submitted: ""                                  # TODO: translate
+  submitted: "Շնորհակալություն։ Ձեր հայտը ստացված է, կկապվեմ ձեզ հետ։"   # TODO: review
 
 auth:
-  sign_in: ""                                    # TODO: translate
-  email_label: ""                                # TODO: translate
-  send_link: ""                                  # TODO: translate
-  link_sent: ""                                  # TODO: translate
+  sign_in: "Մուտք"                               # TODO: review
+  email_label: "Ձեր էլ. փոստի հասցեն"            # TODO: review
+  send_link: "Ուղարկել ինձ հղում"                # TODO: review
+  link_sent: "Եթե այդ հասցեն հայտնի է այստեղ, մուտքի հղումն ուղարկվել է։"   # TODO: review
 
 request:
-  title: ""                                      # TODO: translate
-  thread: ""                                     # TODO: translate
-  status.pending: ""                             # TODO: translate
-  status.negotiating: ""                         # TODO: translate
-  status.confirmed: ""                           # TODO: translate
-  status.rejected: ""                            # TODO: translate
-  status.expired: ""                             # TODO: translate
-  status.cancelled: ""                           # TODO: translate
-  status.completed: ""                           # TODO: translate
-  open: ""                                       # TODO: translate
-  add_note: ""                                   # TODO: translate
-  note_ask: ""                                   # TODO: translate
-  when: ""                                       # TODO: translate
+  title: "Ձեր հայտը"                             # TODO: review
+  thread: "Նամակագրություն"                      # TODO: review
+  status.pending: "Սպասում է հաստատման"          # TODO: review
+  status.negotiating: "Ժամանակի ընտրություն"     # TODO: review
+  status.confirmed: "Հաստատված է"                # TODO: review
+  status.rejected: "Չի պլանավորվել"              # TODO: review
+  status.expired: "Ժամկետը լրացել է առանց պատասխանի"   # TODO: review
+  status.cancelled: "Չեղարկված է"                # TODO: review
+  status.completed: "Ավարտված է"                 # TODO: review
+  open: "Բացել ձեր ամրագրումը"                   # TODO: review
+  add_note: "Ավելացնել տեղեկություն"             # TODO: review
+  note_ask: "Կա՞ որևէ բան, որ կցանկանայիք ինձ հայտնել հանդիպումից առաջ։"   # TODO: review
+  when: "Երբ"                                    # TODO: review
 
 intent:
-  request.proposal.client.body: "Նոր առաջարկ թերապևտից՝ {time}"   # TODO: add {uuid}
-  request.proposal.client.note: ""               # TODO: translate
+  request.proposal.client.body: "Ձեր {uuid} հայտի համար առաջարկվել է ժամանակ՝ {time}։"   # TODO: review
+  request.proposal.client.note: "Թերապևտի նշումը՝ {note}"   # TODO: review
   request.proposal.client.action.accept: "Համաձայնվել"
   request.proposal.client.action.counter: "Առաջարկել այլ ժամանակ"
-  request.proposal.client.action.decline: ""     # TODO: translate
+  request.proposal.client.action.decline: "Հրաժարվել"   # TODO: review
 
-  request.counter.client.ask: ""                 # TODO: translate
-  request.counter.client.sent: ""                # TODO: translate
+  request.counter.client.ask: "Ո՞ր ժամանակը ձեզ ավելի հարմար կլիներ։"   # TODO: review
+  request.counter.client.sent: "Շնորհակալություն, ձեր առաջարկը փոխանցված է։"   # TODO: review
 
   request.confirmed.client.body: "Հանդիպումը հաստատված է՝ {time}"
-  request.confirmed.client.join_online: ""       # TODO: translate
-  request.confirmed.client.join_onsite: ""       # TODO: translate
+  request.confirmed.client.join_online: "Միանալ այստեղ՝ {url}"   # TODO: review
+  request.confirmed.client.join_onsite: "Հասցե՝ {url}"   # TODO: review
 
-  request.rejected.client.body: "Հայտը մերժված է:"   # TODO: add {uuid}
-  request.rejected.client.reason: ""             # TODO: translate
-  request.expired.client.body: ""                # TODO: translate
-  request.cancelled.client.body: ""              # TODO: translate
-  request.cancelled.client.reason: ""            # TODO: translate
-  request.cancelled.client.calendar: ""          # TODO: translate
+  request.rejected.client.body: "Ցավոք, ձեր {uuid} հայտը հնարավոր չեղավ պլանավորել։"   # TODO: review
+  request.rejected.client.reason: "Պատճառը՝ {reason}"   # TODO: review
+  request.expired.client.body: "Ձեր {uuid} հայտի ժամկետը լրացավ առանց պատասխանի։ Կարող եք նորը ներկայացնել։"   # TODO: review
+  request.cancelled.client.body: "{time} ձեր հանդիպումը չեղարկվել է։"   # TODO: review
+  request.cancelled.client.reason: "Պատճառը՝ {reason}"   # TODO: review
+  request.cancelled.client.calendar: "Եթե այս հանդիպումն ավելացրել եք ձեր օրացույցում, խնդրում ենք հեռացնել այն այնտեղից։"   # TODO: review
 
-  reminder.client.body: ""                       # TODO: translate
+  reminder.client.body: "Հիշեցում՝ ձեր խորհրդատվությունը {time}-ին է։"   # TODO: review
   reminder.client.body.24h: "Հիշեցում՝ Ձեր խորհրդատվությունը վաղն է, {time}։"
   reminder.client.body.1h: "Հիշեցում՝ Ձեր խորհրդատվությունը սկսվում է 1 ժամից, {time}։"
 
-  waitlist.joined.client.body: ""                # TODO: translate
+  waitlist.joined.client.body: "Դուք սպասման ցուցակում եք։ Կկապվեմ ձեզ հետ, երբ տեղ ազատվի։"   # TODO: review
 
-  auth.login_link.client.subject: ""             # TODO: translate
-  auth.login_link.client.body: ""                # TODO: translate
-  auth.login_link.client.action.open: ""         # TODO: translate
-  auth.login_link.client.telegram_hint: ""       # TODO: translate
-  auth.login_link.client.action.telegram: ""     # TODO: translate
-  auth.link_channel.client.body: ""              # TODO: translate
+  auth.login_link.client.subject: "Ձեր մուտքի հղումը"   # TODO: review
+  auth.login_link.client.body: "Այս հղումով կարող եք բացել ձեր ամրագրումը։ Այն գործում է մեկ անգամ և վավեր է {minutes} րոպե։"   # TODO: review
+  auth.login_link.client.action.open: "Բացել իմ ամրագրումը"   # TODO: review
+  auth.login_link.client.telegram_hint: "Telegram-ը ավելի հարմա՞ր է։ Միացրեք այն և ծանուցումները կստանաք այնտեղ։"   # TODO: review
+  auth.login_link.client.action.telegram: "Միացնել Telegram"   # TODO: review
+  auth.link_channel.client.body: "Միացրեք Telegram-ը՝ ձեր հանդիպման մասին ծանուցումներն այնտեղ ստանալու համար։"   # TODO: review
 
 email:
-  subject.request_update: ""                     # TODO: translate
-  subject.request_confirmed: ""                  # TODO: translate
-  subject.reminder: ""                           # TODO: translate
-  subject.request_cancelled: ""                  # TODO: translate
-  footer: ""                                     # TODO: translate
+  subject.request_update: "Թարմացում ձեր հայտի վերաբերյալ"   # TODO: review
+  subject.request_confirmed: "Ձեր հանդիպումը հաստատված է"   # TODO: review
+  subject.reminder: "Հիշեցում ձեր հանդիպման մասին"   # TODO: review
+  subject.request_cancelled: "Ձեր հանդիպումը չեղարկվել է"   # TODO: review
+  footer: "Դուք ստանում եք այս նամակը, քանի որ հայտ եք թողել խորհրդատվության համար։ Եթե դա դուք չեք եղել, պատասխանեք այս հասցեին։"   # TODO: review
 
 calendar:
-  summary: ""                                    # TODO: translate
-  location.online: ""                            # TODO: translate
+  summary: "Խորհրդատվություն"                    # TODO: review
+  location.online: "Առցանց"                      # TODO: review
