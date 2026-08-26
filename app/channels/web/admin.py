@@ -29,6 +29,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels.web import ratelimit
 from app.channels.web.backups import list_dumps, resolve_dump
+from app.channels.web.help import help_guide
 from app.channels.web.security import (
     CSRF_FIELD,
     authenticate_admin,
@@ -104,6 +105,7 @@ async def _labels(session: AsyncSession) -> dict[str, str]:
         "nav_timezones": "admin.nav.timezones",
         "nav_delivery": "admin.nav.delivery",
         "nav_maintenance": "admin.nav.maintenance",
+        "nav_help": "admin.nav.help",
         "approve": "admin.request.approve",
         "propose": "admin.request.propose",
         "reject": "admin.request.reject",
@@ -1022,6 +1024,24 @@ def build_router() -> APIRouter:
                 "admin/clients.html",
                 await _context(session, request, admin, rows=rows, identities=identities),
             )
+
+    # --- Help (§12.2) -------------------------------------------------------
+
+    @router.get("/help", response_class=HTMLResponse, include_in_schema=False)
+    async def help_page(request: Request, lang: str = "en") -> Response:
+        """The admin guide, served from the installation it documents.
+
+        A standalone page rather than one of these templates: it ships its own
+        navigation, search, and print stylesheet, and it is the one admin
+        surface that is not English-only -- the therapist reads it in Russian
+        while the console around it stays in English (DESIGN.md §11).
+        """
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+
+        return HTMLResponse(help_guide(lang))
 
     # --- Maintenance: configuration and backups (§16.6, §16.7) -------------
 

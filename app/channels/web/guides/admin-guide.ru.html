@@ -1,0 +1,764 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Psychobooking — Руководство администратора</title>
+<style>
+  :root {
+    --bg: #f6f1ea;
+    --bg-elev: #fffdf9;
+    --ink: #1c1916;
+    --muted: #6b6259;
+    --line: #e4d9cd;
+    --accent: #2f5d50;
+    --accent-2: #c46b3a;
+    --accent-soft: #e7f0ec;
+    --warn: #8a3b2a;
+    --code-bg: #efe7dc;
+    --sidebar: #221e1b;
+    --sidebar-ink: #f3ebe3;
+    --sidebar-muted: #b7aaa0;
+    --hit: #ffe08a;
+    --shadow: 0 18px 40px rgba(34, 30, 27, .08);
+    --radius: 14px;
+    --font: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+    --mono: "IBM Plex Mono", "ui-monospace", Menlo, Consolas, monospace;
+  }
+  [data-theme="dark"] {
+    --bg: #161311;
+    --bg-elev: #211c19;
+    --ink: #f4ece4;
+    --muted: #b3a79c;
+    --line: #3a322c;
+    --accent: #8fceb8;
+    --accent-2: #e39a6c;
+    --accent-soft: #24332e;
+    --warn: #f0a090;
+    --code-bg: #2a2420;
+    --sidebar: #100e0c;
+    --sidebar-ink: #f4ece4;
+    --sidebar-muted: #9c9086;
+    --hit: #7a5d12;
+    --shadow: 0 18px 40px rgba(0,0,0,.35);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.55;
+  }
+  .app {
+    display: grid;
+    grid-template-columns: 300px 1fr;
+    min-height: 100vh;
+  }
+  aside {
+    background: var(--sidebar);
+    color: var(--sidebar-ink);
+    padding: 22px 16px 40px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow: auto;
+  }
+  aside .brand {
+    font-family: var(--font);
+    font-size: 1.15rem;
+    letter-spacing: .01em;
+    margin: 0 8px 4px;
+  }
+  aside .sub {
+    color: var(--sidebar-muted);
+    font-size: .78rem;
+    margin: 0 8px 16px;
+  }
+  #q {
+    width: 100%;
+    border: 0;
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: #2c2622;
+    color: var(--sidebar-ink);
+    font: inherit;
+    margin-bottom: 14px;
+  }
+  #q::placeholder { color: #8d8076; }
+  nav a {
+    display: block;
+    color: var(--sidebar-ink);
+    text-decoration: none;
+    padding: 7px 10px;
+    border-radius: 8px;
+    font-size: .88rem;
+  }
+  nav a:hover, nav a.active { background: #3a322c; }
+  nav a .n {
+    display: inline-block;
+    width: 1.5em;
+    color: var(--sidebar-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .tools {
+    display: flex;
+    gap: 8px;
+    margin: 8px 0 16px;
+  }
+  .tools a,
+  .tools button {
+    flex: 1;
+    background: #2c2622;
+    color: var(--sidebar-ink);
+    border: 0;
+    border-radius: 8px;
+    padding: 8px;
+    cursor: pointer;
+    font: inherit;
+    font-size: .8rem;
+  }
+  .tools a { text-align: center; text-decoration: none; }
+  main { padding: 36px 48px 80px; max-width: 920px; }
+  h1, h2, h3 { font-family: var(--font); font-weight: 600; line-height: 1.25; }
+  h1 { font-size: 2.05rem; margin: 0 0 .3em; }
+  .lede { font-size: 1.08rem; color: var(--muted); max-width: 62ch; }
+  section.card {
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 28px 30px 22px;
+    margin: 22px 0;
+    box-shadow: var(--shadow);
+    scroll-margin-top: 16px;
+  }
+  section.card h2 { margin-top: 0; }
+  p { max-width: 68ch; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .92rem;
+    margin: 12px 0 6px;
+  }
+  th, td {
+    text-align: left;
+    vertical-align: top;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  th { color: var(--muted); font-weight: 600; font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; }
+  code, kbd {
+    font-family: var(--mono);
+    font-size: .86em;
+    background: var(--code-bg);
+    padding: .1em .35em;
+    border-radius: 5px;
+  }
+  pre {
+    background: var(--code-bg);
+    border-radius: 12px;
+    padding: 14px 16px;
+    overflow: auto;
+    position: relative;
+    font-family: var(--mono);
+    font-size: .84rem;
+  }
+  pre .copy {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 4px 8px;
+    cursor: pointer;
+    font: inherit;
+    font-size: .75rem;
+  }
+  .flow {
+    font-family: var(--mono);
+    font-size: .85rem;
+    background: var(--accent-soft);
+    padding: 14px 16px;
+    border-radius: 12px;
+    white-space: pre;
+    overflow: auto;
+  }
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 16px; }
+  .pill {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: .78rem;
+    font-weight: 600;
+  }
+  .callout {
+    border-left: 3px solid var(--accent-2);
+    padding: 10px 14px;
+    background: var(--bg);
+    border-radius: 0 10px 10px 0;
+    margin: 14px 0;
+  }
+  .warn { border-left-color: var(--warn); }
+  details.box {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 8px 14px;
+    margin: 10px 0;
+    background: var(--bg);
+  }
+  details.box summary { cursor: pointer; font-weight: 600; }
+  .checklist label {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 6px 0;
+    cursor: pointer;
+  }
+  .checklist input { margin-top: 4px; }
+  mark { background: var(--hit); color: inherit; padding: 0 .15em; border-radius: 3px; }
+  #hits {
+    color: var(--sidebar-muted);
+    font-size: .75rem;
+    margin: -8px 8px 12px;
+    min-height: 1em;
+  }
+  .menu { display: none; }
+  footer {
+    color: var(--muted);
+    font-size: .85rem;
+    margin-top: 40px;
+  }
+  @media (max-width: 860px) {
+    .app { grid-template-columns: 1fr; }
+    aside {
+      position: relative;
+      height: auto;
+      max-height: none;
+    }
+    .menu { display: inline-block; margin-bottom: 10px; }
+    nav.collapsed { display: none; }
+    main { padding: 22px 18px 60px; }
+  }
+  @media print {
+    aside, .tools, .copy, .menu { display: none !important; }
+    .app { display: block; }
+    section.card { box-shadow: none; break-inside: avoid; }
+    body { background: #fff; color: #000; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <p class="brand">Psychobooking</p>
+    <p class="sub">Руководство администратора</p>
+    <input id="q" type="search" placeholder="Поиск по руководству…" autocomplete="off">
+    <div id="hits"></div>
+    <div class="tools">
+      <a href="/admin/requests">← Админка</a>
+      <a href="/admin/help?lang=en">English</a>
+    </div>
+    <div class="tools">
+      <button type="button" id="theme">Тема</button>
+      <button type="button" id="print">Печать</button>
+    </div>
+    <button class="menu" type="button" id="toggleNav">Меню</button>
+    <nav id="nav">
+      <a href="#what"><span class="n">1</span> Что это</a>
+      <a href="#signin"><span class="n">2</span> Первый вход</a>
+      <a href="#menu"><span class="n">3</span> Меню админки</a>
+      <a href="#daily"><span class="n">4</span> Рабочий день</a>
+      <a href="#requests"><span class="n">5</span> Заявки</a>
+      <a href="#waitlist"><span class="n">6</span> Лист ожидания</a>
+      <a href="#slots"><span class="n">7</span> Слоты</a>
+      <a href="#settings"><span class="n">8</span> Настройки</a>
+      <a href="#types"><span class="n">9</span> Типы сессий</a>
+      <a href="#tz"><span class="n">10</span> Часовые пояса</a>
+      <a href="#content"><span class="n">11</span> Контент</a>
+      <a href="#i18n"><span class="n">12</span> Переводы</a>
+      <a href="#delivery"><span class="n">13</span> Доставка сообщений</a>
+      <a href="#clients"><span class="n">14</span> Клиенты и приватность</a>
+      <a href="#maint"><span class="n">15</span> Обслуживание</a>
+      <a href="#tg"><span class="n">16</span> Админ в Telegram</a>
+      <a href="#clients-view"><span class="n">17</span> Что видит клиент</a>
+      <a href="#week"><span class="n">18</span> Чек-лист первой недели</a>
+      <a href="#fix"><span class="n">19</span> Если что-то не так</a>
+      <a href="#host"><span class="n">20</span> Для хостера</a>
+      <a href="#not"><span class="n">21</span> Чего нет в продукте</a>
+    </nav>
+  </aside>
+
+  <main>
+    <h1>Руководство администратора</h1>
+    <p class="lede">Для терапевта. Как вести запись через веб-админку и панель в Telegram. Публичный сайт — <code>/</code>. Ваша консоль — <code>/admin</code>, на английском. Клиентские страницы и бот могут быть на русском, армянском или английском.</p>
+    <div class="callout">Подписи кнопок в самой админке остаются английскими (так задумано в продукте). Ниже рядом с русским названием указано, как пункт выглядит на экране.</div>
+
+    <section class="card" id="what">
+      <h2>1. Что делает сервис</h2>
+      <p>Клиенты читают информацию о практике и записываются на консультацию на <strong>сайте</strong> или в <strong>Telegram-боте</strong>. Когда вы не берёте новых людей, они попадают в <strong>лист ожидания</strong>.</p>
+      <p>Вы всегда в контуре решения, пока не включите автоподтверждение:</p>
+      <div class="pills">
+        <span class="pill">Approve — одобрить</span>
+        <span class="pill">Propose — предложить другое время</span>
+        <span class="pill">Reject — отклонить</span>
+        <span class="pill">Cancel — отменить</span>
+        <span class="pill">Waitlist: contacted / converted / closed</span>
+      </div>
+      <p>Почта только исходящая. Если при установке SMTP не задали, почты нет: вход идёт через Telegram.</p>
+    </section>
+
+    <section class="card" id="signin">
+      <h2>2. Первый вход</h2>
+      <ol>
+        <li>Откройте <code>https://ВАШ-ДОМЕН/admin</code> (локально / режим plain: <code>http://127.0.0.1:8000/admin</code>).</li>
+        <li>Логин и пароль задаются при установке: <code>ADMIN_USERNAME</code> / <code>ADMIN_PASSWORD</code>.</li>
+        <li>После первого запуска пароль хранится только как хеш. Открытый текст в базе не остаётся.</li>
+      </ol>
+      <div class="callout">Не больше <strong>5 попыток входа за 15 минут с одного IP</strong>. Если заблокировали — подождите.</div>
+      <p>Выход — кнопка <strong>Sign out</strong> в шапке.</p>
+      <h3>Сделайте это один раз до того, как звать клиентов</h3>
+      <table>
+        <thead><tr><th>#</th><th>Страница</th><th>Зачем</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>Settings</td><td>Название, часовой пояс, режим записи, ссылки на встречу</td></tr>
+          <tr><td>2</td><td>Session types</td><td>Длительность и цена</td></tr>
+          <tr><td>3</td><td>Timezones</td><td>Города, которые видит клиент</td></tr>
+          <tr><td>4</td><td>Slots</td><td>Сетка на ближайшую неделю, если запись по слотам</td></tr>
+          <tr><td>5</td><td>Content</td><td>Тексты, которые читает клиент</td></tr>
+          <tr><td>6</td><td>Translations</td><td>Пропущенные строки на ru / hy</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card" id="menu">
+      <h2>3. Меню админки</h2>
+      <p>Все страницы начинаются с <code>/admin</code>:</p>
+      <table>
+        <thead><tr><th>Пункт</th><th>Адрес</th><th>Для чего</th></tr></thead>
+        <tbody>
+          <tr><td>Requests</td><td><code>/admin/requests</code></td><td>Одобрить, предложить время, отклонить, отменить</td></tr>
+          <tr><td>Waitlist</td><td><code>/admin/waitlist</code></td><td>Люди, пока запись закрыта</td></tr>
+          <tr><td>Slots</td><td><code>/admin/slots</code></td><td>Создать неделю; заблокировать или удалить свободное</td></tr>
+          <tr><td>Content</td><td><code>/admin/content</code></td><td>Страницы практики в Markdown</td></tr>
+          <tr><td>Translations</td><td><code>/admin/translations</code></td><td>Переписать кнопки и тексты бота / писем</td></tr>
+          <tr><td>Session types</td><td><code>/admin/session-types</code></td><td>Что вы предлагаете</td></tr>
+          <tr><td>Timezones</td><td><code>/admin/timezones</code></td><td>Список поясов для клиента</td></tr>
+          <tr><td>Delivery</td><td><code>/admin/delivery</code></td><td>Ушло ли сообщение</td></tr>
+          <tr><td>Maintenance</td><td><code>/admin/maintenance</code></td><td>Экспорт/импорт настроек; скачать дампы</td></tr>
+          <tr><td>Clients</td><td><code>/admin/clients</code></td><td>Выгрузить данные человека или стереть его</td></tr>
+          <tr><td>Settings</td><td><code>/admin/settings</code></td><td>Доступность и рабочие параметры</td></tr>
+        </tbody>
+      </table>
+      <p>Название практики в шапке ведёт на Requests — это домашний экран.</p>
+    </section>
+
+    <section class="card" id="daily">
+      <h2>4. Обычный рабочий день</h2>
+      <ol>
+        <li>Откройте <strong>Requests</strong>. Фильтр <code>pending</code> или <code>negotiating</code>.</li>
+        <li>Откройте каждую новую заявку. Текст клиента виден только на карточке.</li>
+        <li>Одобрите, предложите другое время или отклоните.</li>
+        <li>Если запись закрыта — гляньте <strong>Waitlist</strong>.</li>
+        <li>Если клиент «не получил письмо» — <strong>Delivery</strong>.</li>
+        <li>В дороге напишите боту <code>/admin</code>.</li>
+      </ol>
+      <div class="callout">Файл <code>.env</code> для повседневной работы не нужен. Доступность, цены, напоминания, тексты и режим записи живут в админке.</div>
+    </section>
+
+    <section class="card" id="requests">
+      <h2>5. Заявки (Requests)</h2>
+      <p>Список <code>/admin/requests</code> фильтруется по статусу. Короткий UUID открывает карточку.</p>
+      <div class="flow">pending  →  negotiating  →  confirmed  →  completed
+    │              │              │
+    ├─ reject      ├─ reject      └─ cancel
+    └─ expire      └─ expire</div>
+      <table>
+        <thead><tr><th>Статус</th><th>Смысл</th></tr></thead>
+        <tbody>
+          <tr><td><strong>pending</strong></td><td>Новая. Ждёт вас.</td></tr>
+          <tr><td><strong>negotiating</strong></td><td>Предложено время. Кто-то ещё должен согласиться.</td></tr>
+          <tr><td><strong>confirmed</strong></td><td>Запись есть. Напоминания сработают.</td></tr>
+          <tr><td><strong>rejected</strong></td><td>Вы отказали.</td></tr>
+          <tr><td><strong>expired</strong></td><td>Никто не ответил вовремя.</td></tr>
+          <tr><td><strong>cancelled</strong></td><td>Вы отменили уже подтверждённую сессию.</td></tr>
+          <tr><td><strong>completed</strong></td><td>Время сессии прошло.</td></tr>
+        </tbody>
+      </table>
+      <p>Клиент сам отменить запись не может.</p>
+      <details class="box" open>
+        <summary>Карточка заявки</summary>
+        <p>Статус, тип, формат (online / onsite), имя, назначенное и/или желаемое время, пояс клиента, контактная пометка, переписка о времени, чей ход.</p>
+        <p><strong>What they wrote</strong> — свободный текст о запросе. Его нет в списке, логах и письмах. В Telegram его видите только вы.</p>
+      </details>
+      <details class="box" open>
+        <summary>Действия</summary>
+        <p><strong>Approve</strong> — время можно не трогать: останется слот, который выбрал клиент. Или укажите время в <em>часовом поясе практики</em>. Поле meeting URL — ссылка именно на эту встречу; иначе для online берётся постоянная комната из Settings.</p>
+        <p><strong>Propose</strong> — время и необязательная заметка. Заявка становится <code>negotiating</code>.</p>
+        <p><strong>Reject</strong> / <strong>Cancel</strong> — причина по желанию. Cancel на подтверждённой сессии останавливает напоминания.</p>
+        <p>Если действие в этом статусе нельзя — вспышка <code>refused</code>, ничего не меняется.</p>
+      </details>
+    </section>
+
+    <section class="card" id="waitlist">
+      <h2>6. Лист ожидания (Waitlist)</h2>
+      <p>Сюда попадают, когда выключено «принимаю новые записи», либо режим слотов, свободных слотов нет, а запасной переход в переговоры выключен.</p>
+      <table>
+        <thead><tr><th>Действие</th><th>Смысл</th></tr></thead>
+        <tbody>
+          <tr><td>contacted</td><td>Вы связались.</td></tr>
+          <tr><td>converted</td><td>Человек записался (или вы запишете вручную).</td></tr>
+          <tr><td>closed</td><td>Больше не ждёт.</td></tr>
+        </tbody>
+      </table>
+      <p>Это не запись: нет слота, нет торга о времени, нет напоминаний. Можно дописать заметку и нажать действие.</p>
+    </section>
+
+    <section class="card" id="slots">
+      <h2>7. Слоты (Slots)</h2>
+      <p>Время, которое вы вводите, — в <strong>часовом поясе практики</strong> (написан вверху страницы).</p>
+      <h3>Собрать неделю</h3>
+      <ol>
+        <li>Даты From / To.</li>
+        <li>Дни недели.</li>
+        <li>Начала через запятую: <code>10:00, 11:00, 15:30</code>.</li>
+        <li>Длительность (по умолчанию 60) и при желании только online / onsite / either.</li>
+        <li>Create.</li>
+      </ol>
+      <table>
+        <thead><tr><th>Статус</th><th>Что можно</th></tr></thead>
+        <tbody>
+          <tr><td>available</td><td>block или delete</td></tr>
+          <tr><td>blocked</td><td>unblock</td></tr>
+          <tr><td>held / booked</td><td>занят — не удалять</td></tr>
+        </tbody>
+      </table>
+      <div class="callout">Слоты не входят в экспорт конфигурации. Следующую неделю собирайте здесь заново.</div>
+    </section>
+
+    <section class="card" id="settings">
+      <h2>8. Настройки (Settings)</h2>
+      <p>Живут в базе. Перезапуск сервера не нужен.</p>
+      <h3>Запись</h3>
+      <table>
+        <thead><tr><th>Параметр</th><th>Эффект</th></tr></thead>
+        <tbody>
+          <tr><td>Accepting new bookings</td><td>Выкл. → только лист ожидания (плюс контент <code>references</code>)</td></tr>
+          <tr><td>Mode: slots</td><td>Клиент выбирает из вашей сетки</td></tr>
+          <tr><td>Mode: negotiation</td><td>Клиент пишет желаемое время</td></tr>
+          <tr><td>Fallback to negotiation</td><td>Пустая сетка в режиме слотов → форма свободного времени, не лист</td></tr>
+          <tr><td>Negotiation enabled</td><td>После заявки можно предлагать / отвечать / соглашаться</td></tr>
+          <tr><td>Auto-confirm slots</td><td>Без вашего одобрения. По умолчанию выкл.</td></tr>
+        </tbody>
+      </table>
+      <h3>Что увидит клиент</h3>
+      <table>
+        <thead><tr><th>Приём</th><th>Режим</th><th>Свободные слоты</th><th>Клиент видит</th></tr></thead>
+        <tbody>
+          <tr><td>Выкл.</td><td>—</td><td>—</td><td>Лист ожидания</td></tr>
+          <tr><td>Вкл.</td><td>slots</td><td>Да</td><td>Выбор слота</td></tr>
+          <tr><td>Вкл.</td><td>slots</td><td>Нет, fallback вкл.</td><td>Свободное время текстом</td></tr>
+          <tr><td>Вкл.</td><td>slots</td><td>Нет, fallback выкл.</td><td>Лист ожидания</td></tr>
+          <tr><td>Вкл.</td><td>negotiation</td><td>—</td><td>Свободное время текстом</td></tr>
+        </tbody>
+      </table>
+      <h3>Практика и тайминги</h3>
+      <ul>
+        <li><strong>Timezone</strong> — имя IANA, например <code>Asia/Yerevan</code>. Не пишите <code>UTC+4</code>: так ломается переход на летнее время.</li>
+        <li><strong>Default language</strong> — <code>ru</code> / <code>hy</code> / <code>en</code>.</li>
+        <li><strong>Clinic address link</strong> и <strong>standing meeting room</strong>. Ссылку на конкретную встречу всё равно можно задать при Approve.</li>
+        <li>Ссылку на встречу почта не отправляет: в письме — страница заявки.</li>
+        <li><strong>Slot hold</strong> (минуты), <strong>pending expiry</strong> (часы), окно отмены, <strong>retention</strong> (месяцы: свободный текст потом очищается, строки для статистики остаются).</li>
+        <li><strong>Reminder offsets</strong> — минуты до сессии через запятую, например <code>1440, 60</code>. Пусто = без напоминаний.</li>
+      </ul>
+    </section>
+
+    <section class="card" id="types">
+      <h2>9. Типы сессий (Session types)</h2>
+      <p>При установке создаются <code>individual</code> и <code>couple</code> по 60 минут. Можно добавить своё (например <code>supervision</code>) без обновления программы.</p>
+      <ul>
+        <li><strong>Price (minor units)</strong> — минимальная единица валюты. AMD: <code>15000</code> = 15 000 драмов. EUR/USD: <code>5000</code> = 50.00.</li>
+        <li><strong>Currency</strong> — три буквы (<code>AMD</code>, <code>EUR</code>…).</li>
+        <li>Снимите <strong>active</strong>, чтобы спрятать тип из новой записи.</li>
+      </ul>
+      <div class="callout">Код потом не переименовывайте. Заведите новый тип и выключите старый.</div>
+    </section>
+
+    <section class="card" id="tz">
+      <h2>10. Часовые пояса (Timezones)</h2>
+      <p>Это список, из которого клиент выбирает город, чтобы сетка показывала <em>его</em> часы. Только имя IANA и понятная подпись.</p>
+      <p>Уже есть: Ереван, Москва, Киев, Берлин, Лондон, Нью-Йорк, Лос-Анджелес. Добавьте города, которые реально нужны; лишние выключите.</p>
+    </section>
+
+    <section class="card" id="content">
+      <h2>11. Контент (Content)</h2>
+      <p>Страницы практики — блоки Markdown у темы и языка. <code>ru</code>, <code>hy</code> и <code>en</code> пишутся отдельно.</p>
+      <table>
+        <thead><tr><th>Тема</th><th>В меню клиента</th><th>Обычно про что</th></tr></thead>
+        <tbody>
+          <tr><td><code>work_terms</code></td><td>Да</td><td>Условия, формат, отмена</td></tr>
+          <tr><td><code>qualification</code></td><td>Да</td><td>Образование и подход</td></tr>
+          <tr><td><code>about_psychotherapy</code></td><td>Да</td><td>Чего ждать</td></tr>
+          <tr><td><code>references</code></td><td>Нет</td><td>Уходит вместе с подтверждением листа ожидания</td></tr>
+        </tbody>
+      </table>
+      <ol>
+        <li>Правите Markdown.</li>
+        <li>Галочка <strong>published</strong> — клиент это увидит.</li>
+        <li><strong>Preview per channel</strong> — рядом Web, Telegram и Email.</li>
+        <li><strong>Save</strong> создаёт версию. <strong>Revisions</strong> — откат.</li>
+      </ol>
+      <div class="callout warn">У Telegram потолок 4096 символов на сообщение. Длинную страницу лучше разбить на несколько блоков.</div>
+    </section>
+
+    <section class="card" id="i18n">
+      <h2>12. Переводы (Translations)</h2>
+      <p>Это не страницы практики (они в Content), а строки интерфейса: кнопки, ошибки, ответы бота, письма.</p>
+      <ul>
+        <li>Пропуски помечены. Пока строки нет — берётся язык практики, затем английский.</li>
+        <li>Сгруппированы по месту, где текст встречается. Сохранение — по строке.</li>
+        <li>Обновление программы уже изменённую вами строку не перезаписывает.</li>
+      </ul>
+    </section>
+
+    <section class="card" id="delivery">
+      <h2>13. Доставка сообщений (Delivery)</h2>
+      <p>Строка = одно исходящее сообщение. Статус: <code>pending</code> → <code>sending</code> → <code>sent</code>, либо <code>failed</code> / <code>dead</code>.</p>
+      <p><code>dead</code> — повторы закончились. Проверьте SMTP или не заблокировал ли человек бота. Новое действие в админке ставит в очередь новое сообщение; «мёртвую» строку отсюда повторно не отправить.</p>
+    </section>
+
+    <section class="card" id="clients">
+      <h2>14. Клиенты и приватность</h2>
+      <p>Клиент — человек. У него могут быть личности Telegram и/или почты.</p>
+      <p><strong>Export</strong> скачивает всё, что хранится о человеке, включая написанный им текст.</p>
+      <p><strong>Erase</strong> необратим. В поле нужно набрать слово <code>erase</code>, затем подтвердить. Личности и токены удаляются, свободный текст очищается, подтверждённые сессии отменяются (чтобы не ушло напоминание), строки записей остаются с пометкой erased — для статистики.</p>
+      <p>Позже фоновая задача по сроку хранения чистит текст проблемы, тела переговоров и контактные заметки. Строки не исчезают.</p>
+      <div class="callout warn">Текст проблемы не попадает в логи, письма и список заявок. В дампах базы он <strong>есть</strong> — дампы считайте конфиденциальными. Это аккуратное обращение с данными, не юридическая консультация.</div>
+    </section>
+
+    <section class="card" id="maint">
+      <h2>15. Обслуживание (Maintenance)</h2>
+      <h3>A. Файл конфигурации — можно хранить вне сервера</h3>
+      <p>Export JSON: настройки, типы сессий, пояса, темы, блоки, переводы. <strong>Без клиентов. Без слотов.</strong></p>
+      <p>Import <strong>сливает</strong>: добавляет и обновляет то, что названо в файле, и никогда не удаляет то, чего в файле нет. Сначала Preview (ничего не пишет). Потом снова выберите файл и Import. Неудачный текст страницы откатывается через Revisions.</p>
+      <h3>B. Дампы базы — конфиденциально</h3>
+      <p>Раз в сутки в папку <code>backups/</code> на хосте. Скачать можно с этой страницы. Внутри есть текст проблем клиентов.</p>
+      <p>Кнопок «сделать дамп сейчас» и «восстановить» в браузере нет. Восстановление затирает все записи после дампа — это операция из командной строки для того, кто держит сервер.</p>
+    </section>
+
+    <section class="card" id="tg">
+      <h2>16. Админ в Telegram</h2>
+      <p>Ваш числовой Telegram ID должен быть в <code>TELEGRAM_ADMIN_IDS</code>. Чужому <code>/admin</code> бот просто молчит.</p>
+      <p>Напишите боту <code>/admin</code>: доступность, число pending / negotiating, ближайшая сессия, лист ожидания, ссылка на веб-админку.</p>
+      <div class="pills">
+        <span class="pill">Requests</span>
+        <span class="pill">Sessions (2 или 7 дней)</span>
+        <span class="pill">Waitlist</span>
+        <span class="pill">Availability вкл/выкл</span>
+        <span class="pill">Refresh</span>
+      </div>
+      <p><code>/admin availability</code> тоже переключает приём. На заявке: Approve, Propose (бот просит время), Reject, Cancel. Повторный <code>/admin</code> бросает недописанный ответ и возвращает в панель.</p>
+      <div class="callout">Контент, переводы, настройки, типы, пояса и создание слотов — только в вебе. Бот пришлёт ссылку.</div>
+    </section>
+
+    <section class="card" id="clients-view">
+      <h2>17. Что видит клиент</h2>
+      <ul>
+        <li><strong>Сайт</strong> — ваш контент, переключатель языка, форма записи, вход по magic-link (если SMTP включён) или через Telegram.</li>
+        <li><strong>Telegram</strong> — <code>/start</code>, меню тем, тот же сценарий записи, кнопки на уведомлениях.</li>
+        <li><strong>Почта</strong> — ссылки входа и «откройте страницу заявки». Ссылки на встречу в теле письма нет.</li>
+      </ul>
+      <p>Клиент с сайта может позже нажать Telegram-ссылку из письма и привязать бота к тому же человеку.</p>
+    </section>
+
+    <section class="card" id="week">
+      <h2>18. Чек-лист первой недели</h2>
+      <p>Галочки хранятся только в этом браузере.</p>
+      <div class="checklist" id="checks"></div>
+    </section>
+
+    <section class="card" id="fix">
+      <h2>19. Если что-то не так</h2>
+      <table>
+        <thead><tr><th>Симптом</th><th>Что сделать</th></tr></thead>
+        <tbody>
+          <tr><td>Не входит в админку</td><td>Логин/пароль установки. Подождите лимит 5 / 15 мин.</td></tr>
+          <tr><td><code>/admin</code> в Telegram молчит</td><td>Добавить числовой ID в <code>TELEGRAM_ADMIN_IDS</code> и перезапустить.</td></tr>
+          <tr><td>Клиенты видят только лист</td><td>Приём выключен, либо режим слотов без свободных и без fallback.</td></tr>
+          <tr><td>Пустой выбор слотов</td><td>Создайте будущие слоты со статусом <code>available</code>.</td></tr>
+          <tr><td>Время «поехало»</td><td>Пояс практики — IANA; клиент выбирает из Timezones.</td></tr>
+          <tr><td>Сообщение не пришло</td><td>Delivery: <code>sent</code> против <code>failed</code>/<code>dead</code>. Почте нужен SMTP. В Telegram человек должен сделать <code>/start</code>.</td></tr>
+          <tr><td>Approve даёт <code>refused</code></td><td>Уже confirmed, expired или cancelled. Обновите карточку.</td></tr>
+          <tr><td>Telegram обрезает страницу</td><td>Разбейте контент на блоки.</td></tr>
+          <tr><td>Нужны вчерашние записи</td><td>Это восстановление базы, не импорт JSON. Зовите хостера.</td></tr>
+        </tbody>
+      </table>
+      <p>Проверка живности: <code>/healthz</code> (процесс есть), <code>/readyz</code> (база отвечает).</p>
+    </section>
+
+    <section class="card" id="host">
+      <h2>20. Заметки тому, кто держит сервер</h2>
+      <p>Повседневная работа терапевта в оболочке не нуждается.</p>
+      <p>Один раз в <code>.env</code>: логин админки, токен / имя / секрет вебхука бота / admin ID, <code>SECRET_KEY</code>, <code>BASE_URL</code>, пароль базы, при необходимости SMTP, а <code>DOMAIN</code> и <code>ACME_EMAIL</code> — только для TLS-профиля.</p>
+<pre><button class="copy" type="button">Копировать</button><code>docker compose logs -f web worker
+docker compose logs backup
+ls -la backups/</code></pre>
+<pre><button class="copy" type="button">Копировать</button><code>docker compose stop web worker
+docker compose exec -T db pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists &lt; backups/psychobooking-YYYY-MM-DD.dump
+docker compose start web worker</code></pre>
+<pre><button class="copy" type="button">Копировать</button><code>git pull
+docker compose up -d --build</code></pre>
+      <p>Перед обновлением снимите дамп. Контейнер <code>web</code> накатывает миграции до того, как начнёт отвечать.</p>
+    </section>
+
+    <section class="card" id="not">
+      <h2>21. Чего в продукте нет</h2>
+      <ul>
+        <li>Оплаты и счета</li>
+        <li>Несколько терапевтов в одной установке</li>
+        <li>Клинические заметки и домашние задания</li>
+        <li>Синхронизация с Google Calendar / CalDAV</li>
+        <li>Самостоятельная отмена записи клиентом</li>
+      </ul>
+      <p>Хранится то, что нужно, чтобы назначить сессию — и по возможности ничего сверх этого.</p>
+    </section>
+
+    <footer>
+      Поставляется вместе с сервисом. Страница отдаётся вашей же установкой по адресу <code>/admin/help</code>, поэтому всегда соответствует запущенной версии.
+    </footer>
+  </main>
+</div>
+<script>
+(function () {
+  const nav = document.getElementById("nav");
+  const links = [...nav.querySelectorAll("a")];
+  const sections = links.map(a => document.querySelector(a.getAttribute("href"))).filter(Boolean);
+  const q = document.getElementById("q");
+  const hits = document.getElementById("hits");
+  const themeBtn = document.getElementById("theme");
+  const root = document.documentElement;
+
+  const saved = localStorage.getItem("admin-guide-theme");
+  if (saved) root.dataset.theme = saved;
+  else if (matchMedia("(prefers-color-scheme: dark)").matches) root.dataset.theme = "dark";
+
+  themeBtn.onclick = () => {
+    root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
+    localStorage.setItem("admin-guide-theme", root.dataset.theme);
+  };
+  document.getElementById("print").onclick = () => print();
+  document.getElementById("toggleNav").onclick = () => nav.classList.toggle("collapsed");
+
+  const io = new IntersectionObserver((entries) => {
+    const vis = entries.filter(e => e.isIntersecting).sort((a,b) => b.intersectionRatio - a.intersectionRatio)[0];
+    if (!vis) return;
+    links.forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#" + vis.target.id));
+  }, { rootMargin: "-20% 0px -70% 0px", threshold: [0, .2, .6] });
+  sections.forEach(s => io.observe(s));
+
+  function clearMarks(node) {
+    node.querySelectorAll("mark[data-q]").forEach(m => {
+      m.replaceWith(document.createTextNode(m.textContent));
+    });
+  }
+  function highlight(node, term) {
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
+      acceptNode(n) {
+        if (!n.parentElement) return NodeFilter.FILTER_REJECT;
+        const tag = n.parentElement.tagName;
+        if (tag === "SCRIPT" || tag === "STYLE" || tag === "MARK") return NodeFilter.FILTER_REJECT;
+        return n.textContent.toLowerCase().includes(term) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    let count = 0;
+    for (const n of nodes) {
+      const text = n.textContent;
+      const lower = text.toLowerCase();
+      const frag = document.createDocumentFragment();
+      let i = 0, idx;
+      while ((idx = lower.indexOf(term, i)) !== -1) {
+        frag.append(text.slice(i, idx));
+        const mark = document.createElement("mark");
+        mark.dataset.q = "1";
+        mark.textContent = text.slice(idx, idx + term.length);
+        frag.append(mark);
+        i = idx + term.length;
+        count++;
+      }
+      frag.append(text.slice(i));
+      n.replaceWith(frag);
+    }
+    return count;
+  }
+
+  q.addEventListener("input", () => {
+    const term = q.value.trim().toLowerCase();
+    document.querySelectorAll("main section.card").forEach(clearMarks);
+    if (term.length < 2) {
+      hits.textContent = "";
+      document.querySelectorAll("main section.card").forEach(s => s.style.display = "");
+      return;
+    }
+    let total = 0, shown = 0;
+    document.querySelectorAll("main section.card").forEach(s => {
+      const n = highlight(s, term);
+      const match = n > 0 || s.innerText.toLowerCase().includes(term);
+      s.style.display = match ? "" : "none";
+      if (match) shown++;
+      total += n;
+    });
+    hits.textContent = shown ? `${shown} разделов · ${total} совпадений` : "Ничего не найдено";
+  });
+
+  document.querySelectorAll("pre .copy").forEach(btn => {
+    btn.onclick = async () => {
+      const text = btn.parentElement.innerText.replace(/^(Копировать|Copy)\n?/, "");
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.textContent = "Скопировано";
+        setTimeout(() => btn.textContent = "Копировать", 1200);
+      } catch {
+        btn.textContent = "Выделите текст";
+      }
+    };
+  });
+
+  const items = [
+    "Вошли в /admin",
+    "Заданы название практики и пояс IANA",
+    "Указаны постоянная комната и/или ссылка на кабинет",
+    "Выбран режим записи; автоподтверждение выключено, если не нужно",
+    "Проставлены цены типов сессий",
+    "Собрана сетка на 1–2 недели (если запись по слотам)",
+    "Контент опубликован на используемых языках",
+    "Просмотрены пропуски в переводах",
+    "В Telegram команда /admin отвечает с вашего ID",
+    "Отправили тестовую заявку с сайта и одобрили её",
+    "Проверили Delivery по этому тесту",
+    "Выгрузили JSON конфигурации и положили в надёжное место",
+    "После первого ночного дампа файл появился в списке бэкапов"
+  ];
+  const box = document.getElementById("checks");
+  const state = JSON.parse(localStorage.getItem("admin-guide-checks-ru") || "{}");
+  items.forEach((label, i) => {
+    const id = "c" + i;
+    const row = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = !!state[id];
+    input.onchange = () => {
+      state[id] = input.checked;
+      localStorage.setItem("admin-guide-checks-ru", JSON.stringify(state));
+    };
+    row.append(input, document.createTextNode(label));
+    box.append(row);
+  });
+})();
+</script>
+</body>
+</html>

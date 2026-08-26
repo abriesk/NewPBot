@@ -121,6 +121,7 @@ timezone list, retention, and all practice content.
 | `/admin/delivery` | Whether a message actually went out |
 | `/admin/clients` | Export everything about one person, or erase them |
 | `/admin/maintenance` | Export and import the configuration; download a backup |
+| `/admin/help` | The admin guide, in English or Russian |
 | `/admin/settings` | The knobs above |
 
 Telegram keeps a reduced admin surface for when you are away from a desk:

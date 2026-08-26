@@ -1,0 +1,761 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Psychobooking — Admin user guide</title>
+<style>
+  :root {
+    --bg: #f6f1ea;
+    --bg-elev: #fffdf9;
+    --ink: #1c1916;
+    --muted: #6b6259;
+    --line: #e4d9cd;
+    --accent: #2f5d50;
+    --accent-2: #c46b3a;
+    --accent-soft: #e7f0ec;
+    --warn: #8a3b2a;
+    --code-bg: #efe7dc;
+    --sidebar: #221e1b;
+    --sidebar-ink: #f3ebe3;
+    --sidebar-muted: #b7aaa0;
+    --hit: #ffe08a;
+    --shadow: 0 18px 40px rgba(34, 30, 27, .08);
+    --radius: 14px;
+    --font: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, serif;
+    --sans: "Segoe UI", system-ui, -apple-system, sans-serif;
+    --mono: "IBM Plex Mono", "ui-monospace", Menlo, Consolas, monospace;
+  }
+  [data-theme="dark"] {
+    --bg: #161311;
+    --bg-elev: #211c19;
+    --ink: #f4ece4;
+    --muted: #b3a79c;
+    --line: #3a322c;
+    --accent: #8fceb8;
+    --accent-2: #e39a6c;
+    --accent-soft: #24332e;
+    --warn: #f0a090;
+    --code-bg: #2a2420;
+    --sidebar: #100e0c;
+    --sidebar-ink: #f4ece4;
+    --sidebar-muted: #9c9086;
+    --hit: #7a5d12;
+    --shadow: 0 18px 40px rgba(0,0,0,.35);
+  }
+  * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--ink);
+    font-family: var(--sans);
+    line-height: 1.55;
+  }
+  .app {
+    display: grid;
+    grid-template-columns: 280px 1fr;
+    min-height: 100vh;
+  }
+  aside {
+    background: var(--sidebar);
+    color: var(--sidebar-ink);
+    padding: 22px 16px 40px;
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    overflow: auto;
+  }
+  aside .brand {
+    font-family: var(--font);
+    font-size: 1.15rem;
+    letter-spacing: .01em;
+    margin: 0 8px 4px;
+  }
+  aside .sub {
+    color: var(--sidebar-muted);
+    font-size: .78rem;
+    margin: 0 8px 16px;
+  }
+  #q {
+    width: 100%;
+    border: 0;
+    border-radius: 10px;
+    padding: 10px 12px;
+    background: #2c2622;
+    color: var(--sidebar-ink);
+    font: inherit;
+    margin-bottom: 14px;
+  }
+  #q::placeholder { color: #8d8076; }
+  nav a {
+    display: block;
+    color: var(--sidebar-ink);
+    text-decoration: none;
+    padding: 7px 10px;
+    border-radius: 8px;
+    font-size: .9rem;
+  }
+  nav a:hover, nav a.active { background: #3a322c; }
+  nav a .n {
+    display: inline-block;
+    width: 1.4em;
+    color: var(--sidebar-muted);
+    font-variant-numeric: tabular-nums;
+  }
+  .tools {
+    display: flex;
+    gap: 8px;
+    margin: 8px 0 16px;
+  }
+  .tools a,
+  .tools button {
+    flex: 1;
+    background: #2c2622;
+    color: var(--sidebar-ink);
+    border: 0;
+    border-radius: 8px;
+    padding: 8px;
+    cursor: pointer;
+    font: inherit;
+    font-size: .8rem;
+  }
+  .tools a { text-align: center; text-decoration: none; }
+  main { padding: 36px 48px 80px; max-width: 920px; }
+  h1, h2, h3 { font-family: var(--font); font-weight: 600; line-height: 1.25; }
+  h1 { font-size: 2.1rem; margin: 0 0 .3em; }
+  .lede { font-size: 1.08rem; color: var(--muted); max-width: 62ch; }
+  section.card {
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: var(--radius);
+    padding: 28px 30px 22px;
+    margin: 22px 0;
+    box-shadow: var(--shadow);
+    scroll-margin-top: 16px;
+  }
+  section.card h2 { margin-top: 0; }
+  p { max-width: 68ch; }
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: .92rem;
+    margin: 12px 0 6px;
+  }
+  th, td {
+    text-align: left;
+    vertical-align: top;
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--line);
+  }
+  th { color: var(--muted); font-weight: 600; font-size: .78rem; letter-spacing: .04em; text-transform: uppercase; }
+  code, kbd {
+    font-family: var(--mono);
+    font-size: .86em;
+    background: var(--code-bg);
+    padding: .1em .35em;
+    border-radius: 5px;
+  }
+  pre {
+    background: var(--code-bg);
+    border-radius: 12px;
+    padding: 14px 16px;
+    overflow: auto;
+    position: relative;
+    font-family: var(--mono);
+    font-size: .84rem;
+  }
+  pre .copy {
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    background: var(--bg-elev);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    padding: 4px 8px;
+    cursor: pointer;
+    font: inherit;
+    font-size: .75rem;
+  }
+  .flow {
+    font-family: var(--mono);
+    font-size: .85rem;
+    background: var(--accent-soft);
+    padding: 14px 16px;
+    border-radius: 12px;
+    white-space: pre;
+    overflow: auto;
+  }
+  .pills { display: flex; flex-wrap: wrap; gap: 6px; margin: 10px 0 16px; }
+  .pill {
+    background: var(--accent-soft);
+    color: var(--accent);
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-size: .78rem;
+    font-weight: 600;
+  }
+  .callout {
+    border-left: 3px solid var(--accent-2);
+    padding: 10px 14px;
+    background: var(--bg);
+    border-radius: 0 10px 10px 0;
+    margin: 14px 0;
+  }
+  .warn { border-left-color: var(--warn); }
+  details.box {
+    border: 1px solid var(--line);
+    border-radius: 10px;
+    padding: 8px 14px;
+    margin: 10px 0;
+    background: var(--bg);
+  }
+  details.box summary { cursor: pointer; font-weight: 600; }
+  .checklist label {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 6px 0;
+    cursor: pointer;
+  }
+  .checklist input { margin-top: 4px; }
+  mark { background: var(--hit); color: inherit; padding: 0 .15em; border-radius: 3px; }
+  #hits {
+    color: var(--sidebar-muted);
+    font-size: .75rem;
+    margin: -8px 8px 12px;
+    min-height: 1em;
+  }
+  .menu { display: none; }
+  footer {
+    color: var(--muted);
+    font-size: .85rem;
+    margin-top: 40px;
+  }
+  @media (max-width: 860px) {
+    .app { grid-template-columns: 1fr; }
+    aside {
+      position: relative;
+      height: auto;
+      max-height: none;
+    }
+    .menu { display: inline-block; margin-bottom: 10px; }
+    nav.collapsed { display: none; }
+    main { padding: 22px 18px 60px; }
+  }
+  @media print {
+    aside, .tools, .copy, .menu { display: none !important; }
+    .app { display: block; }
+    section.card { box-shadow: none; break-inside: avoid; }
+    body { background: #fff; color: #000; }
+  }
+</style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <p class="brand">Psychobooking</p>
+    <p class="sub">Admin user guide</p>
+    <input id="q" type="search" placeholder="Search the guide…" autocomplete="off">
+    <div id="hits"></div>
+    <div class="tools">
+      <a href="/admin/requests">← Admin</a>
+      <a href="/admin/help?lang=ru">Русский</a>
+    </div>
+    <div class="tools">
+      <button type="button" id="theme">Theme</button>
+      <button type="button" id="print">Print</button>
+    </div>
+    <button class="menu" type="button" id="toggleNav">Menu</button>
+    <nav id="nav">
+      <a href="#what"><span class="n">1</span> What it does</a>
+      <a href="#signin"><span class="n">2</span> First sign-in</a>
+      <a href="#menu"><span class="n">3</span> Admin menu</a>
+      <a href="#daily"><span class="n">4</span> Daily workflow</a>
+      <a href="#requests"><span class="n">5</span> Requests</a>
+      <a href="#waitlist"><span class="n">6</span> Waitlist</a>
+      <a href="#slots"><span class="n">7</span> Slots</a>
+      <a href="#settings"><span class="n">8</span> Settings</a>
+      <a href="#types"><span class="n">9</span> Session types</a>
+      <a href="#tz"><span class="n">10</span> Timezones</a>
+      <a href="#content"><span class="n">11</span> Content</a>
+      <a href="#i18n"><span class="n">12</span> Translations</a>
+      <a href="#delivery"><span class="n">13</span> Delivery</a>
+      <a href="#clients"><span class="n">14</span> Clients &amp; privacy</a>
+      <a href="#maint"><span class="n">15</span> Maintenance</a>
+      <a href="#tg"><span class="n">16</span> Telegram admin</a>
+      <a href="#clients-view"><span class="n">17</span> What clients see</a>
+      <a href="#week"><span class="n">18</span> First-week checklist</a>
+      <a href="#fix"><span class="n">19</span> Troubleshooting</a>
+      <a href="#host"><span class="n">20</span> For the host</a>
+      <a href="#not"><span class="n">21</span> Out of scope</a>
+    </nav>
+  </aside>
+
+  <main>
+    <h1>Admin user guide</h1>
+    <p class="lede">For the therapist. How to run bookings from the web admin and from Telegram. The public site is <code>/</code>. Your console is <code>/admin</code>, in English. Clients may use Russian, Armenian, or English.</p>
+
+    <section class="card" id="what">
+      <h2>1. What the service does</h2>
+      <p>Clients read practice information and request a consultation on the <strong>website</strong> or in the <strong>Telegram bot</strong>. When you are not taking people, they join a <strong>waitlist</strong>.</p>
+      <p>You stay in the loop unless you turn on auto-confirm:</p>
+      <div class="pills">
+        <span class="pill">Approve</span>
+        <span class="pill">Propose another time</span>
+        <span class="pill">Reject</span>
+        <span class="pill">Cancel</span>
+        <span class="pill">Waitlist: contacted / converted / closed</span>
+      </div>
+      <p>Email is outbound only. If SMTP was left empty at install, email is off and people sign in through Telegram.</p>
+    </section>
+
+    <section class="card" id="signin">
+      <h2>2. First sign-in</h2>
+      <ol>
+        <li>Open <code>https://YOUR-DOMAIN/admin</code> (or <code>http://127.0.0.1:8000/admin</code> on a local/plain install).</li>
+        <li>Use the install username and password (<code>ADMIN_USERNAME</code> / <code>ADMIN_PASSWORD</code>).</li>
+        <li>After first start the password is stored only as a hash.</li>
+      </ol>
+      <div class="callout">Login is limited to <strong>5 attempts per 15 minutes per IP</strong>. If you are locked out, wait.</div>
+      <h3>Do this once before inviting clients</h3>
+      <table>
+        <thead><tr><th>#</th><th>Page</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td>1</td><td>Settings</td><td>Name, timezone, booking mode, meeting links</td></tr>
+          <tr><td>2</td><td>Session types</td><td>Duration and price</td></tr>
+          <tr><td>3</td><td>Timezones</td><td>Cities clients can pick</td></tr>
+          <tr><td>4</td><td>Slots</td><td>Next week of times, if you book by slots</td></tr>
+          <tr><td>5</td><td>Content</td><td>Pages clients will read</td></tr>
+          <tr><td>6</td><td>Translations</td><td>Missing Russian / Armenian strings</td></tr>
+        </tbody>
+      </table>
+    </section>
+
+    <section class="card" id="menu">
+      <h2>3. The admin menu</h2>
+      <table>
+        <thead><tr><th>Page</th><th>Address</th><th>Use it for</th></tr></thead>
+        <tbody>
+          <tr><td>Requests</td><td><code>/admin/requests</code></td><td>Approve, propose, reject, cancel</td></tr>
+          <tr><td>Waitlist</td><td><code>/admin/waitlist</code></td><td>People waiting while bookings are closed</td></tr>
+          <tr><td>Slots</td><td><code>/admin/slots</code></td><td>Create a week; block or delete free times</td></tr>
+          <tr><td>Content</td><td><code>/admin/content</code></td><td>Practice pages in Markdown</td></tr>
+          <tr><td>Translations</td><td><code>/admin/translations</code></td><td>Reword buttons and bot/email copy</td></tr>
+          <tr><td>Session types</td><td><code>/admin/session-types</code></td><td>Products you offer</td></tr>
+          <tr><td>Timezones</td><td><code>/admin/timezones</code></td><td>Client timezone list</td></tr>
+          <tr><td>Delivery</td><td><code>/admin/delivery</code></td><td>Did a message actually leave?</td></tr>
+          <tr><td>Maintenance</td><td><code>/admin/maintenance</code></td><td>Config export/import; download dumps</td></tr>
+          <tr><td>Clients</td><td><code>/admin/clients</code></td><td>Export one person, or erase them</td></tr>
+          <tr><td>Settings</td><td><code>/admin/settings</code></td><td>Availability and operational knobs</td></tr>
+        </tbody>
+      </table>
+      <p>The header brand returns to Requests — that is the home screen.</p>
+    </section>
+
+    <section class="card" id="daily">
+      <h2>4. Daily workflow</h2>
+      <ol>
+        <li>Open <strong>Requests</strong>. Filter by <code>pending</code> or <code>negotiating</code>.</li>
+        <li>Open each new request. Read what they wrote (detail page only).</li>
+        <li>Approve, propose another time, or reject.</li>
+        <li>Check <strong>Waitlist</strong> if availability is off.</li>
+        <li>If someone missed a message, open <strong>Delivery</strong>.</li>
+        <li>On the phone, send <code>/admin</code> to the bot.</li>
+      </ol>
+      <div class="callout">Do not edit <code>.env</code> for ordinary practice changes. Availability, prices, reminders, content, and booking mode all live in the admin UI.</div>
+    </section>
+
+    <section class="card" id="requests">
+      <h2>5. Requests</h2>
+      <p>The list at <code>/admin/requests</code> can be filtered by status. Click the short UUID for the detail page.</p>
+      <div class="flow">pending  →  negotiating  →  confirmed  →  completed
+    │              │              │
+    ├─ reject      ├─ reject      └─ cancel
+    └─ expire      └─ expire</div>
+      <table>
+        <thead><tr><th>Status</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td><strong>pending</strong></td><td>New. Waiting for you.</td></tr>
+          <tr><td><strong>negotiating</strong></td><td>A time was proposed. Someone still has to accept.</td></tr>
+          <tr><td><strong>confirmed</strong></td><td>Booked. Reminders will fire.</td></tr>
+          <tr><td><strong>rejected</strong></td><td>You declined.</td></tr>
+          <tr><td><strong>expired</strong></td><td>Nobody answered in time.</td></tr>
+          <tr><td><strong>cancelled</strong></td><td>You cancelled a booked session.</td></tr>
+          <tr><td><strong>completed</strong></td><td>Session time has passed.</td></tr>
+        </tbody>
+      </table>
+      <p>Clients cannot cancel themselves.</p>
+      <details class="box" open>
+        <summary>Detail page</summary>
+        <p>Status, type, modality, name, scheduled and/or desired time, client timezone, contact note, negotiation thread, whose turn it is.</p>
+        <p><strong>What they wrote</strong> (problem text) is only on this page — never in the list, logs, or email. Telegram shows it only to you.</p>
+      </details>
+      <details class="box" open>
+        <summary>Actions</summary>
+        <p><strong>Approve</strong> — leave time blank to keep the held slot, or set a time in the practice timezone. Optional per-session meeting URL; otherwise the standing room from Settings is used for online sessions.</p>
+        <p><strong>Propose</strong> — time plus optional note. Moves the request to negotiating.</p>
+        <p><strong>Reject</strong> / <strong>Cancel</strong> — optional reason. Cancel stops reminders on a confirmed session.</p>
+        <p>If the current status does not allow the action, the page flashes <code>refused</code> and nothing changes.</p>
+      </details>
+    </section>
+
+    <section class="card" id="waitlist">
+      <h2>6. Waitlist</h2>
+      <p>People land here when accepting new bookings is off, or when you are in slot mode with no free slots and fallback-to-negotiation is off.</p>
+      <table>
+        <thead><tr><th>Action</th><th>Meaning</th></tr></thead>
+        <tbody>
+          <tr><td>contacted</td><td>You reached out.</td></tr>
+          <tr><td>converted</td><td>They booked, or you will book them by hand.</td></tr>
+          <tr><td>closed</td><td>No longer waiting.</td></tr>
+        </tbody>
+      </table>
+      <p>A waitlist entry is not a booking: no slot, no negotiation, no reminders. Type an optional note, then press the action.</p>
+    </section>
+
+    <section class="card" id="slots">
+      <h2>7. Slots</h2>
+      <p>Times are in the <strong>practice timezone</strong> shown at the top of <code>/admin/slots</code>.</p>
+      <h3>Create a week</h3>
+      <ol>
+        <li>From / To dates.</li>
+        <li>Weekdays.</li>
+        <li>Start times, comma-separated — <code>10:00, 11:00, 15:30</code>.</li>
+        <li>Duration (default 60) and optional modality lock (online / onsite / either).</li>
+        <li>Create.</li>
+      </ol>
+      <table>
+        <thead><tr><th>Status</th><th>What you can do</th></tr></thead>
+        <tbody>
+          <tr><td>available</td><td>Block or delete</td></tr>
+          <tr><td>blocked</td><td>Unblock</td></tr>
+          <tr><td>held / booked</td><td>In use — do not delete</td></tr>
+        </tbody>
+      </table>
+      <div class="callout">Slots are not in the configuration export. Recreate next week here.</div>
+    </section>
+
+    <section class="card" id="settings">
+      <h2>8. Settings</h2>
+      <p>These live in the database. No restart needed.</p>
+      <h3>Booking</h3>
+      <table>
+        <thead><tr><th>Setting</th><th>Effect</th></tr></thead>
+        <tbody>
+          <tr><td>Accepting new bookings</td><td>Off → waitlist only (plus <code>references</code> content)</td></tr>
+          <tr><td>Mode: slots</td><td>Client picks from your grid</td></tr>
+          <tr><td>Mode: negotiation</td><td>Client types a preferred time</td></tr>
+          <tr><td>Fallback to negotiation</td><td>Empty grid in slot mode → free-text form instead of waitlist</td></tr>
+          <tr><td>Negotiation enabled</td><td>Propose / counter / accept after a request exists</td></tr>
+          <tr><td>Auto-confirm slots</td><td>Skip your approval. Default off.</td></tr>
+        </tbody>
+      </table>
+      <h3>What the client actually sees</h3>
+      <table>
+        <thead><tr><th>Accepting</th><th>Mode</th><th>Free slots?</th><th>Client sees</th></tr></thead>
+        <tbody>
+          <tr><td>Off</td><td>—</td><td>—</td><td>Waitlist</td></tr>
+          <tr><td>On</td><td>slots</td><td>Yes</td><td>Slot picker</td></tr>
+          <tr><td>On</td><td>slots</td><td>No, fallback on</td><td>Free-text time</td></tr>
+          <tr><td>On</td><td>slots</td><td>No, fallback off</td><td>Waitlist</td></tr>
+          <tr><td>On</td><td>negotiation</td><td>—</td><td>Free-text time</td></tr>
+        </tbody>
+      </table>
+      <h3>Practice &amp; timing</h3>
+      <ul>
+        <li><strong>Timezone</strong> must be IANA, e.g. <code>Asia/Yerevan</code> — never <code>UTC+4</code>.</li>
+        <li><strong>Default language</strong> <code>ru</code> / <code>hy</code> / <code>en</code>.</li>
+        <li><strong>Clinic address link</strong> and <strong>standing meeting room</strong>. You can still override the meeting URL when approving.</li>
+        <li>Join links are not sent by email; email points at the request page.</li>
+        <li><strong>Slot hold</strong> (minutes), <strong>pending expiry</strong> (hours), <strong>cancellation window</strong>, <strong>retention</strong> (months — free text is later cleared, rows stay).</li>
+        <li><strong>Reminder offsets</strong> in minutes, comma-separated, e.g. <code>1440, 60</code>. Empty = no reminders.</li>
+      </ul>
+    </section>
+
+    <section class="card" id="types">
+      <h2>9. Session types</h2>
+      <p>Seeded: <code>individual</code> and <code>couple</code>, both 60 minutes. Add more (e.g. <code>supervision</code>) without a software update.</p>
+      <ul>
+        <li><strong>Price (minor units)</strong> — smallest currency unit. AMD: <code>15000</code> = 15,000 dram. EUR/USD: <code>5000</code> = 50.00.</li>
+        <li><strong>Currency</strong> — three letters (<code>AMD</code>, <code>EUR</code>…).</li>
+        <li>Uncheck <strong>active</strong> to hide a type from new bookings.</li>
+      </ul>
+      <div class="callout">Do not rename a code later. Add a new type and deactivate the old one.</div>
+    </section>
+
+    <section class="card" id="tz">
+      <h2>10. Timezones</h2>
+      <p>This is the list clients pick from so the slot picker shows <em>their</em> clock. IANA name + friendly label only.</p>
+      <p>Seeded: Yerevan, Moscow, Kyiv, Berlin, London, New York, Los Angeles. Add cities you actually need; deactivate the rest.</p>
+    </section>
+
+    <section class="card" id="content">
+      <h2>11. Content</h2>
+      <p>Practice pages are Markdown <strong>blocks</strong> under a topic and a language. Write <code>ru</code>, <code>hy</code>, and <code>en</code> separately.</p>
+      <table>
+        <thead><tr><th>Topic</th><th>In client menu?</th><th>Typical use</th></tr></thead>
+        <tbody>
+          <tr><td><code>work_terms</code></td><td>Yes</td><td>Fees, format, cancellation</td></tr>
+          <tr><td><code>qualification</code></td><td>Yes</td><td>Training and approach</td></tr>
+          <tr><td><code>about_psychotherapy</code></td><td>Yes</td><td>What to expect</td></tr>
+          <tr><td><code>references</code></td><td>No</td><td>Sent with waitlist confirmations</td></tr>
+        </tbody>
+      </table>
+      <ol>
+        <li>Edit Markdown.</li>
+        <li>Tick <strong>published</strong> when clients may see it.</li>
+        <li><strong>Preview per channel</strong> — Web, Telegram, Email side by side.</li>
+        <li><strong>Save</strong> (creates a version). <strong>Revisions</strong> to roll back.</li>
+      </ol>
+      <div class="callout warn">Telegram caps a message at 4096 characters. Preview long pages; split into several blocks if needed.</div>
+    </section>
+
+    <section class="card" id="i18n">
+      <h2>12. Translations</h2>
+      <p>UI strings — buttons, errors, bot replies, emails — not the practice pages.</p>
+      <ul>
+        <li>Missing strings are marked. Fallback: practice default language, then English.</li>
+        <li>Grouped by where they appear. Save per row.</li>
+        <li>A software update never overwrites a string you already changed.</li>
+      </ul>
+    </section>
+
+    <section class="card" id="delivery">
+      <h2>13. Delivery</h2>
+      <p>One row = one outbound message. Status moves <code>pending</code> → <code>sending</code> → <code>sent</code>, or <code>failed</code> / <code>dead</code>.</p>
+      <p><code>dead</code> means retries stopped. Check SMTP, or whether the user blocked the bot. Taking a new admin action queues a fresh message; dead rows are not resent from this page.</p>
+    </section>
+
+    <section class="card" id="clients">
+      <h2>14. Clients and privacy</h2>
+      <p>A client is the person. They may have Telegram and/or email identities.</p>
+      <p><strong>Export</strong> downloads everything held about them, including what they wrote.</p>
+      <p><strong>Erase</strong> is irreversible. Type the word <code>erase</code>, then confirm. Identities and tokens go; free text is cleared; confirmed sessions are cancelled so reminders stop; booking rows stay marked erased for statistics.</p>
+      <p>A retention job later clears problem text, negotiation bodies, and contact notes. Rows remain.</p>
+      <div class="callout warn">Problem text never appears in logs, emails, or the request list. Database dumps <strong>do</strong> contain it — treat backups as confidential. This is careful handling, not legal advice.</div>
+    </section>
+
+    <section class="card" id="maint">
+      <h2>15. Maintenance</h2>
+      <h3>A. Configuration file — safe off-server</h3>
+      <p>Export JSON: settings, session types, timezones, topics, blocks, translations. <strong>No client data. No slots.</strong></p>
+      <p>Import <strong>merges</strong>: adds and updates named items, never deletes omitted ones. Preview first (writes nothing). Then choose the file again and Import. Bad content edits roll back from Revisions.</p>
+      <h3>B. Database backups — confidential</h3>
+      <p>Taken daily into the host <code>backups/</code> folder. Download from this page. Includes problem text.</p>
+      <p>There is no “back up now” or “restore” button. Restore overwrites every booking since the dump — command line only, for whoever hosts the service.</p>
+    </section>
+
+    <section class="card" id="tg">
+      <h2>16. Telegram admin</h2>
+      <p>Your numeric Telegram user ID must be in <code>TELEGRAM_ADMIN_IDS</code>. Anyone else who types <code>/admin</code> gets silence.</p>
+      <p>Send <code>/admin</code> for the panel: availability, pending/negotiating counts, next session, waitlist count, link to the web UI.</p>
+      <div class="pills">
+        <span class="pill">Requests</span>
+        <span class="pill">Sessions (2 or 7 days)</span>
+        <span class="pill">Waitlist</span>
+        <span class="pill">Availability on/off</span>
+        <span class="pill">Refresh</span>
+      </div>
+      <p><code>/admin availability</code> also toggles availability. On a request: Approve, Propose (bot asks for a time), Reject, Cancel. Sending <code>/admin</code> again drops a half-typed answer.</p>
+      <div class="callout">Content, translations, settings, session types, timezones, and creating slots are web-only. The bot sends a link instead.</div>
+    </section>
+
+    <section class="card" id="clients-view">
+      <h2>17. What clients experience</h2>
+      <ul>
+        <li><strong>Web</strong> — your content, language switcher, booking form, email magic link (if SMTP is on) or Telegram sign-in.</li>
+        <li><strong>Telegram</strong> — <code>/start</code>, topic menu, the same booking flow, action buttons on notifications.</li>
+        <li><strong>Email</strong> — login links and “open your request page”. No meeting URL in the body.</li>
+      </ul>
+      <p>A web client can later tap a Telegram deep link in email to attach Telegram to the same person.</p>
+    </section>
+
+    <section class="card" id="week">
+      <h2>18. First-week checklist</h2>
+      <p>Ticks are stored in this browser only.</p>
+      <div class="checklist" id="checks"></div>
+    </section>
+
+    <section class="card" id="fix">
+      <h2>19. Troubleshooting</h2>
+      <table>
+        <thead><tr><th>Symptom</th><th>What to try</th></tr></thead>
+        <tbody>
+          <tr><td>Cannot log in</td><td>Install credentials. Wait out the 5 / 15 min limit.</td></tr>
+          <tr><td><code>/admin</code> in Telegram does nothing</td><td>Add your numeric user ID to <code>TELEGRAM_ADMIN_IDS</code> and restart.</td></tr>
+          <tr><td>Clients only see waitlist</td><td>Availability off, or slot mode with no free slots and fallback off.</td></tr>
+          <tr><td>Empty slot picker</td><td>Create future <code>available</code> slots.</td></tr>
+          <tr><td>Wrong clock</td><td>Practice timezone must be IANA; clients pick from Timezones.</td></tr>
+          <tr><td>No message received</td><td>Delivery: <code>sent</code> vs <code>failed</code>/<code>dead</code>. Email needs SMTP. Telegram users must <code>/start</code> the bot.</td></tr>
+          <tr><td>Approve flashes <code>refused</code></td><td>Already confirmed, expired, or cancelled. Refresh.</td></tr>
+          <tr><td>Telegram truncates a page</td><td>Split content into more blocks.</td></tr>
+          <tr><td>Need old bookings back</td><td>Database restore, not config import. Ask the host.</td></tr>
+        </tbody>
+      </table>
+      <p>Health: <code>/healthz</code> (process up), <code>/readyz</code> (database answers).</p>
+    </section>
+
+    <section class="card" id="host">
+      <h2>20. Notes for whoever hosts the server</h2>
+      <p>Ordinary therapist work never needs a shell.</p>
+      <p>Set once in <code>.env</code>: admin login, Telegram bot token / username / webhook secret / admin IDs, <code>SECRET_KEY</code>, <code>BASE_URL</code>, database password, optional SMTP, and <code>DOMAIN</code>+<code>ACME_EMAIL</code> only for the TLS profile.</p>
+<pre><button class="copy" type="button">Copy</button><code>docker compose logs -f web worker
+docker compose logs backup
+ls -la backups/</code></pre>
+<pre><button class="copy" type="button">Copy</button><code>docker compose stop web worker
+docker compose exec -T db pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists &lt; backups/psychobooking-YYYY-MM-DD.dump
+docker compose start web worker</code></pre>
+<pre><button class="copy" type="button">Copy</button><code>git pull
+docker compose up -d --build</code></pre>
+      <p>Take a dump before upgrading. <code>web</code> migrates before it serves traffic.</p>
+    </section>
+
+    <section class="card" id="not">
+      <h2>21. What this product is not</h2>
+      <ul>
+        <li>Not payments or invoicing</li>
+        <li>Not a multi-therapist clinic roster</li>
+        <li>Not clinical notes or homework</li>
+        <li>Not Google Calendar / CalDAV sync</li>
+        <li>Clients cannot cancel their own bookings</li>
+      </ul>
+      <p>It stores what is needed to schedule a session, and as little else as possible.</p>
+    </section>
+
+    <footer>
+      Shipped with the service. This page is served from your own installation at <code>/admin/help</code>, so it always matches the version you are running.
+    </footer>
+  </main>
+</div>
+<script>
+(function () {
+  const nav = document.getElementById("nav");
+  const links = [...nav.querySelectorAll("a")];
+  const sections = links.map(a => document.querySelector(a.getAttribute("href"))).filter(Boolean);
+  const q = document.getElementById("q");
+  const hits = document.getElementById("hits");
+  const themeBtn = document.getElementById("theme");
+  const root = document.documentElement;
+
+  const saved = localStorage.getItem("admin-guide-theme");
+  if (saved) root.dataset.theme = saved;
+  else if (matchMedia("(prefers-color-scheme: dark)").matches) root.dataset.theme = "dark";
+
+  themeBtn.onclick = () => {
+    root.dataset.theme = root.dataset.theme === "dark" ? "light" : "dark";
+    localStorage.setItem("admin-guide-theme", root.dataset.theme);
+  };
+  document.getElementById("print").onclick = () => print();
+  document.getElementById("toggleNav").onclick = () => nav.classList.toggle("collapsed");
+
+  const io = new IntersectionObserver((entries) => {
+    const vis = entries.filter(e => e.isIntersecting).sort((a,b) => b.intersectionRatio - a.intersectionRatio)[0];
+    if (!vis) return;
+    links.forEach(a => a.classList.toggle("active", a.getAttribute("href") === "#" + vis.target.id));
+  }, { rootMargin: "-20% 0px -70% 0px", threshold: [0, .2, .6] });
+  sections.forEach(s => io.observe(s));
+
+  function clearMarks(node) {
+    node.querySelectorAll("mark[data-q]").forEach(m => {
+      m.replaceWith(document.createTextNode(m.textContent));
+    });
+  }
+  function highlight(node, term) {
+    const walker = document.createTreeWalker(node, NodeFilter.SHOW_TEXT, {
+      acceptNode(n) {
+        if (!n.parentElement) return NodeFilter.FILTER_REJECT;
+        const tag = n.parentElement.tagName;
+        if (tag === "SCRIPT" || tag === "STYLE" || tag === "MARK") return NodeFilter.FILTER_REJECT;
+        return n.textContent.toLowerCase().includes(term) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
+    });
+    const nodes = [];
+    while (walker.nextNode()) nodes.push(walker.currentNode);
+    let count = 0;
+    for (const n of nodes) {
+      const text = n.textContent;
+      const lower = text.toLowerCase();
+      const frag = document.createDocumentFragment();
+      let i = 0, idx;
+      while ((idx = lower.indexOf(term, i)) !== -1) {
+        frag.append(text.slice(i, idx));
+        const mark = document.createElement("mark");
+        mark.dataset.q = "1";
+        mark.textContent = text.slice(idx, idx + term.length);
+        frag.append(mark);
+        i = idx + term.length;
+        count++;
+      }
+      frag.append(text.slice(i));
+      n.replaceWith(frag);
+    }
+    return count;
+  }
+
+  q.addEventListener("input", () => {
+    const term = q.value.trim().toLowerCase();
+    document.querySelectorAll("main section.card").forEach(clearMarks);
+    if (term.length < 2) {
+      hits.textContent = "";
+      document.querySelectorAll("main section.card").forEach(s => s.style.display = "");
+      return;
+    }
+    let total = 0, shown = 0;
+    document.querySelectorAll("main section.card").forEach(s => {
+      const n = highlight(s, term);
+      const match = n > 0 || s.innerText.toLowerCase().includes(term);
+      s.style.display = match ? "" : "none";
+      if (match) shown++;
+      total += n;
+    });
+    hits.textContent = shown ? `${shown} sections · ${total} matches` : "No matches";
+  });
+
+  document.querySelectorAll("pre .copy").forEach(btn => {
+    btn.onclick = async () => {
+      const text = btn.parentElement.innerText.replace(/^Copy\n?/, "");
+      try {
+        await navigator.clipboard.writeText(text);
+        btn.textContent = "Copied";
+        setTimeout(() => btn.textContent = "Copy", 1200);
+      } catch {
+        btn.textContent = "Select & copy";
+      }
+    };
+  });
+
+  const items = [
+    "Signed in at /admin",
+    "Practice name and IANA timezone set",
+    "Standing meeting room and/or clinic link set",
+    "Booking mode chosen; auto-confirm left off unless wanted",
+    "Prices set on session types",
+    "Next 1–2 weeks of slots created (if using slots)",
+    "Content published in the languages you use",
+    "Missing translations reviewed",
+    "Telegram /admin works with your user ID",
+    "Sent a test request from the public site and approved it",
+    "Checked Delivery for that test",
+    "Exported configuration JSON and stored it somewhere safe",
+    "Confirmed a backup file appears after the first scheduled dump"
+  ];
+  const box = document.getElementById("checks");
+  const state = JSON.parse(localStorage.getItem("admin-guide-checks") || "{}");
+  items.forEach((label, i) => {
+    const id = "c" + i;
+    const row = document.createElement("label");
+    const input = document.createElement("input");
+    input.type = "checkbox";
+    input.checked = !!state[id];
+    input.onchange = () => {
+      state[id] = input.checked;
+      localStorage.setItem("admin-guide-checks", JSON.stringify(state));
+    };
+    row.append(input, document.createTextNode(label));
+    box.append(row);
+  });
+})();
+</script>
+</body>
+</html>

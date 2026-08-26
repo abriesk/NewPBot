@@ -206,6 +206,7 @@ admin:
   maintenance.preview: "Preview without saving"
   maintenance.invalid: "The file was not imported: {detail}"
   maintenance.backups: "Database backups"
+  nav.help: "Help"
   nav.maintenance: "Maintenance"
   settings.saved: "Saved."
   delivery.failed: "Delivery failed: {error}"

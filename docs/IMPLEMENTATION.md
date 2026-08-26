@@ -67,7 +67,7 @@ Do not invent features not specified here. Where this document says "configurabl
 │   ├── channels/
 │   │   ├── base.py               # Transport protocol
 │   │   ├── telegram/             # webhook router, keyboards, transport
-│   │   ├── email/                # SMTP transport, templates
+│   │   └── web/                  # client + admin routers, templates, static, guides/
 │   │   └── web/                  # client + admin routers, templates, static
 │   ├── worker/
 │   │   ├── main.py               # loop
@@ -739,7 +739,7 @@ A message *about a request* **MUST** link to `/r/{uuid}` carrying a `view_reques
 
 All under `/admin`, session-authenticated, CSRF-protected.
 
-`/admin/login`, `/admin/requests`, `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`).
+`/admin/login`, `/admin/requests`, `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`), `/admin/help`.
 
 The maintenance page carries both halves of §16.7 and §16.6 and nothing else:
 
@@ -757,6 +757,13 @@ The import route is one route with two modes on purpose: a preview that runs dif
 Uploads **MUST** be capped (5 MB) and rejected above it before parsing.
 
 `/admin/content/preview` **MUST** render a block exactly as each channel would, side by side.
+
+`/admin/help` serves the admin guide from `app/channels/web/guides/admin-guide.<lang>.html`, session-authenticated like every other admin route. The guides are complete standalone documents — their own navigation, search, theme toggle, and print stylesheet — so they are returned as they are rather than rendered through `admin/base.html`.
+
+- They ship **inside the image**, not in `docs/`, so the guide always describes the version this installation is running.
+- They **MUST** be self-contained: no CDN, no external stylesheet or font, nothing fetched at view time. There is no CSP to catch a regression, and a practice server may have no outbound network at all.
+- `?lang=` selects the language. `en` and `ru` exist; anything else, `hy` included, falls back to `en` — a missing page is worse than the wrong language, and the fallback is also what stops the parameter being a path.
+- This is the one admin surface that is **not** English-only (§15, DESIGN.md §11). The console stays in English; the manual explaining it does not have to be.
 
 ### 12.3 Telegram webhook
 
