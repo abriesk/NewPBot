@@ -44,6 +44,7 @@ from app.core.enums import (
     BookingMode,
     Channel,
     ContentBlockKind,
+    ErrorSource,
     Modality,
     NegotiationKind,
     OutboxStatus,
@@ -648,6 +649,33 @@ class AuditLog(Base):
     created_at: Mapped[datetime] = _tstz(nullable=False, server_default=func.now())
 
 
+class ErrorEvent(Base):
+    """An exception that left no other trace (§6.9, DESIGN.md §22.2).
+
+    Every other failure in this system is already a row: an undelivered
+    message is an outbox row, a missed reminder is a reminder row. An
+    unhandled exception in a request is not -- the client sees a 500 and
+    leaves -- and a worker job that raises is caught on purpose so one bad job
+    cannot stop the others (§14). Without this table those two are visible
+    only in logs, which do not survive `docker compose down`.
+
+    `kind` and `location` only. The exception's **message and traceback are
+    deliberately not stored**: either can carry an email address or a fragment
+    of problem text, and hard rule 8 has no exception for tracebacks. The logs
+    keep the detail, where detail belongs.
+    """
+
+    __tablename__ = "error_event"
+    __table_args__ = (Index("ix_error_event_at", "at"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    practice_id: Mapped[int] = mapped_column(ForeignKey("practice.id"), nullable=False)
+    source: Mapped[ErrorSource] = mapped_column(pg_enum(ErrorSource), nullable=False)
+    kind: Mapped[str] = mapped_column(Text, nullable=False)  # exception class
+    location: Mapped[str] = mapped_column(Text, nullable=False)  # 'module:line' or a job name
+    at: Mapped[datetime] = _tstz(nullable=False, server_default=func.now())
+
+
 __all__ = [
     "AdminSession",
     "AdminUser",
@@ -659,6 +687,7 @@ __all__ = [
     "ContentBlock",
     "ContentBlockRevision",
     "ContentTopic",
+    "ErrorEvent",
     "FlowState",
     "Identity",
     "NegotiationMessage",

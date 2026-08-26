@@ -18,13 +18,17 @@ import signal
 from collections.abc import Awaitable, Callable
 
 from app.config import get_settings
-from app.db import dispose_engine
+from app.core.enums import ErrorSource
+from app.core.services.status import record_error, where
+from app.db import dispose_engine, unit_of_work
 from app.worker.jobs.outbox import dispatch_outbox
+from app.worker.jobs.status import write_status
 from app.worker.jobs.sweeps import (
     complete_requests,
     expire_requests,
     expire_slot_holds,
     fire_reminders,
+    prune_error_events,
     prune_revisions,
     prune_tokens,
     purge_content,
@@ -46,16 +50,36 @@ JOBS: list[Job] = [
     purge_content,
     prune_tokens,
     prune_revisions,
+    prune_error_events,
+    # Last, so the file it writes describes the pass that has just finished
+    # rather than the one before it (§16.8).
+    write_status,
 ]
 
 
 async def run_once() -> None:
     """One pass over every job. A failing job MUST NOT stop the others."""
     for job in JOBS:
+        name = getattr(job, "__name__", str(job))
         try:
             await job()
-        except Exception:
-            logger.exception("job %s failed", getattr(job, "__name__", job))
+        except Exception as exc:
+            logger.exception("job %s failed", name)
+            # §6.9: this `except` is why a broken job can fail every twenty
+            # seconds for a month unnoticed. Recording it is what makes
+            # `worker_errors` (§16.9) able to see it at all.
+            await _record(exc, name)
+
+
+async def _record(exc: Exception, job: str) -> None:
+    """Best-effort, and never allowed to become the failure it is reporting."""
+    try:
+        async with unit_of_work() as session:
+            await record_error(
+                session, source=ErrorSource.worker, exc=exc, location=where(exc, job)
+            )
+    except Exception:
+        logger.warning("could not record the failure of job %s", job)
 
 
 async def run_forever(stop: asyncio.Event) -> None:

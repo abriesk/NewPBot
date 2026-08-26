@@ -46,6 +46,7 @@ services:
     # is no route that writes, deletes, or restores one (DESIGN.md §21.5).
     volumes:
       - ${BACKUP_DIR:-./backups}:/backups:ro
+      - ${STATE_DIR:-./state}:/state:ro
     # No published ports here. Under `tls`, Caddy is the sole ingress and web is
     # reachable only on the internal network. Under `plain`, the loopback
     # binding comes from docker-compose.plain.yml.
@@ -64,6 +65,12 @@ services:
       web:
         condition: service_healthy
     command: ["python", "-m", "app.worker.main"]
+    # The worker writes the health file (§16.8) and reads the dump directory to
+    # check its freshness and the disk under it (§16.9) -- read-only there,
+    # because the sidecar owns those files.
+    volumes:
+      - ${STATE_DIR:-./state}:/state
+      - ${BACKUP_DIR:-./backups}:/backups:ro
     restart: unless-stopped
 
   # Nightly pg_dump into a directory bind-mounted from the host (§16.6). Not

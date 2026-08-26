@@ -68,3 +68,35 @@ details.group .count.todo { border-color: #b8860b; color: #b8860b; }
 /* A key with no wording yet. Expected, not an error -- §15 falls back. */
 tr.todo td { background: color-mix(in srgb, #b8860b 8%, transparent); }
 td.reference { color: var(--muted); max-width: 22rem; }
+
+/* The health dot (§12.2). `ok`/`warn`/`fail` are the data; this is the only
+   place in the system that turns them into colours. Never colour alone:
+   the status page spells out what each state means, and screen readers get
+   the word rather than the swatch. */
+.dot {
+  display: inline-block; width: .7rem; height: .7rem; border-radius: 50%;
+  vertical-align: middle; border: 1px solid rgba(0, 0, 0, .25);
+}
+.dot-ok   { background: #2e7d32; }
+.dot-warn { background: #b8860b; }
+.dot-fail { background: #b3261e; }
+
+a.health-dot { padding: 0 .35rem; }
+/* Amber and red earn attention; green must not. */
+a.health-dot.health-warn .dot,
+a.health-dot.health-fail .dot { box-shadow: 0 0 0 3px color-mix(in srgb, currentColor 18%, transparent); }
+
+.sr-only {
+  position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+  overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
+}
+
+.health-verdict { padding: .6rem .85rem; border-radius: var(--radius); border: 1px solid var(--line); }
+.health-verdict.health-ok   { border-color: #2e7d32; }
+.health-verdict.health-warn { border-color: #b8860b; }
+.health-verdict.health-fail { border-color: #b3261e; font-weight: 600; }
+
+table.health td { vertical-align: top; }
+table.health tr.health-fail td { background: color-mix(in srgb, #b3261e 7%, transparent); }
+table.health tr.health-warn td { background: color-mix(in srgb, #b8860b 7%, transparent); }
+table.health p { margin: .15rem 0; }

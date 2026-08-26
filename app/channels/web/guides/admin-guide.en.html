@@ -346,6 +346,7 @@
           <tr><td>Timezones</td><td><code>/admin/timezones</code></td><td>Client timezone list</td></tr>
           <tr><td>Delivery</td><td><code>/admin/delivery</code></td><td>Did a message actually leave?</td></tr>
           <tr><td>Maintenance</td><td><code>/admin/maintenance</code></td><td>Config export/import; download dumps</td></tr>
+          <tr><td>Status</td><td><code>/admin/status</code></td><td>The traffic light: what is working, and what to tell your IT person</td></tr>
           <tr><td>Clients</td><td><code>/admin/clients</code></td><td>Export one person, or erase them</td></tr>
           <tr><td>Settings</td><td><code>/admin/settings</code></td><td>Availability and operational knobs</td></tr>
         </tbody>
@@ -579,6 +580,24 @@
 
     <section class="card" id="fix">
       <h2>19. Troubleshooting</h2>
+      <h3>The dot in the top bar</h3>
+      <p>Every admin page carries a small coloured dot. It links to
+        <code>/admin/status</code>, which lists what the service checks about itself.</p>
+      <ul>
+        <li><strong>Green</strong> — nothing to do.</li>
+        <li><strong>Amber</strong> — something will break soon (backups have stopped, disk
+          filling up). Not urgent today; do not leave it a month.</li>
+        <li><strong>Red</strong> — clients are affected right now. Open the page, read the
+          plain sentence, and call whoever runs your server. Each check also shows a
+          technical line written for them — read it out or send a photo of it.</li>
+      </ul>
+      <p>The dot never counts your own workload. Ten unanswered requests is work, not a
+        fault, and it stays green.</p>
+      <p>If something goes red you also get a Telegram message, so you do not have to be
+        looking at the page. One message per fault, not one per minute.</p>
+      <p class="callout warn">A green dot means everything <em>inside</em> the server is fine.
+        It cannot tell you the site is reachable from outside — ask whoever runs the server
+        to set up an external check on <code>/readyz</code>.</p>
       <table>
         <thead><tr><th>Symptom</th><th>What to try</th></tr></thead>
         <tbody>

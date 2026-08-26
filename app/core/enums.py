@@ -1,16 +1,20 @@
 """Domain enumerations (IMPLEMENTATION.md §5).
 
-Every one of these is persisted as a PostgreSQL *native* enum type, with the
+Almost every one is persisted as a PostgreSQL *native* enum type, with the
 lowercase **values** stored -- not the Python member names. `pg_enum` below wires
 `values_callable` to guarantee that; forgetting it silently persists 'PENDING'
 where the schema says 'pending'.
 
 `RequestType` from v1.0 deliberately does not exist. Session types are rows
 (§6.4) so that adding "supervision" is an insert, not a migration and a deploy.
+
+`CheckState` is the exception to the first paragraph: it is written to the
+status file (§16.8), never to a column.
 """
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from enum import Enum, StrEnum
 from typing import Any
 
@@ -106,6 +110,39 @@ class ContentBlockKind(StrEnum):
     link_button = "link_button"
 
 
+class ErrorSource(StrEnum):
+    """Which process caught the exception (§6.9)."""
+
+    web = "web"
+    worker = "worker"
+
+
+class CheckState(StrEnum):
+    """One health check's verdict (§16.8).
+
+    Not persisted anywhere -- it is written to the status file, never to a
+    column -- so it is deliberately absent from PG_ENUM_NAMES below and needs
+    no migration.
+
+    `ok`, `warn` and `fail` rather than colour names: green, amber and red are
+    how a template renders these, and a domain that knows about colours is a
+    domain that has to change when the design does.
+    """
+
+    ok = "ok"
+    warn = "warn"
+    fail = "fail"
+
+    @property
+    def rank(self) -> int:
+        return {"ok": 0, "warn": 1, "fail": 2}[self.value]
+
+    @classmethod
+    def worst(cls, states: Iterable[CheckState]) -> CheckState:
+        """The overall state is the worst of its parts (§16.8)."""
+        return max(states, key=lambda state: state.rank, default=cls.ok)
+
+
 #: Python enum -> PostgreSQL type name. The first migration creates these
 #: explicitly, in this order, before any table that references them.
 PG_ENUM_NAMES: dict[type[Enum], str] = {
@@ -122,6 +159,7 @@ PG_ENUM_NAMES: dict[type[Enum], str] = {
     ReminderState: "reminder_state",
     ActorType: "actor_type",
     ContentBlockKind: "content_block_kind",
+    ErrorSource: "error_source",
 }
 
 

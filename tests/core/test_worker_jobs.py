@@ -177,11 +177,16 @@ async def test_firing_the_same_reminder_twice_does_not_duplicate(
     assert len(first) == 1
     assert second == []
 
+    # Scoped to this request: §18 runs the suite against a real installation,
+    # where a genuine reminder for somebody else's booking is not a duplicate.
     total = (
         await db.execute(
             select(func.count())
             .select_from(OutboxMessage)
-            .where(OutboxMessage.intent_key == "reminder.client")
+            .where(
+                OutboxMessage.intent_key == "reminder.client",
+                OutboxMessage.request_id == request.id,
+            )
         )
     ).scalar_one()
     assert total == 1
@@ -425,6 +430,8 @@ def test_the_worker_registers_every_job_from_section_14() -> None:
         "purge_content",
         "prune_tokens",
         "prune_revisions",
+        "prune_error_events",
+        "write_status",
     }
 
 

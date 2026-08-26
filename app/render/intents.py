@@ -130,6 +130,18 @@ CATALOGUE: dict[str, IntentSpec] = {
         key="system.delivery_failed.admin",
         body_key="admin.intent.system.delivery_failed.admin.body",
     ),
+    # §16.10. Admin-namespaced, so English only like every operational
+    # message (DESIGN.md §11) -- and carrying check ids, never a `detail`
+    # string, which is written under looser rules than email allows (§13.4).
+    "system.health.degraded.admin": IntentSpec(
+        key="system.health.degraded.admin",
+        body_key="admin.intent.system.health.degraded.admin.body",
+        actions=("open",),
+    ),
+    "system.health.recovered.admin": IntentSpec(
+        key="system.health.recovered.admin",
+        body_key="admin.intent.system.health.recovered.admin.body",
+    ),
 }
 
 #: Action label keys. Most intents name their own; these are the shared ones.
@@ -142,6 +154,7 @@ ACTION_LABEL_KEYS: dict[tuple[str, str], str] = {
     ("reminder.client", "open"): "request.open",
     ("auth.login_link.client", "open"): "intent.auth.login_link.client.action.open",
     ("auth.link_channel.client", "open"): "intent.auth.login_link.client.action.telegram",
+    ("system.health.degraded.admin", "open"): "admin.intent.system.health.action.open",
     ("request.submitted.admin", "approve"): "admin.request.approve",
     ("request.submitted.admin", "propose"): "admin.request.propose",
     ("request.submitted.admin", "reject"): "admin.request.reject",

@@ -1,0 +1,54 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ t.nav_status }}{% endblock %}
+{% block content %}
+<h1>{{ t.nav_status }}</h1>
+
+{# Two sentences per check, for two readers (DESIGN.md §22.4): the summary is
+   about consequences, the detail is what gets read down the phone. #}
+
+{% if health.healthy %}
+  <p class="health-verdict health-ok">
+    Everything the service can check from the inside is working. Nothing to do.
+  </p>
+{% elif health.state.value == "warn" %}
+  <p class="health-verdict health-warn">
+    Something needs attention soon, but nothing is broken for clients right now.
+  </p>
+{% else %}
+  <p class="health-verdict health-fail">
+    Something is wrong that affects clients. Call whoever runs your server, and
+    read them the technical line under the failing check.
+  </p>
+{% endif %}
+
+<table class="health">
+  <thead><tr><th></th><th>Check</th><th>What it means</th></tr></thead>
+  <tbody>
+    {% for check in health.checks %}
+      <tr class="health-{{ check.state }}">
+        <td><span class="dot dot-{{ check.state }}" aria-hidden="true"></span>
+          <span class="sr-only">{{ check.state }}</span></td>
+        <td><code>{{ check.id }}</code></td>
+        <td>
+          {% if check.summary %}<p>{{ check.summary }}</p>{% endif %}
+          <p class="muted"><code>{{ check.detail }}</code></p>
+        </td>
+      </tr>
+    {% endfor %}
+  </tbody>
+</table>
+
+<p class="muted">
+  {% if health.written_at %}
+    Last checked {{ health.written_at.strftime("%Y-%m-%d %H:%M") }} UTC.
+  {% endif %}
+  Checks run in the background about every minute; this page only reads the result.
+  Common symptoms and what to try are in the <a href="/admin/help#fix">guide</a>.
+</p>
+
+<p class="muted">
+  A green light means everything visible from inside this server is fine. It cannot
+  tell you the site is reachable from the internet — ask whoever runs the server to
+  set up an outside check against <code>/readyz</code>.
+</p>
+{% endblock %}

@@ -19,6 +19,10 @@ DB_HOST=${BACKUP_DB_HOST:-db}
 DB_USER=${POSTGRES_USER:-psycho}
 DB_NAME=${POSTGRES_DB:-psychobooking}
 
+# Read by the `backup_verified` health check (§16.9). One line: `ok <name>` or
+# `failed <name>`.
+VERIFY=.last-verify
+
 # The uid `web` runs as (see Dockerfile). The directory is 0700 because the
 # dumps contain clients' problem text (§17), and owned by that uid because
 # `web` mounts it read-only to serve downloads to a therapist with no shell
@@ -57,10 +61,23 @@ dump() {
     return 1
   fi
 
+  # Read it back before calling it a backup. Dumps that exist and cannot be
+  # restored are the corruption that actually ruins a practice, and it is
+  # always discovered on the one morning it matters (§16.6).
+  if ! pg_restore --list "$tmp" > /dev/null 2>&1; then
+    rm -f "$tmp"
+    echo "failed $name" > "$DIR/$VERIFY"
+    chown "$APP_UID:$APP_GID" "$DIR/$VERIFY" 2>/dev/null || true
+    log "ERROR: $name failed verification and was discarded"
+    return 1
+  fi
+
   chown "$APP_UID:$APP_GID" "$tmp" 2>/dev/null || true
   chmod 0600 "$tmp"
   mv "$tmp" "$DIR/$name"
-  log "wrote $name ($(wc -c < "$DIR/$name") bytes)"
+  echo "ok $name" > "$DIR/$VERIFY"
+  chown "$APP_UID:$APP_GID" "$DIR/$VERIFY" 2>/dev/null || true
+  log "wrote $name ($(wc -c < "$DIR/$name") bytes), verified"
 
   # Only after a success. A failed run is exactly the one whose predecessors
   # matter most (§16.6).

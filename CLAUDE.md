@@ -34,7 +34,7 @@ the design mid-implementation.
 
 > Update this line as work progresses. It is the first thing to check each session.
 
-**Milestone: M10 complete. M11 (health signal) specified in `IMPLEMENTATION.md` §16.8–§16.10, not yet implemented.**
+**Milestone: M11 (complete) — all milestones M0 → M11 are done.**
 
 Milestones run M0 → M11 (`IMPLEMENTATION.md` §19). Work them **in order**. Each
 one's acceptance criteria must pass before starting the next. Do not implement

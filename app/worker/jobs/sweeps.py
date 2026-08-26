@@ -21,6 +21,7 @@ from app.core.models import (
     AuthToken,
     BookingRequest,
     ContentBlockRevision,
+    ErrorEvent,
     NegotiationMessage,
     Reminder,
     Slot,
@@ -39,6 +40,9 @@ BATCH_SIZE = 100
 #: §14. Expired tokens are kept a week so a support question about a bad link
 #: can still be answered, then deleted.
 TOKEN_GRACE = timedelta(days=7)
+
+#: §14. Long enough to answer "how long has this been happening?", no longer.
+ERROR_EVENT_RETENTION = timedelta(days=30)
 
 
 async def expire_slot_holds() -> int:
@@ -306,3 +310,20 @@ async def prune_revisions() -> int:
         if removed:
             logger.info("pruned %d content revision(s)", removed)
         return removed
+
+
+async def prune_error_events() -> int:
+    """`error_event.at < now() - 30 days` -> deleted (§14).
+
+    The health checks only ever look an hour back (§16.9); the rest is kept
+    long enough for somebody to ask "how long has this been happening?" and no
+    longer.
+    """
+    async with unit_of_work() as session:
+        result = await session.execute(
+            delete(ErrorEvent).where(ErrorEvent.at < now_utc() - ERROR_EVENT_RETENTION)
+        )
+        count = int(getattr(result, "rowcount", 0) or 0)
+        if count:
+            logger.info("pruned %d error event(s)", count)
+        return count

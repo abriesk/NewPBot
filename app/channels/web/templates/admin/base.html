@@ -25,6 +25,11 @@
     <a href="/admin/clients">Clients</a>
     <a href="/admin/settings">{{ t.nav_settings }}</a>
     <a href="/admin/help">{{ t.nav_help }}</a>
+    <a class="health-dot health-{{ health.state.value }}" href="/admin/status"
+       title="{{ t.nav_status }}">
+      <span class="dot dot-{{ health.state.value }}" aria-hidden="true"></span>
+      <span class="sr-only">{{ t.nav_status }}: {{ health.state.value }}</span>
+    </a>
   </nav>
   <form method="post" action="/admin/logout" class="lang">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

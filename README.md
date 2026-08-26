@@ -122,6 +122,7 @@ timezone list, retention, and all practice content.
 | `/admin/clients` | Export everything about one person, or erase them |
 | `/admin/maintenance` | Export and import the configuration; download a backup |
 | `/admin/help` | The admin guide, in English or Russian |
+| `/admin/status` | The traffic light: what is working, and what to tell your IT person |
 | `/admin/settings` | The knobs above |
 
 Telegram keeps a reduced admin surface for when you are away from a desk:
@@ -238,6 +239,42 @@ docker compose up -d --build
 |---|---|
 | `/healthz` | Liveness. Does not touch the database — the Compose healthcheck gates `worker` on it. |
 | `/readyz` | Readiness. 200 when the database answers, 503 otherwise. |
+
+### The traffic light
+
+Every admin page carries a coloured dot linking to `/admin/status`. **Red means
+clients are affected right now; amber means something will break.** The
+therapist's own queue is never coloured — a long list of pending requests is
+work, not a fault.
+
+Each check shows two lines: one for the therapist, about consequences, and one
+technical line to read down the phone. When it goes red the therapist gets a
+Telegram message, so nobody has to be watching the page.
+
+The checks and their thresholds are in `IMPLEMENTATION.md` §16.9. The worker
+runs them every pass and writes the result to `STATE_DIR/status.json`:
+
+```bash
+cat state/status.json | python -m json.tool
+```
+
+That file is deliberately not a database row. When the database is the thing
+that broke, it is still readable — and so is this:
+
+```bash
+docker compose logs worker --tail 50
+```
+
+### One thing to set up outside the box
+
+A green dot means *everything visible from inside this server is fine*. It can
+never tell you the site is reachable, because if the whole stack is down there
+is nothing left to draw a dot — or to send a Telegram message.
+
+**Point a free external uptime check at `https://your-domain/readyz`** (
+healthchecks.io, UptimeRobot, or a one-line cron on another machine). It returns
+200 when the database answers and 503 otherwise. This is the only monitoring
+that survives the server going away, and it takes about two minutes to set up.
 
 ---
 

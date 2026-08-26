@@ -54,3 +54,9 @@ asyncio_default_fixture_loop_scope = "function"
 # datetime.utcnow() is deprecated in 3.12 and banned outright (hard rule 4).
 # Surfacing deprecations as errors keeps that from creeping back in quietly.
 filterwarnings = ["error::DeprecationWarning"]
+
+[tool.ruff.lint.isort]
+# `alembic/` next to `app/` makes the dependency look first-party once a
+# migration under it is linted, which would reshuffle alembic/env.py's imports.
+# It is a third-party package that happens to own a directory here.
+known-third-party = ["alembic"]

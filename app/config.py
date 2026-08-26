@@ -66,6 +66,10 @@ class Settings(BaseSettings):
     #: (§16.6). `web` mounts it read-only and only ever lists and streams it.
     backup_path: str = "/backups"
 
+    #: Container-side path of the directory the worker writes status.json to
+    #: (§16.8). `worker` mounts it read-write, `web` read-only.
+    state_path: str = "/state"
+
     # --- Deployment (consumed by Compose; declared so .env stays one file) -
     domain: str | None = None
     acme_email: str | None = None
@@ -74,6 +78,7 @@ class Settings(BaseSettings):
     backup_dir: str | None = None
     backup_hour_utc: int = 3
     backup_retention_days: int = 30
+    state_dir: str | None = None
 
     @field_validator("base_url")
     @classmethod

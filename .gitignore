@@ -6,6 +6,7 @@
 
 # Backups contain clients' problem text.
 /backups/
+/state/
 *.dump
 
 # Python

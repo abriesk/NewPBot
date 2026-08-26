@@ -42,6 +42,8 @@ def test_every_intent_in_section_10_has_a_spec() -> None:
         "auth.link_channel.client",
         "request.note.admin",
         "system.delivery_failed.admin",
+        "system.health.degraded.admin",
+        "system.health.recovered.admin",
     }
     assert set(CATALOGUE) == expected
 

@@ -40,6 +40,7 @@ from app.channels.web.security import (
     issue_csrf,
     start_admin_session,
 )
+from app.channels.web.status import read_status
 from app.channels.web.translation_groups import Entry, arrange
 from app.core.enums import ActorType, BookingMode, Modality, OutboxStatus, RequestStatus
 from app.core.errors import DomainError, NotFound
@@ -106,6 +107,7 @@ async def _labels(session: AsyncSession) -> dict[str, str]:
         "nav_delivery": "admin.nav.delivery",
         "nav_maintenance": "admin.nav.maintenance",
         "nav_help": "admin.nav.help",
+        "nav_status": "admin.nav.status",
         "approve": "admin.request.approve",
         "propose": "admin.request.propose",
         "reject": "admin.request.reject",
@@ -134,6 +136,9 @@ async def _context(
         "t": await _labels(session),
         "csrf_token": csrf_token_for(request),
         "flash": request.query_params.get("flash"),
+        # The dot lives in base.html, so every admin page carries it (§12.2).
+        # One small file read, no queries.
+        "health": read_status(),
         **extra,
     }
 
@@ -1023,6 +1028,27 @@ def build_router() -> APIRouter:
             return _render(
                 "admin/clients.html",
                 await _context(session, request, admin, rows=rows, identities=identities),
+            )
+
+    # --- Health (§12.2, §16.8) ---------------------------------------------
+
+    @router.get("/status", response_class=HTMLResponse, include_in_schema=False)
+    async def status_page(request: Request) -> Response:
+        """The checks in full, with what to do about each.
+
+        Reads the file the worker wrote; it does not check anything itself
+        (§12.2). The point of the dot in the header is that nobody has to
+        remember to open this page -- but when they do, it has to say whether
+        to carry on or to call for help, in those words.
+        """
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+
+            return _render(
+                "admin/status.html",
+                await _context(session, request, admin),
             )
 
     # --- Help (§12.2) -------------------------------------------------------

@@ -487,6 +487,48 @@ async def alert_admin_delivery_failed(
     )
 
 
+async def alert_admin_health(
+    session: AsyncSession, *, intent_key: str, payload: dict[str, Any], dedupe_key: str
+) -> list[OutboxMessage]:
+    """§16.10: the health signal reaching the therapist without her opening the
+    admin UI, which is the whole point of it.
+
+    Inserted with ON CONFLICT DO NOTHING rather than added to the session:
+    unlike every other alert, this one can legitimately be attempted twice for
+    the same key -- a worker restart re-runs the pass that noticed the
+    transition -- and a therapist told twice about one fault stops reading the
+    first one.
+
+    Nothing here is a direct send (hard rule 2): these are outbox rows like any
+    other, written in the caller's transaction.
+    """
+    practice = await get_practice(session)
+    rows: list[OutboxMessage] = []
+
+    for channel, address, admin_user_id in await _admin_targets(session):
+        stmt = (
+            pg_insert(OutboxMessage)
+            .values(
+                practice_id=practice.id,
+                channel=channel,
+                address=address,
+                admin_user_id=admin_user_id,
+                intent_key=intent_key,
+                payload=payload,
+                # The admin surface is English by design (DESIGN.md §11).
+                locale="en",
+                dedupe_key=f"{dedupe_key}:{channel.value}:{address}",
+                status=OutboxStatus.pending,
+            )
+            .on_conflict_do_nothing(index_elements=["dedupe_key"])
+            .returning(OutboxMessage)
+        )
+        rows.extend((await session.execute(stmt)).scalars().all())
+
+    await session.flush()
+    return rows
+
+
 async def enqueue_raw(
     session: AsyncSession,
     *,

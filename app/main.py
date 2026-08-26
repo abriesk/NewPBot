@@ -14,8 +14,8 @@ import logging
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from fastapi.responses import JSONResponse
+from fastapi import FastAPI, Request, Response
+from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 
@@ -24,7 +24,9 @@ from app.channels.telegram.webhook import register_webhook
 from app.channels.web.admin import build_router as admin_router
 from app.channels.web.client import build_router as web_router
 from app.config import get_settings
-from app.db import dispose_engine, get_session_factory
+from app.core.enums import ErrorSource
+from app.core.services.status import record_error, where
+from app.db import dispose_engine, get_session_factory, unit_of_work
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +65,33 @@ def create_app() -> FastAPI:
         redoc_url=None,
         openapi_url=None,
     )
+
+    @app.exception_handler(Exception)
+    async def record_unhandled(request: Request, exc: Exception) -> Response:
+        """§6.9: the one failure that otherwise leaves no trace at all.
+
+        A client who gets a 500 does not file a ticket -- they conclude the
+        practice is disorganised and book elsewhere (DESIGN.md §22.1). Every
+        other failure in this system is already a row; this makes that one a
+        row too.
+
+        Recording is best-effort and deliberately silent on its own failure:
+        if the database is what broke, the insert breaks with it, and masking
+        the original exception would be worse than losing the record.
+        """
+        logger.exception("unhandled error serving %s", request.url.path)
+        try:
+            async with unit_of_work() as session:
+                await record_error(
+                    session,
+                    source=ErrorSource.web,
+                    exc=exc,
+                    location=where(exc, request.url.path),
+                )
+        except Exception:
+            logger.warning("could not record the unhandled error")
+
+        return PlainTextResponse("Internal Server Error", status_code=500)
 
     # One ASGI ingress: the client UI, the Telegram webhook, and (from M7) the
     # admin UI are all routes on this one app (DESIGN.md §3.3).
