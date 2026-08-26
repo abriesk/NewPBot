@@ -447,6 +447,35 @@ Roughly in the order they would be worth doing:
 9. Multi-practice operation (§18)
 10. Statistics for the therapist: conversion, no-shows, load by weekday
 
+### 20.1 Known weaknesses, accepted for now
+
+Not features waiting to be built — things we have looked at, understood, and
+decided not to act on yet. Recorded so the next person finds the reasoning
+rather than the surprise.
+
+**Raw tokens live in `outbox_message.payload`.** `issue_token` promises that
+only a hash is persisted, so a database leak hands out no live tokens
+(IMPLEMENTATION.md §6.2). The notification service then puts the raw
+`view_token` into the outbox payload, and the login link carries its raw token
+the same way — so the outbox undoes for its own rows what the token table is
+careful about, and every nightly dump (§21) contains live view and login tokens
+until they expire or are consumed. Closing it properly means minting the token
+in the worker at send time rather than at enqueue time, because a raw value
+cannot be recovered from a hash. That is a real change to who mints tokens, and
+the exposure is bounded: single-use, short-lived, and behind a `0700` backup
+directory. Revisit when the outbox grows a pruning job, or if dumps ever leave
+the host.
+
+**A `view_request` token burns on `GET`.** Opening `/r/{uuid}?token=…` consumes
+the token on first paint, so anything that fetches the URL before the client
+does spends it — and mail scanners on some corporate systems do exactly that,
+leaving the real client at the sign-in form with a magic-link allowance of three
+an hour (§17). Tested against a personal Gmail account and the behaviour did not
+appear; the risk is specific to link-scanning gateways rather than to consumer
+mail. Any fix moves when the token burns, which §6.2 pins as single-use, so it
+is not worth changing on a hypothetical. Revisit if a client reports a dead
+link, and treat "the therapist's clients are on corporate mail" as the trigger.
+
 ---
 
 ## 21. Portable configuration and backups
