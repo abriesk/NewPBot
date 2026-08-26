@@ -127,3 +127,35 @@ async def close_entry(
     return await _transition(
         session, entry_id, WaitlistStatus.closed, "waitlist.close", admin_note=admin_note
     )
+
+
+async def recent(
+    session: AsyncSession, *, limit: int = 5, offset: int = 0
+) -> list[WaitlistEntry]:
+    """§13.2: the waitlist as the phone panel reads it -- newest first."""
+    rows = (
+        await session.execute(
+            select(WaitlistEntry)
+            .order_by(WaitlistEntry.created_at.desc(), WaitlistEntry.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    ).scalars()
+    return list(rows.all())
+
+
+async def count_open(session: AsyncSession) -> int:
+    """Entries nobody has finished with: `new` or `contacted`."""
+    from sqlalchemy import func
+
+    return int(
+        (
+            await session.execute(
+                select(func.count())
+                .select_from(WaitlistEntry)
+                .where(
+                    WaitlistEntry.status.in_((WaitlistStatus.new, WaitlistStatus.contacted))
+                )
+            )
+        ).scalar_one()
+    )

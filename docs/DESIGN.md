@@ -340,6 +340,10 @@ The web UI is the primary admin surface:
 
 Telegram retains a reduced admin surface for the operations that matter when away from a desk: toggle availability, view pending requests, approve, propose, reject. Content editing and settings are web-only; a phone keyboard is the wrong tool for them.
 
+The dividing line is **triage, not administration**. What belongs on the phone is time-sensitive and decidable in a tap or two: a request arrived and wants an answer, a session is today and has to be cancelled because she is ill, availability has to go off for a week. What belongs on the web is anything that means composing text or configuring the practice, because on a phone that is a worse version of a form she could fill in properly later.
+
+Two consequences follow, and both are worth stating because they are easy to get wrong. First, the phone surface is a *panel that navigates*, not a series of one-shot commands: every screen offers the way back, so the therapist is never left holding a message with nothing to press — the earlier version answered "Confirmed 7f3c…" and left her there. Second, the panel edits its own message rather than sending a new one, because a triage tool used a dozen times a morning must not bury the chat it lives in. Neither is a feature so much as the price of the surface being usable at all.
+
 ---
 
 ## 16. Data protection

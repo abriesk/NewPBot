@@ -220,12 +220,19 @@ async def test_the_full_scenario_on_the_telegram_channel(
     await _fire(db, reminder, request)
     assert await _rows(db, request.id, "reminder.client")
 
-    # Cancel from Telegram too.
-    reply = await handle(db, Update(chat_id=1, callback_data=f"{kb.CANCEL_REQUEST}:{request.id}"))
+    # Cancel from Telegram too. §13.2 asks for a reason first: the client is
+    # told it, so it is hers to write rather than the adapter's to invent.
+    asked = await handle(db, Update(chat_id=1, callback_data=f"{kb.CANCEL_REQUEST}:{request.id}"))
+    assert asked is not None
+    await db.refresh(request)
+    assert request.status is RequestStatus.confirmed  # nothing yet
+
+    reply = await handle(db, Update(chat_id=1, text="I am ill, I am sorry"))
     assert reply is not None
 
     await db.refresh(request)
     assert request.status is RequestStatus.cancelled
+    assert request.cancellation_reason == "I am ill, I am sorry"
     await db.refresh(future_slot)
     assert future_slot.status is SlotStatus.available
     assert await _rows(db, request.id, "request.cancelled.client")

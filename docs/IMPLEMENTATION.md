@@ -768,7 +768,29 @@ Multi-step input state is stored in the database against the client, **not** in 
 
 ### 13.2 Admin
 
-`/admin` gated by `TELEGRAM_ADMIN_IDS`. Available: toggle availability, list pending and negotiating requests, open a request thread, approve, propose (free text or a datetime), reject, cancel. Content, translations, settings, and slot creation are **web-only** and **MUST** reply with a link to the admin UI.
+`/admin` gated by `TELEGRAM_ADMIN_IDS`, and by nothing else: the bot has no other way to authenticate the therapist (DESIGN.md §5.2). A chat that is not in that set gets **silence**, never an error — an unknown chat learns nothing.
+
+The surface is a **panel**: one message with an inline keyboard, which the therapist navigates. It is inline-only because her chat already carries the client reply keyboard and two persistent keyboards cannot coexist. It is English, like the rest of the admin surface (DESIGN.md §11), so none of it takes translation keys.
+
+| Screen | Callback | Shows | Leads to |
+|---|---|---|---|
+| Panel | `apanel` | availability, pending and negotiating counts, next confirmed session, waitlist size, admin URL | requests, sessions, waitlist, availability toggle |
+| Requests | `areq:<page>` | pending and negotiating, newest first, 5 a page | one request; panel |
+| Request | `aopen:<id>` | uuid, status, client name, contact note, session type, modality, time, `problem_text`, last 3 thread messages | its permitted actions; requests; panel |
+| Sessions | `asess:<days>` | confirmed sessions in the next `days` (2 or 7), with join links, at most 10 | one request; the other window; panel |
+| Waitlist | `awl:<page>` | entries, 5 a page, **read-only** | panel |
+
+Requirements:
+
+- Every screen **MUST** offer a way back. No reply may end in text with nothing to press — including the outcome of an action, which **MUST** be the re-rendered request screen rather than a bare "Confirmed …".
+- A request's action buttons **MUST** be derived from §7.1's transition table, so the panel never offers what the core would refuse. `negotiating` therefore offers propose and reject but not approve.
+- `propose` and `cancel` need typing, so they park the request id in `flow_state` (§13.1's store, not aiogram FSM) and answer with a prompt carrying `✕` to abandon. Cancel's prompt carries `Skip`; the reason reaches the client in `request.cancelled.client`, so it is asked for rather than invented. Approve uses the practice's default meeting link; a per-request `meeting_url` stays web-only.
+- A reply caused by a **button** edits that message in place; a reply caused by **typed text** is a new message. An edit rejected as unmodified **MUST** be treated as success, and an edit refused because the message is too old (Telegram's 48-hour limit, reached by pressing a button on an old notification) **MUST** fall back to sending a new message.
+- The webhook **MUST** answer the callback query, or the therapist's client spins on every tap. A refused action answers with its reason.
+- `/admin` while a typed answer is pending abandons it, exactly as a main-keyboard label does in §13.1.
+- `problem_text` **MAY** be shown here: this is an admin surface, and DESIGN.md §16 names the therapist's own Telegram account as one of the two places it is visible. It **MUST NOT** be logged (hard rule 8).
+
+Content, translations, settings, session types, timezones, slot creation, the delivery log, and client export or erasure are **web-only** and **MUST** answer with a link to the admin UI.
 
 ### 13.3 Notification delivery policy
 

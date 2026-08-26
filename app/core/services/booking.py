@@ -169,6 +169,63 @@ async def active_for_client(
     return list(rows.all())
 
 
+async def count_with_status(session: AsyncSession, *statuses: RequestStatus) -> int:
+    """How many requests are in any of these statuses. §13.2's panel counts."""
+    from sqlalchemy import func
+
+    return int(
+        (
+            await session.execute(
+                select(func.count())
+                .select_from(BookingRequest)
+                .where(BookingRequest.status.in_(statuses))
+            )
+        ).scalar_one()
+    )
+
+
+async def queue_for_admin(
+    session: AsyncSession, *, limit: int = 5, offset: int = 0
+) -> list[BookingRequest]:
+    """§13.2: what is waiting on the therapist, newest first."""
+    rows = (
+        await session.execute(
+            select(BookingRequest)
+            .where(
+                BookingRequest.status.in_((RequestStatus.pending, RequestStatus.negotiating))
+            )
+            .order_by(BookingRequest.created_at.desc(), BookingRequest.id.desc())
+            .offset(offset)
+            .limit(limit)
+        )
+    ).scalars()
+    return list(rows.all())
+
+
+async def upcoming_sessions(
+    session: AsyncSession, *, within: timedelta, limit: int = 10
+) -> list[BookingRequest]:
+    """§13.2: confirmed sessions from now to `within` from now, soonest first.
+
+    Sorted the opposite way from the queue on purpose: a queue is answered
+    newest first, a day is lived in order.
+    """
+    now = now_utc()
+    rows = (
+        await session.execute(
+            select(BookingRequest)
+            .where(
+                BookingRequest.status == RequestStatus.confirmed,
+                BookingRequest.scheduled_start >= now,
+                BookingRequest.scheduled_start < now + within,
+            )
+            .order_by(BookingRequest.scheduled_start)
+            .limit(limit)
+        )
+    ).scalars()
+    return list(rows.all())
+
+
 async def requested_start(session: AsyncSession, request: BookingRequest) -> datetime | None:
     """The instant this request is about.
 

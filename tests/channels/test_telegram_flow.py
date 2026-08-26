@@ -765,6 +765,191 @@ async def test_toggling_availability_from_telegram(db: AsyncSession, practice: P
     assert practice.availability_on is not before
 
 
+# --- The admin panel (§13.2) ------------------------------------------------
+
+
+def _panel_data(reply: Reply) -> set[str]:
+    return {b.callback_data for row in reply.keyboard.inline_keyboard for b in row}
+
+
+async def _admin_request(db: AsyncSession, slot: Slot, session_type_id: int) -> BookingRequest:
+    client = await resolve_client(db, Channel.telegram, "777666555", verified=True)
+    return await booking.submit_slot_request(
+        db,
+        client_id=client.id,
+        slot_id=slot.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        source_channel=Channel.telegram,
+        problem_text="deeply private",
+        display_name="Anna",
+    )
+
+
+async def test_the_panel_reaches_every_screen(db: AsyncSession) -> None:
+    """§13.2: the root offers all of them."""
+    reply = await handle(db, Update(chat_id=1, text="/admin"))
+
+    assert reply is not None
+    data = _panel_data(reply)
+    assert f"{kb.PANEL_REQUESTS}:0" in data
+    assert f"{kb.PANEL_SESSIONS}:2" in data
+    assert f"{kb.PANEL_WAITLIST}:0" in data
+    assert kb.PANEL_AVAILABILITY in data
+    assert kb.PANEL in data
+
+
+@pytest.mark.parametrize(
+    "callback",
+    [
+        f"{kb.PANEL_REQUESTS}:0",
+        f"{kb.PANEL_SESSIONS}:2",
+        f"{kb.PANEL_SESSIONS}:7",
+        f"{kb.PANEL_WAITLIST}:0",
+    ],
+)
+async def test_no_screen_is_a_dead_end_even_when_empty(db: AsyncSession, callback: str) -> None:
+    """§13.2: every reply is navigable, including the empty ones."""
+    reply = await handle(db, Update(chat_id=1, callback_data=callback))
+
+    assert reply is not None
+    assert kb.PANEL in _panel_data(reply)
+    assert reply.edit is True
+
+
+async def test_a_request_opens_from_the_queue_with_its_permitted_actions(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    """§13.2: the buttons come from §7.1, so the panel cannot offer what the
+    core would refuse."""
+    request = await _admin_request(db, future_slot, session_type_id)
+
+    listed = await handle(db, Update(chat_id=1, callback_data=f"{kb.PANEL_REQUESTS}:0"))
+    assert listed is not None
+    assert f"{kb.PANEL_OPEN}:{request.id}" in _panel_data(listed)
+
+    opened = await handle(db, Update(chat_id=1, callback_data=f"{kb.PANEL_OPEN}:{request.id}"))
+    assert opened is not None
+    data = _panel_data(opened)
+    assert f"{kb.APPROVE}:{request.id}" in data  # pending
+    assert f"{kb.CANCEL_REQUEST}:{request.id}" not in data  # only from confirmed
+    assert kb.PANEL in data
+    # This is an admin surface: the problem text belongs here (DESIGN.md §16).
+    assert "deeply private" in opened.text
+    assert "Anna" in opened.text
+
+
+async def test_a_confirmed_request_offers_cancel_and_nothing_else(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    request = await _admin_request(db, future_slot, session_type_id)
+    await booking.admin_approve(db, request.id)
+
+    opened = await handle(db, Update(chat_id=1, callback_data=f"{kb.PANEL_OPEN}:{request.id}"))
+
+    assert opened is not None
+    data = _panel_data(opened)
+    assert f"{kb.CANCEL_REQUEST}:{request.id}" in data
+    assert f"{kb.APPROVE}:{request.id}" not in data
+
+
+async def test_an_action_answers_with_the_request_not_with_bare_text(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    """The old surface said "Confirmed <uuid>." and left her there."""
+    request = await _admin_request(db, future_slot, session_type_id)
+
+    reply = await handle(db, Update(chat_id=1, callback_data=f"{kb.APPROVE}:{request.id}"))
+
+    assert reply is not None
+    assert reply.toast == "Confirmed."
+    assert kb.PANEL in _panel_data(reply)
+    await db.refresh(request)
+    assert request.status is RequestStatus.confirmed
+
+
+async def test_an_action_the_state_machine_refuses_shows_the_current_state(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    """Another channel answered first; she gets the request as it now is."""
+    request = await _admin_request(db, future_slot, session_type_id)
+    await booking.admin_reject(db, request.id)
+
+    reply = await handle(db, Update(chat_id=1, callback_data=f"{kb.APPROVE}:{request.id}"))
+
+    assert reply is not None
+    assert reply.toast is not None and "Not possible" in reply.toast
+    assert kb.PANEL in _panel_data(reply)
+
+
+async def test_cancelling_asks_for_a_reason_and_uses_it(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    """§13.2: the client is told the reason, so it is asked for."""
+    request = await _admin_request(db, future_slot, session_type_id)
+    await booking.admin_approve(db, request.id)
+
+    asked = await handle(db, Update(chat_id=1, callback_data=f"{kb.CANCEL_REQUEST}:{request.id}"))
+    assert asked is not None
+    assert f"{kb.PANEL_SKIP}:{request.id}" in _panel_data(asked)
+    await db.refresh(request)
+    assert request.status is RequestStatus.confirmed  # nothing cancelled yet
+
+    reply = await handle(db, Update(chat_id=1, text="I am ill"))
+
+    assert reply is not None
+    await db.refresh(request)
+    assert request.status is RequestStatus.cancelled
+    assert request.cancellation_reason == "I am ill"
+    # A typed answer has no message of its own to edit.
+    assert reply.edit is False
+
+
+async def test_the_reason_can_be_skipped(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    request = await _admin_request(db, future_slot, session_type_id)
+    await booking.admin_approve(db, request.id)
+    await handle(db, Update(chat_id=1, callback_data=f"{kb.CANCEL_REQUEST}:{request.id}"))
+
+    reply = await handle(db, Update(chat_id=1, callback_data=f"{kb.PANEL_SKIP}:{request.id}"))
+
+    assert reply is not None
+    await db.refresh(request)
+    assert request.status is RequestStatus.cancelled
+    assert request.cancellation_reason is None
+
+
+async def test_admin_navigation_abandons_a_half_typed_answer(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    """§13.2, the same rule §13.1 gives the client's menu."""
+    request = await _admin_request(db, future_slot, session_type_id)
+    await handle(db, Update(chat_id=1, callback_data=f"{kb.PROPOSE}:{request.id}"))
+    admin_client = await resolve_client(db, Channel.telegram, "1", verified=True)
+    assert (
+        await flow.current_step(db, admin_client.id, Channel.telegram)
+        is Step.admin_entering_proposal
+    )
+
+    await handle(db, Update(chat_id=1, text="/admin"))
+
+    assert await flow.current_step(db, admin_client.id, Channel.telegram) is Step.idle
+
+
+async def test_a_request_erased_under_her_still_navigates(db: AsyncSession) -> None:
+    reply = await handle(db, Update(chat_id=1, callback_data=f"{kb.PANEL_OPEN}:99999999"))
+
+    assert reply is not None
+    assert "no longer exists" in reply.text
+    assert kb.PANEL in _panel_data(reply)
+
+
+async def test_the_panel_is_gated_like_the_command(db: AsyncSession) -> None:
+    """A stranger pressing a panel button learns nothing."""
+    assert await handle(db, Update(chat_id=CHAT, callback_data=kb.PANEL)) is None
+
+
 # --- Keyboards --------------------------------------------------------------
 
 

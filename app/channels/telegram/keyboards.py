@@ -50,8 +50,45 @@ PROPOSE = "propose"
 REJECT = "reject"
 CANCEL_REQUEST = "cancelreq"
 
+#: §13.2's panel navigation. Short names: the argument shares the 64 bytes.
+PANEL = "apanel"
+PANEL_REQUESTS = "areq"
+PANEL_OPEN = "aopen"
+PANEL_SESSIONS = "asess"
+PANEL_WAITLIST = "awl"
+PANEL_AVAILABILITY = "aavail"
+PANEL_SKIP = "askip"
+
 CLIENT_ACTIONS = frozenset({ACCEPT, COUNTER, DECLINE})
-ADMIN_ACTIONS = frozenset({APPROVE, PROPOSE, REJECT, CANCEL_REQUEST})
+ADMIN_ACTIONS = frozenset(
+    {
+        APPROVE,
+        PROPOSE,
+        REJECT,
+        CANCEL_REQUEST,
+        PANEL,
+        PANEL_REQUESTS,
+        PANEL_OPEN,
+        PANEL_SESSIONS,
+        PANEL_WAITLIST,
+        PANEL_AVAILABILITY,
+        PANEL_SKIP,
+    }
+)
+
+
+def panel_keyboard(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
+    """§13.2: `(label, callback_data)` pairs, laid out as given.
+
+    The panel builds its own rows because the shape carries meaning there --
+    actions on one line, navigation on the next.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [InlineKeyboardButton(text=label, callback_data=data) for label, data in row]
+            for row in rows
+        ]
+    )
 
 
 def language_keyboard() -> InlineKeyboardMarkup:

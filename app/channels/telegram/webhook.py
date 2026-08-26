@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import logging
 import secrets
+from contextlib import suppress
 
 from fastapi import APIRouter, Header, Request, Response
 
@@ -62,8 +63,8 @@ def build_router() -> APIRouter:
             logger.exception("telegram update from chat %s failed", update.chat_id)
             return Response(status_code=200)
 
-        if reply is not None:
-            await _send(update.chat_id, reply)
+        if reply is not None or update.callback_id:
+            await _send(update, reply)
 
         # §12.3: return 200 quickly.
         return Response(status_code=200)
@@ -91,10 +92,15 @@ def _parse(payload: dict[str, object]) -> Update | None:
         chat = message.get("chat") if isinstance(message, dict) else None
         if not isinstance(chat, dict):
             return None
+        message_id = message.get("message_id") if isinstance(message, dict) else None
         return Update(
             chat_id=int(chat["id"]),
             callback_data=callback.get("data"),
             display_name=_display_name(callback.get("from")),
+            # §13.2: what the panel edits in place, and the query to answer so
+            # the therapist's client stops spinning on the tap.
+            message_id=int(message_id) if message_id is not None else None,
+            callback_id=str(callback.get("id")) if callback.get("id") else None,
         )
 
     return None
@@ -108,8 +114,8 @@ def _display_name(sender: object) -> str | None:
     return name or None
 
 
-async def _send(chat_id: int, reply: Reply) -> None:
-    """Send a router reply.
+async def _send(update: Update, reply: Reply | None) -> None:
+    """Send a router reply, and answer the tap that asked for it.
 
     This is a *response* to an inbound update, not an outbound notification, so
     it does not go through the outbox: there is no domain change to be atomic
@@ -121,18 +127,60 @@ async def _send(chat_id: int, reply: Reply) -> None:
     settings = get_settings()
     bot = Bot(token=settings.telegram_bot_token)
     try:
-        await bot.send_message(
-            chat_id=chat_id,
-            text=reply.text,
-            parse_mode=PARSE_MODE,
-            reply_markup=reply.keyboard or inline_keyboard([]),
-        )
+        if update.callback_id:
+            # §13.2: unanswered, the button spins for the therapist until
+            # Telegram gives up on it.
+            with suppress(Exception):
+                await bot.answer_callback_query(
+                    update.callback_id, text=reply.toast if reply else None
+                )
+
+        if reply is None:
+            return
+
+        edited = False
+        if reply.edit and update.message_id is not None:
+            edited = await _edit(bot, update, reply)
+
+        if not edited:
+            await bot.send_message(
+                chat_id=update.chat_id,
+                text=reply.text,
+                parse_mode=PARSE_MODE,
+                reply_markup=reply.keyboard or inline_keyboard([]),
+            )
         for part in reply.extra:
-            await bot.send_message(chat_id=chat_id, text=part, parse_mode=PARSE_MODE)
+            await bot.send_message(chat_id=update.chat_id, text=part, parse_mode=PARSE_MODE)
     except Exception as exc:  # a reply that fails must not fail the webhook
-        logger.warning("could not reply to chat %s: %s", chat_id, type(exc).__name__)
+        logger.warning("could not reply to chat %s: %s", update.chat_id, type(exc).__name__)
     finally:
         await bot.session.close()
+
+
+async def _edit(bot: object, update: Update, reply: Reply) -> bool:
+    """§13.2: replace the message the button was on. True when that worked.
+
+    Two refusals are ordinary rather than exceptional. Telegram rejects an edit
+    that would change nothing, which is what pressing Refresh on an unchanged
+    panel does -- the screen is already right, so that counts as success. And a
+    message older than 48 hours cannot be edited at all, which is what pressing
+    Approve on a days-old notification does -- there the caller falls back to a
+    new message.
+    """
+    try:
+        await bot.edit_message_text(  # type: ignore[attr-defined]
+            chat_id=update.chat_id,
+            message_id=update.message_id,
+            text=reply.text,
+            parse_mode=PARSE_MODE,
+            reply_markup=reply.keyboard,
+        )
+    except Exception as exc:
+        if "not modified" in str(exc).lower():
+            return True
+        logger.info("panel edit fell back to a new message: %s", type(exc).__name__)
+        return False
+    return True
 
 
 async def register_webhook() -> bool:
