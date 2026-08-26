@@ -332,12 +332,32 @@ def test_the_committed_example_carries_no_real_secret() -> None:
             assert set(line.split("=", 1)[1].split(":")[0]) <= {"0"}
 
 
-def test_there_are_no_upload_endpoints() -> None:
-    """§17: uploads, none in this version."""
-    for path in APP.rglob("*.py"):
-        source = path.read_text(encoding="utf-8")
-        assert "UploadFile" not in source, path
-        assert "File(" not in source, path
+def test_the_config_import_is_the_only_upload_endpoint() -> None:
+    """§17: exactly one upload, and clients have none.
+
+    This used to assert that no module mentioned `UploadFile` at all. §16.7
+    added the config file, so the invariant it protects -- that an upload
+    cannot arrive anywhere unexpected -- is now stated as "one, and it is that
+    one" rather than "none".
+    """
+    accepting = {
+        path.relative_to(APP).as_posix()
+        for path in APP.rglob("*.py")
+        if "UploadFile" in path.read_text(encoding="utf-8")
+    }
+    assert accepting == {"channels/web/admin.py"}, accepting
+
+
+def test_the_config_upload_is_capped_and_never_written_to_disk() -> None:
+    import inspect
+
+    from app.channels.web import admin
+
+    source = inspect.getsource(admin.build_router)
+    assert "MAX_CONFIG_UPLOAD + 1" in source, "read past the cap, do not trust Content-Length"
+    assert admin.MAX_CONFIG_UPLOAD == 5 * 1024 * 1024
+    # Read into memory and parsed; nothing touches the filesystem.
+    assert ".save(" not in source and "open(" not in source
 
 
 def test_the_webhook_secret_is_compared_in_constant_time() -> None:

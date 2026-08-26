@@ -1,0 +1,99 @@
+{% extends "admin/base.html" %}
+{% block title %}{{ t.nav_maintenance }}{% endblock %}
+{% block content %}
+<h1>{{ t.nav_maintenance }}</h1>
+
+{# Two mechanisms, deliberately not one (DESIGN.md §21.1): the configuration
+   file carries what was typed here and no client data, so it can be sent to
+   whoever is rebuilding the install; the dumps carry the database and stay on
+   the host. #}
+
+<section class="card">
+  <h2>Configuration</h2>
+  <p class="muted">
+    Settings, session types, timezones, topics, blocks, and translations — everything typed
+    into this admin UI. No clients, requests, or messages, so this file is safe to keep
+    outside the server. Availability slots are not included.
+  </p>
+
+  <p><a class="cta" href="/admin/maintenance/config/export">{{ t.config_export }}</a></p>
+
+  <form method="post" action="/admin/maintenance/config/import" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Configuration file <input type="file" name="file" accept="application/json,.json" required></label>
+    <p class="muted">
+      Importing adds and updates what the file names. It never deletes anything the file
+      leaves out, and a changed page keeps its old text in the revision history.
+    </p>
+    <button type="submit" name="apply" value="0">{{ t.config_preview }}</button>
+    <button type="submit" name="apply" value="1">{{ t.config_import }}</button>
+  </form>
+</section>
+
+{% if error %}
+  <p class="flash error">{{ error }}</p>
+{% endif %}
+
+{% if report %}
+  <section class="card">
+    <h2>{% if report.applied %}Imported{% else %}Preview — nothing was saved{% endif %}</h2>
+    <table>
+      <thead>
+        <tr><th>Section</th><th>Added</th><th>Updated</th><th>Unchanged</th><th>Skipped</th></tr>
+      </thead>
+      <tbody>
+        {% for name, counts in report.sections | dictsort %}
+          <tr>
+            <td>{{ name.replace("_", " ") }}</td>
+            <td>{{ counts.created }}</td>
+            <td>{{ counts.updated }}</td>
+            <td>{{ counts.unchanged }}</td>
+            <td>{{ counts.skipped }}</td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+
+    {% if not report.applied %}
+      {# The apply re-reads the file: nothing is carried between the two
+         requests in server state (§16.7). #}
+      <p class="muted">To apply these changes, choose the file again and press
+        “{{ t.config_import }}”.</p>
+    {% endif %}
+
+    {% if report.warnings %}
+      <h3>Skipped</h3>
+      <ul>
+        {% for warning in report.warnings %}<li>{{ warning }}</li>{% endfor %}
+      </ul>
+    {% endif %}
+  </section>
+{% endif %}
+
+<section class="card">
+  <h2>{{ t.backups }}</h2>
+  <p class="muted">
+    Taken automatically once a day and kept for a limited time. These contain everything,
+    including what clients wrote about their problem — store them somewhere safe.
+    Restoring one is done from the command line; see the README.
+  </p>
+
+  {% if dumps %}
+    <table>
+      <thead><tr><th>File</th><th>Size</th><th>Taken</th><th></th></tr></thead>
+      <tbody>
+        {% for dump in dumps %}
+          <tr>
+            <td><code>{{ dump.name }}</code></td>
+            <td>{{ dump.size_mb }} MB</td>
+            <td>{{ dump.modified_at.strftime("%Y-%m-%d %H:%M") }} UTC</td>
+            <td><a href="/admin/maintenance/backups/{{ dump.name }}">Download</a></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  {% else %}
+    <p class="muted">No backups yet. The first one is taken at the next scheduled hour.</p>
+  {% endif %}
+</section>
+{% endblock %}

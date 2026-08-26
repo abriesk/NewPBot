@@ -28,6 +28,9 @@ ignore = [
 # The Armenian full stop is the point of these golden tests: §11.5 exists to
 # prove non-ASCII punctuation reaches a client unmangled.
 "tests/channels/test_markdown.py" = ["RUF001"]
+# Same reason: a config file crosses installations with real Russian and
+# Armenian content inside it, and the tests say so in the content.
+"tests/core/test_config_io.py" = ["RUF001"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "datetime.datetime.utcnow".msg = "Naive UTC is banned. Use datetime.now(UTC)."

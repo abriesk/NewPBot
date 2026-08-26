@@ -62,9 +62,18 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
     trust_proxy_headers: bool = True
 
+    #: Container-side path of the directory the `backup` sidecar writes to
+    #: (§16.6). `web` mounts it read-only and only ever lists and streams it.
+    backup_path: str = "/backups"
+
     # --- Deployment (consumed by Compose; declared so .env stays one file) -
     domain: str | None = None
     acme_email: str | None = None
+    #: Host side of the same mount, and the sidecar's own schedule. Declared
+    #: here so `.env` stays one file even though only Compose reads them.
+    backup_dir: str | None = None
+    backup_hour_utc: int = 3
+    backup_retention_days: int = 30
 
     @field_validator("base_url")
     @classmethod

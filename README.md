@@ -120,6 +120,7 @@ timezone list, retention, and all practice content.
 | `/admin/translations` | Reword UI strings; see what is missing per language |
 | `/admin/delivery` | Whether a message actually went out |
 | `/admin/clients` | Export everything about one person, or erase them |
+| `/admin/maintenance` | Export and import the configuration; download a backup |
 | `/admin/settings` | The knobs above |
 
 Telegram keeps a reduced admin surface for when you are away from a desk:
@@ -127,24 +128,66 @@ Telegram keeps a reduced admin surface for when you are away from a desk:
 buttons on a notification approve, propose, reject and cancel. Content and
 settings are web-only and reply with a link.
 
+### Configuration: export and import
+
+`/admin/maintenance` downloads everything typed into the admin UI as one JSON
+file — settings, session types, timezones, topics, blocks, translations. It
+carries **no client data**, so unlike a database dump it is safe to keep in a
+password manager or send to whoever is helping you rebuild.
+
+Importing it into a fresh installation reproduces the practice's voice without
+retyping it. Import **merges**: it adds and updates what the file names and
+never deletes anything the file leaves out. A changed page keeps its previous
+text in the usual revision history, so a bad import is undone from
+`/admin/content` per block.
+
+Preview first — the button reports exactly what would change and writes
+nothing. Then choose the file again and press Import.
+
+Availability slots are deliberately not in the file: they are dated, and last
+winter's Tuesdays mean nothing in a fresh install. Recreate a week from
+`/admin/slots`.
+
 ### Backup
 
-A host cron entry, not a container. **The dump contains clients' problem text:
-encrypt it and keep it off-host.**
+The `backup` container dumps the database once a day into `BACKUP_DIR` on the
+host (default `./backups`), keeps `BACKUP_RETENTION_DAYS` of them, and needs no
+setup beyond `docker compose up -d`. It runs the same `postgres:16` image as the
+database, so `pg_dump` can never be older than the server it dumps.
+
+**The dump contains clients' problem text.** The directory is created `0700`,
+but encrypting the files and copying them off-host is still your job — the
+container cannot know where "off-host" is.
 
 ```bash
-docker compose exec -T db pg_dump -U "$POSTGRES_USER" -Fc "$POSTGRES_DB" > "/backups/psychobooking-$(date +%F).dump"
+docker compose logs backup          # when the last one ran, and whether it worked
+ls -la backups/                     # what is on disk
 ```
 
-Nightly, retained 30 days. With content in the database and no application
-volumes, this dump plus `.env` is the complete state of the service.
+They are also listed at `/admin/maintenance` with a download link, for a
+therapist with no shell access on the server.
+
+There is deliberately no "back up now" button and no restore button: restoring
+overwrites every booking made since the dump, which is not a thing to do behind
+one click in a browser.
 
 ### Restore
 
+Stop the application first, so nothing writes while the database is being
+replaced:
+
 ```bash
-docker compose down web worker
-docker compose exec -T db pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists < backup.dump
-docker compose up -d web worker
+docker compose stop web worker
+docker compose exec -T db pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists < backups/psychobooking-2026-01-31.dump
+docker compose start web worker
+```
+
+If your shell mangles binary on a redirect (Git Bash on Windows does), copy the
+file in and restore from a path instead:
+
+```bash
+docker cp backups/psychobooking-2026-01-31.dump "$(docker compose ps -q db)":/tmp/restore.dump
+docker compose exec -T db pg_restore -U "$POSTGRES_USER" -d "$POSTGRES_DB" --clean --if-exists /tmp/restore.dump
 ```
 
 ### Rehearse the restore
@@ -153,7 +196,7 @@ docker compose up -d web worker
 database, without touching the live one:
 
 ```bash
-# 1. Take a dump.
+# 1. Use the newest dump the backup container took (or take one now).
 docker compose exec -T db pg_dump -U psycho -Fc psychobooking > /tmp/rehearsal.dump
 
 # 2. Restore it into a throwaway database.

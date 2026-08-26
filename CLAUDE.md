@@ -34,7 +34,7 @@ the design mid-implementation.
 
 > Update this line as work progresses. It is the first thing to check each session.
 
-**Milestone: M9 complete. M10 (portability and backups) specified in `IMPLEMENTATION.md` §16.6/§16.7, not yet implemented.**
+**Milestone: M10 (complete) — all milestones M0 → M10 are done.**
 
 Milestones run M0 → M10 (`IMPLEMENTATION.md` §19). Work them **in order**. Each
 one's acceptance criteria must pass before starting the next. Do not implement

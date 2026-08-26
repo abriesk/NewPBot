@@ -42,6 +42,10 @@ services:
              --proxy-headers --forwarded-allow-ips='*'"
     expose:
       - "8000"
+    # Read-only on purpose: the admin UI lists and downloads dumps, and there
+    # is no route that writes, deletes, or restores one (DESIGN.md §21.5).
+    volumes:
+      - ${BACKUP_DIR:-./backups}:/backups:ro
     # No published ports here. Under `tls`, Caddy is the sole ingress and web is
     # reachable only on the internal network. Under `plain`, the loopback
     # binding comes from docker-compose.plain.yml.
@@ -60,6 +64,24 @@ services:
       web:
         condition: service_healthy
     command: ["python", "-m", "app.worker.main"]
+    restart: unless-stopped
+
+  # Nightly pg_dump into a directory bind-mounted from the host (§16.6). Not
+  # behind a profile: profiles select the ingress, and a backup that has to be
+  # switched on is a backup most installs do not have. Same image as db, so
+  # pg_dump can never be older than the server it dumps.
+  backup:
+    image: postgres:16
+    env_file: .env
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      PGPASSWORD: ${POSTGRES_PASSWORD:?required}
+    volumes:
+      - ./backup.sh:/backup.sh:ro
+      - ${BACKUP_DIR:-./backups}:/backups
+    entrypoint: ["/bin/sh", "/backup.sh"]
     restart: unless-stopped
 
   caddy:

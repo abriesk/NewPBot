@@ -11,6 +11,8 @@ COPY alembic ./alembic
 COPY alembic.ini .
 COPY pyproject.toml .
 COPY tests ./tests
-RUN adduser --disabled-password --gecos "" appuser && chown -R appuser /app
+# uid pinned: backup.sh chowns the dump directory to it so `web` can read a
+# 0700 directory it does not own (IMPLEMENTATION.md §16.6).
+RUN adduser --disabled-password --gecos "" --uid 1000 appuser && chown -R appuser /app
 USER appuser
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

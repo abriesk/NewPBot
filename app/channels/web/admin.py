@@ -21,13 +21,14 @@ from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
-from fastapi import APIRouter, Form, Request, Response
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi import APIRouter, Form, Request, Response, UploadFile
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels.web import ratelimit
+from app.channels.web.backups import list_dumps, resolve_dump
 from app.channels.web.security import (
     CSRF_FIELD,
     authenticate_admin,
@@ -60,6 +61,14 @@ from app.core.policies import now_utc
 from app.core.services import booking, content, notifications, waitlist
 from app.core.services import slots as slot_service
 from app.core.services.clients import erase_client, export_client, identities_for
+from app.core.services.config_io import (
+    ConfigInvalid,
+    ImportReport,
+    dump_config,
+    export_config,
+    import_config,
+    load_config,
+)
 from app.core.services.content import MarkdownNotAllowed
 from app.core.services.settings import MUTABLE_FIELDS, get_practice, update_settings
 from app.core.services.slots import SlotPattern
@@ -76,6 +85,9 @@ LOCALE = "en"
 
 LANGUAGES = ("ru", "hy", "en")
 
+#: §17. The one upload this service accepts, capped before it is parsed.
+MAX_CONFIG_UPLOAD = 5 * 1024 * 1024
+
 
 async def _labels(session: AsyncSession) -> dict[str, str]:
     """Only the labels the catalogue actually covers."""
@@ -91,6 +103,7 @@ async def _labels(session: AsyncSession) -> dict[str, str]:
         "nav_session_types": "admin.nav.session_types",
         "nav_timezones": "admin.nav.timezones",
         "nav_delivery": "admin.nav.delivery",
+        "nav_maintenance": "admin.nav.maintenance",
         "approve": "admin.request.approve",
         "propose": "admin.request.propose",
         "reject": "admin.request.reject",
@@ -101,6 +114,10 @@ async def _labels(session: AsyncSession) -> dict[str, str]:
         "content_revisions": "admin.content.revisions",
         "invalid_markdown": "admin.content.invalid_markdown",
         "settings_saved": "admin.settings.saved",
+        "config_export": "admin.maintenance.export",
+        "config_import": "admin.maintenance.import",
+        "config_preview": "admin.maintenance.preview",
+        "backups": "admin.maintenance.backups",
     }
     return {name: await get_text(session, LOCALE, key) for name, key in keys.items()}
 
@@ -1006,6 +1023,175 @@ def build_router() -> APIRouter:
                 await _context(session, request, admin, rows=rows, identities=identities),
             )
 
+    # --- Maintenance: configuration and backups (§16.6, §16.7) -------------
+
+    async def _import_error(session: AsyncSession, detail: str) -> str:
+        """A refusal, worded from the catalogue like every other admin error.
+
+        `detail` comes from `ConfigInvalid`, which names the section and the
+        offending value: the therapist is the person who will fix the file.
+        """
+        return await get_text(session, LOCALE, "admin.maintenance.invalid", detail=detail)
+
+    async def _maintenance(
+        session: AsyncSession,
+        request: Request,
+        admin: AdminUser,
+        *,
+        report: ImportReport | None = None,
+        error: str = "",
+    ) -> Response:
+        return _render(
+            "admin/maintenance.html",
+            await _context(
+                session,
+                request,
+                admin,
+                dumps=list_dumps(),
+                report=report,
+                error=error,
+            ),
+            status_code=400 if error else 200,
+        )
+
+    @router.get("/maintenance", response_class=HTMLResponse, include_in_schema=False)
+    async def maintenance_page(request: Request) -> Response:
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+            return await _maintenance(session, request, admin)
+
+    @router.get("/maintenance/config/export", include_in_schema=False)
+    async def config_export_route(request: Request) -> Response:
+        """The admin-editable configuration as a JSON download (§16.7).
+
+        Unlike a dump this carries no client data at all, which is what makes
+        it safe to send to whoever is rebuilding the install (DESIGN.md §21.1).
+        """
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+
+            payload = await export_config(session)
+            practice = await get_practice(session)
+            session.add(
+                AuditLog(
+                    practice_id=practice.id,
+                    actor_type=ActorType.admin,
+                    actor_id=str(admin.id),
+                    action="config.export",
+                    entity_type="practice",
+                    entity_id=str(practice.id),
+                )
+            )
+
+            stamp = now_utc().strftime("%Y-%m-%d")
+            return Response(
+                dump_config(payload),
+                media_type="application/json",
+                headers={
+                    "Content-Disposition": (
+                        f'attachment; filename="psychobooking-config-{stamp}.json"'
+                    )
+                },
+            )
+
+    @router.post("/maintenance/config/import", response_class=HTMLResponse, include_in_schema=False)
+    async def config_import_route(
+        request: Request,
+        file: UploadFile,
+        apply: str = Form("0"),
+        csrf_token: str = Form("", alias=CSRF_FIELD),
+    ) -> Response:
+        """Preview or apply a config file.
+
+        One route with two modes on purpose (§12.2): a preview that runs
+        different code from the apply is a preview of nothing. `apply=0` runs
+        the identical import inside a savepoint and rolls it back.
+        """
+        if not csrf_ok(request, csrf_token):
+            return Response(status_code=403)
+
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+
+            # Read one byte past the cap rather than trusting Content-Length,
+            # and never write the upload to disk (§17).
+            raw = await file.read(MAX_CONFIG_UPLOAD + 1)
+            if len(raw) > MAX_CONFIG_UPLOAD:
+                return await _maintenance(
+                    session,
+                    request,
+                    admin,
+                    error=await _import_error(session, "the file is larger than 5 MB"),
+                )
+
+            applying = apply == "1"
+            try:
+                payload = load_config(raw)
+                report = await import_config(session, payload, apply=applying)
+            except ConfigInvalid as exc:
+                # The savepoint inside import_config has already rolled back;
+                # nothing partial reaches the commit below.
+                return await _maintenance(
+                    session, request, admin, error=await _import_error(session, str(exc))
+                )
+
+            if applying:
+                practice = await get_practice(session)
+                session.add(
+                    AuditLog(
+                        practice_id=practice.id,
+                        actor_type=ActorType.admin,
+                        actor_id=str(admin.id),
+                        action="config.import",
+                        entity_type="practice",
+                        entity_id=str(practice.id),
+                        meta=report.as_meta(),
+                    )
+                )
+                # The translations cache is process-wide and the import wrote
+                # straight past it.
+                invalidate_cache()
+
+            return await _maintenance(session, request, admin, report=report)
+
+    @router.get("/maintenance/backups/{filename}", include_in_schema=False)
+    async def backup_download_route(request: Request, filename: str) -> Response:
+        """Hand back one dump the sidecar produced (§16.6).
+
+        Read-only by construction: there is no route that writes, overwrites,
+        or deletes a dump, and none that restores one (DESIGN.md §21.5).
+        """
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+
+            path = resolve_dump(filename)
+            if path is None:
+                return Response(status_code=404)
+
+            practice = await get_practice(session)
+            session.add(
+                AuditLog(
+                    practice_id=practice.id,
+                    actor_type=ActorType.admin,
+                    actor_id=str(admin.id),
+                    action="backup.download",
+                    entity_type="backup",
+                    entity_id=filename,
+                )
+            )
+
+            # FileResponse streams: a dump is not read into memory (§12.2).
+            return FileResponse(
+                path, media_type="application/octet-stream", filename=filename
+            )
     return router
 
 

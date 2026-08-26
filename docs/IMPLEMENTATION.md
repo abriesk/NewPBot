@@ -1043,6 +1043,7 @@ Requirements on the script:
 - On success, delete dumps older than `BACKUP_RETENTION_DAYS`. **Never** prune when the dump failed — that is the run whose predecessors matter most.
 - Exit non-zero and log on failure; `restart: unless-stopped` retries. Failure **MUST NOT** be silent.
 - Compute the sleep from the wall clock each iteration, not by sleeping 86400 seconds, so a restart does not permanently shift the hour.
+- On startup, if the directory holds no dump at all, take one immediately. A fresh install would otherwise show an empty backups page for up to a day, which reads as "backups are not working" rather than "not yet".
 
 The directory is bind-mounted from the host, so dumps are reachable by `scp` without Docker. `web` mounts the same directory **read-only** at `BACKUP_PATH` and serves it per §12.2 for a therapist with no shell access.
 
@@ -1151,7 +1152,7 @@ Required before a milestone is complete:
 - **Reminder tests** using `time-machine`: creation on confirmation, cancellation on cancel, `skipped` when already past.
 - **Retention test:** purge nulls content and preserves rows.
 - **E2E:** book via web → approve via admin → reminder fires → cancel; and the same via a simulated Telegram update.
-- **Config round-trip test:** export → import into a freshly seeded database → export again produces a byte-identical file; the second import writes no revisions and reports every section as unchanged.
+- **Config round-trip test:** export → import into a freshly seeded database → export again produces an identical file apart from `exported_at`; the second import writes no revisions and reports every section as unchanged.
 - **Config rejection tests:** unknown language (including `am`), unknown settings field, unknown enum value, invalid Markdown, duplicate natural key — each aborts the whole import with the database untouched.
 - **Backup download tests:** traversal (`../`), an absolute path, and a name outside the dump pattern all return 404; a valid name streams the file.
 
