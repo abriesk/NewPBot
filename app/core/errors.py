@@ -59,6 +59,15 @@ class TokenInvalid(DomainError):
     """
 
 
+class TextTooLong(DomainError):
+    """A client sent more free text than a field accepts (§17).
+
+    Refused rather than truncated: silently dropping the end of somebody's
+    description of their problem tells neither them nor the therapist that half
+    of it is missing.
+    """
+
+
 class RateLimited(DomainError):
     """§17's limits. The caller has had their allowance for the window.
 

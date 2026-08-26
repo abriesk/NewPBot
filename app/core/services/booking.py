@@ -68,7 +68,7 @@ from app.core.models import (
     SessionType,
     Slot,
 )
-from app.core.policies import now_utc, pending_expiry, reminder_schedule
+from app.core.policies import check_client_text, now_utc, pending_expiry, reminder_schedule
 from app.core.services import slots as slot_service
 from app.core.services.settings import get_practice
 
@@ -480,6 +480,10 @@ async def _submit(
     practice = await get_practice(session)
     if not practice.availability_on:
         raise BookingClosed("the practice is not accepting bookings")
+
+    check_client_text(problem_text, "problem_text")
+    check_client_text(contact_note, "contact_note")
+    check_client_text(desired_time_text, "desired_time_text")
 
     await _enforce_submission_rate(session, client_id)
 

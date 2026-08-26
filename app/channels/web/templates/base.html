@@ -44,6 +44,31 @@
     }
   } catch (e) { /* an old browser simply falls back to the practice timezone */ }
 })();
+
+// §17's free-text cap, shown rather than sprung. `maxlength` already stops the
+// typing; this is what tells somebody why the field went quiet on them. Silent
+// until the last tenth, so a two-line answer is never nagged at, and numbers
+// only -- a counter that needed words would need them in three languages.
+(function () {
+  var fields = document.querySelectorAll('[data-counter]');
+  Array.prototype.forEach.call(fields, function (field) {
+    var max = parseInt(field.getAttribute('maxlength'), 10);
+    if (!max || !field.parentNode) { return; }
+
+    var out = document.createElement('span');
+    out.className = 'counter';
+    out.hidden = true;
+    field.parentNode.appendChild(out);
+
+    var render = function () {
+      var used = field.value.length;
+      out.hidden = used < max * 0.9;
+      out.textContent = used + ' / ' + max;
+    };
+    field.addEventListener('input', render);
+    render();
+  });
+})();
 </script>
 </body>
 </html>

@@ -14,7 +14,25 @@ from datetime import UTC, datetime, timedelta
 from enum import StrEnum
 
 from app.core.enums import BookingMode
+from app.core.errors import TextTooLong
 from app.core.models import Practice
+
+#: The longest free text a client can send.
+#:
+#: Telegram caps a message at 4096 characters and the problem description
+#: arrives as exactly one message, so this ceiling already applied on that
+#: channel whether anybody had written it down or not. The web had none at all.
+#: The number is Telegram's rather than a taste of ours, because a limit the web
+#: sets lower would accept text the bot could not carry, and one set higher
+#: would take an essay on one channel and refuse it on the other.
+CLIENT_TEXT_MAX_CHARS = 4096
+
+
+def check_client_text(value: str | None, field: str) -> str | None:
+    """Refuse over-long client text. Returns the value so callers can inline it."""
+    if value is not None and len(value) > CLIENT_TEXT_MAX_CHARS:
+        raise TextTooLong(f"{field} is longer than {CLIENT_TEXT_MAX_CHARS} characters")
+    return value
 
 
 class BookingPath(StrEnum):

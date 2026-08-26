@@ -21,7 +21,7 @@ from app.core.enums import ActorType, WaitlistStatus
 from app.core.errors import InvalidTransition, NotFound, RateLimited
 from app.core.events import WaitlistJoined, collect
 from app.core.models import AuditLog, WaitlistEntry
-from app.core.policies import now_utc
+from app.core.policies import check_client_text, now_utc
 from app.core.services.settings import get_practice
 
 #: §17 caps booking submission at 5 an hour per client, and §8 lists
@@ -81,6 +81,9 @@ async def join_waitlist(
     Deliberately not gated on `availability_on`: the waitlist is precisely what
     the client is offered when availability is off (DESIGN.md §6).
     """
+    check_client_text(problem_text, "problem_text")
+    check_client_text(contact_note, "contact_note")
+
     await _enforce_join_rate(session, client_id)
 
     practice = await get_practice(session)

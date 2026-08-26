@@ -36,7 +36,13 @@ from app.config import get_settings
 from app.core.enums import Channel, Modality, SenderType, TokenPurpose
 from app.core.errors import DomainError, NotFound, SlotUnavailable, TokenInvalid
 from app.core.models import Client, NegotiationMessage, SessionType, TimezoneOption
-from app.core.policies import BookingPath, hold_expiry, now_utc, resolve_booking_mode
+from app.core.policies import (
+    CLIENT_TEXT_MAX_CHARS,
+    BookingPath,
+    hold_expiry,
+    now_utc,
+    resolve_booking_mode,
+)
 from app.core.services import booking, content, flow, notifications, waitlist
 from app.core.services.clients import (
     consume_token,
@@ -162,6 +168,9 @@ async def _context(
         "topics": topics,
         "t": await _labels(session, resolved),
         "csrf_token": csrf_token_for(request),
+        # §17's free-text cap, so the form can stop somebody typing three pages
+        # before the server tells them no. The refusal is still the core's.
+        "text_max": CLIENT_TEXT_MAX_CHARS,
     }
 
 

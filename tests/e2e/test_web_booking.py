@@ -752,6 +752,39 @@ async def test_the_hold_notice_names_the_hold_window(
     assert "{minutes}" not in body
 
 
+async def test_the_free_text_fields_carry_the_cap_the_core_enforces(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """§17. The number has to reach the markup, not merely be referenced by it:
+    an undefined name renders as the empty string in Jinja, so a broken context
+    key would leave `maxlength=""` behind and every test would still pass.
+    """
+    from app.core.policies import CLIENT_TEXT_MAX_CHARS
+
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+
+    web.get("/book")
+    web.post(
+        "/book/hold",
+        data={
+            "csrf_token": _csrf(web),
+            "slot_id": web_slot,
+            "session_type_id": session_type_id,
+            "modality": "online",
+            "tz": "Europe/Moscow",
+        },
+        follow_redirects=False,
+    )
+    body = web.get("/book/details").text
+
+    # Both free-text fields: the problem description and the contact note.
+    assert body.count(f'maxlength="{CLIENT_TEXT_MAX_CHARS}"') == 2
+    assert 'maxlength=""' not in body
+    assert "[data-counter]" in body, "the counter script has to be on the page too"
+
+
 async def test_onsite_selection_shows_the_clinic_address(
     web: TestClient, committed: AsyncSession
 ) -> None:
