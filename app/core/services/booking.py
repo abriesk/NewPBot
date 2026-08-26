@@ -437,11 +437,20 @@ async def _last_admin_proposal(session: AsyncSession, request_id: int) -> Negoti
 
 
 async def whose_turn(session: AsyncSession, request_id: int) -> SenderType | None:
-    """Derived from the last message's sender, never stored (§6.6)."""
+    """Derived from the last message's sender, never stored (§6.6).
+
+    Only the two senders who have a turn are considered. Nothing writes a
+    `system` message today, but the flip below is an admin/client either-or:
+    one system row would silently hand the turn to the admin and leave the
+    client unable to answer.
+    """
     last = (
         await session.execute(
             select(NegotiationMessage)
-            .where(NegotiationMessage.request_id == request_id)
+            .where(
+                NegotiationMessage.request_id == request_id,
+                NegotiationMessage.sender.in_((SenderType.admin, SenderType.client)),
+            )
             .order_by(NegotiationMessage.created_at.desc(), NegotiationMessage.id.desc())
             .limit(1)
         )
@@ -648,9 +657,17 @@ async def admin_propose(
     # Releasing when the proposal names a different time (§7.1): holding a slot
     # the therapist has just proposed moving away from would keep it off the
     # picker for no reason.
+    #
+    # The comparison MUST come before the release, not after. Releasing first
+    # and then discovering the proposal named the very slot being held puts that
+    # slot back on the picker while the request still points at it, and a second
+    # client can take it out from under the negotiation.
     if request.slot_id is not None and proposed_start is not None:
-        slot = await slot_service.release_slot(session, request.slot_id)
-        if slot.starts_at != proposed_start:
+        held = (
+            await session.execute(select(Slot).where(Slot.id == request.slot_id))
+        ).scalar_one_or_none()
+        if held is None or held.starts_at != proposed_start:
+            await slot_service.release_slot(session, request.slot_id)
             request.slot_id = None
 
     session.add(
