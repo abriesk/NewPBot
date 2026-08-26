@@ -34,9 +34,11 @@ the design mid-implementation.
 
 > Update this line as work progresses. It is the first thing to check each session.
 
-**Milestone: M13 (specified, not started) — M0 → M12 are done.** M13 is the
+**Milestone: M13 (complete) — all milestones M0 → M13 are done.** M13 is the
 week schedule view on `/admin/requests` (`IMPLEMENTATION.md` §12.2, §19;
-DESIGN.md §15). The docs are written; no code exists yet.
+DESIGN.md §15). One open question is recorded there: a negotiation whose
+proposal named a *different* time has no instant on the request, so it falls
+to the unscheduled list with only a name.
 
 Milestones run M0 → M13 (`IMPLEMENTATION.md` §19). Work them **in order**. Each
 one's acceptance criteria must pass before starting the next. Do not implement
