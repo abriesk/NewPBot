@@ -731,7 +731,7 @@ async def _submit_booking(session: AsyncSession, client: Client) -> Reply:
             )
         else:
             request = await booking.submit_free_time_request(
-                session, desired_time_text=scratch.get("desired_time", ""), **common
+                session, desired_time_text=scratch.get("desired_time") or "", **common
             )
     except SlotUnavailable:
         # DESIGN.md §8: the race this hold exists to lose gracefully.
