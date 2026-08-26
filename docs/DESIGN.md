@@ -466,6 +466,20 @@ the exposure is bounded: single-use, short-lived, and behind a `0700` backup
 directory. Revisit when the outbox grows a pruning job, or if dumps ever leave
 the host.
 
+**Nothing reserves a slot while the client fills in the form.** `/book/hold`
+records the choice against the flow and takes no database hold, because §6.4
+makes `held_by_request` non-null whenever a slot is held — a real hold needs a
+request row, and creating one there would notify the therapist about a form
+nobody has filled in. So two clients can be on the same slot at once, and the
+loser is told at submit (`booking.slot.taken`); the M2 concurrency test
+guarantees there is exactly one winner. `slot_hold_minutes` therefore names the
+window a client *should* finish in rather than one anything enforces, and the
+wording on the page says so instead of promising a reservation. Closing it
+properly wants a nullable hold owner or a two-phase submit, plus the same
+treatment on Telegram, which has no pre-submit reservation at all. Worth doing
+when contention stops being hypothetical — one therapist and a handful of
+requests a day is not where two clients race for one slot.
+
 **A `view_request` token burns on `GET`.** Opening `/r/{uuid}?token=…` consumes
 the token on first paint, so anything that fetches the URL before the client
 does spends it — and mail scanners on some corporate systems do exactly that,
