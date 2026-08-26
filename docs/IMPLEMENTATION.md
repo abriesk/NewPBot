@@ -1057,6 +1057,8 @@ The base file also defines `backup` (§16.6), which is not behind a profile and 
 
 `worker` and `web` both mount `${STATE_DIR:-./state}` — read-write for `worker`, read-only for `web` — so the status file survives a restart and can be read with `cat` when the application cannot answer (§16.8).
 
+`docker-compose.dev.yml` is a third overlay and belongs to development alone. The Dockerfile copies the source into the image, so a container runs the code as it stood at build time; the overlay bind-mounts `app/`, `tests/`, `locales/` and `alembic/` read-only over those copies, so `docker compose exec web pytest` exercises the working tree rather than the last build. It **MUST NOT** be applied to a deployment, which runs the image it was built from and nothing else.
+
 ### 16.4 `Caddyfile`
 
 ```

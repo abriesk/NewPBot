@@ -75,6 +75,21 @@ of them is a bug even if the tests pass.
 
 ## Commands
 
+**Set this first, every session, before anything below.** The image COPYies the
+source in, so without the dev overlay every command here runs the code as it was
+at the last `build` — `pytest` passes against a stale image and tells you nothing
+about the file you just edited. The separator is the docker CLI's, not the
+shell's: `;` on Windows even from Git Bash, `:` on Linux and macOS.
+
+```bash
+export COMPOSE_FILE="docker-compose.yml;docker-compose.dev.yml"
+```
+
+Not set, or a command that changes `requirements.txt`, `alembic.ini`,
+`pyproject.toml` or the `Dockerfile`? Then `docker compose build web && docker
+compose up -d web worker` first, and check the change is really in the container
+before believing a green suite.
+
 ```bash
 # stack
 docker compose up -d                  # default profile: tls (needs DOMAIN, ACME_EMAIL)

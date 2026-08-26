@@ -1,0 +1,35 @@
+# Development overlay. Never applied to a deployment.
+#
+#   export COMPOSE_FILE="docker-compose.yml;docker-compose.dev.yml"    # Windows
+#   export COMPOSE_FILE=docker-compose.yml:docker-compose.dev.yml      # Linux, macOS
+#
+# The separator follows the docker CLI's own platform, not the shell's: on
+# Windows it is `;` even from Git Bash or WSL calling the Windows binary. With
+# the wrong one, compose reports the whole string as one missing filename.
+#
+# The base image COPYies the source in, so a container started from it runs the
+# code as it was at build time. That is right for a deployment and a trap in
+# development: `docker compose exec web pytest` then tests the image, passes
+# happily, and says nothing about the file just edited. The failure mode is a
+# green suite for code that was never run.
+#
+# These mounts put the working tree over the copies, so the loop is edit, then
+# test -- no rebuild. Read-only, deliberately: nothing in the container has any
+# business writing back into the source, and it keeps root-owned __pycache__
+# directories out of the working tree. Python skips writing bytecode it cannot
+# write and carries on.
+#
+# `alembic.ini`, `pyproject.toml`, `requirements.txt` and the Dockerfile are not
+# mounted -- changing any of those still needs `docker compose build web`.
+services:
+  web:
+    volumes:
+      - ./app:/app/app:ro
+      - ./tests:/app/tests:ro
+      - ./locales:/app/locales:ro
+      - ./alembic:/app/alembic:ro
+  worker:
+    volumes:
+      - ./app:/app/app:ro
+      - ./locales:/app/locales:ro
+      - ./alembic:/app/alembic:ro
