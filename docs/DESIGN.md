@@ -330,7 +330,7 @@ Client-initiated cancellation is deferred. The data model accommodates it — `c
 
 The web UI is the primary admin surface:
 
-- **Requests** — filter by status, view the full negotiation thread, approve, propose, reject, cancel
+- **Requests** — filter by status, view the full negotiation thread, approve, propose, reject, cancel; and the same requests as a **week schedule** (below)
 - **Slots** — create in bulk (a weekly pattern over a date range) and individually, block, delete
 - **Waitlist** — mark contacted, convert to a request, close
 - **Content** — edit blocks per topic and language, reorder, preview per channel, view and restore revisions
@@ -343,6 +343,18 @@ Telegram retains a reduced admin surface for the operations that matter when awa
 The dividing line is **triage, not administration**. What belongs on the phone is time-sensitive and decidable in a tap or two: a request arrived and wants an answer, a session is today and has to be cancelled because she is ill, availability has to go off for a week. What belongs on the web is anything that means composing text or configuring the practice, because on a phone that is a worse version of a form she could fill in properly later.
 
 Two consequences follow, and both are worth stating because they are easy to get wrong. First, the phone surface is a *panel that navigates*, not a series of one-shot commands: every screen offers the way back, so the therapist is never left holding a message with nothing to press — the earlier version answered "Confirmed 7f3c…" and left her there. Second, the panel edits its own message rather than sending a new one, because a triage tool used a dozen times a morning must not bury the chat it lives in. Neither is a feature so much as the price of the surface being usable at all.
+
+The requests list answers *what needs answering*. It is ordered newest first, because a queue is worked from the top. It cannot answer *what does my week look like*, and no amount of filtering makes it: a list sorted by arrival says nothing about the shape of Thursday. So the same requests are also offered as a **week schedule** — seven day columns, each holding that day's sessions in time order. It is a second view of one query, not a second feature: no new table, no new state, and every entry links back to the request page that already exists.
+
+It is deliberately a day-column agenda rather than an hour-ruled grid. An hour-ruled week lets two weeks be compared by eye, which is a real advantage, but it pays for that in empty rows — a practice this size books a handful of hours a day, so most of the ruling is blank, and the blankness is what the eye lands on first. The judgement was that the noise costs more than the comparison is worth, and it was made by the person who reads it every morning.
+
+The schedule is **read-only**. Dragging a session to another hour looks obvious and is not: rescheduling means renegotiating with a client through the same proposal machinery as everywhere else (§9), and a view that quietly rewrote `scheduled_start` would go around it. A cell is a link to the request; the request page keeps the actions.
+
+Three things follow, each of which would otherwise be a quiet defect:
+
+- **Finished sessions stay on it.** A confirmed session becomes `completed` once its end time passes (§7), so a schedule showing only confirmed work would render last week as empty — a plainly false statement about a week that happened. `completed` is shown, muted.
+- **Requests with no time yet are shown beside it, not on it.** A free-text request carries wording rather than an instant ("some evening next week?"), and there is no honest cell for it. Dropping it from the view would hide exactly the requests most in need of an answer, so they get their own list underneath.
+- **It is not calendar synchronisation.** §20 defers a subscribable feed of the therapist's whole schedule, and §1 puts external calendar sync out of scope. This is neither: nothing leaves the server, nothing is fetched, no external calendar is involved. It is a way of drawing rows the admin UI already reads.
 
 ---
 
@@ -429,10 +441,11 @@ Roughly in the order they would be worth doing:
 3. Payments and payment instructions per language
 4. **The therapist's** calendar: export and synchronisation of her whole schedule (a subscribable `.ics` feed first, CalDAV later). Not to be confused with the per-session file a client gets attached to a confirmation email, which is built (IMPLEMENTATION.md §13.5)
 5. The same per-session calendar file on Telegram, which needs `send_document` and a transport that can carry an attachment. Worth doing only after checking the hand-off: an `.ics` sent into a Telegram chat opens in a calendar app reliably on iOS and unreliably on Android, and a file the client cannot open is worse than no file
-6. Recurring clients: session history, prepaid packages
-7. Client self-study materials as a content type
-8. Multi-practice operation (§18)
-9. Statistics for the therapist: conversion, no-shows, load by weekday
+6. The week schedule (§15) on Telegram. **Needs design thought and testing with the therapist before any code is written**, because the obvious answer does not fit. A grid needs monospace, so it needs `<pre>` — the only tag in the supported subset that holds alignment (hard rule 6) — and a phone shows roughly 30 to 40 monospace characters before wrapping or side-scrolling. Seven day-columns do not fit in that, and the version that renders correctly on a desk will be unreadable on the device the surface exists for. The likely shape is therefore not a grid but a day-grouped agenda — a heading per day, its sessions beneath, empty days collapsed to one line — which is a different design and should be judged as one rather than as a degraded grid. Two things to settle by trying it rather than by reasoning: whether a day-grouped agenda actually beats the flat soonest-first list already at `asess:7` (§13.2), and how many days belong on one screen given the 4096-character limit and the current cap of ten sessions. Until both are answered from use, the honest Telegram answer is the existing list plus a link to the web schedule, which is what §13.2 already does for every web-only capability
+7. Recurring clients: session history, prepaid packages
+8. Client self-study materials as a content type
+9. Multi-practice operation (§18)
+10. Statistics for the therapist: conversion, no-shows, load by weekday
 
 ---
 

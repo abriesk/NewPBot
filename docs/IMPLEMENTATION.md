@@ -766,7 +766,30 @@ A message *about a request* **MUST** link to `/r/{uuid}` carrying a `view_reques
 
 All under `/admin`, session-authenticated, CSRF-protected.
 
-`/admin/login`, `/admin/requests`, `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`), `/admin/help`, `/admin/status`.
+`/admin/login`, `/admin/requests` (+ `?view=`, `?start=`), `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`), `/admin/help`, `/admin/status`.
+
+`/admin/requests` serves two views of one query, selected by `?view=` (DESIGN.md §15). `view=list` is the default and is the status-filtered table that already exists; `view=grid` is the **week schedule**. An unrecognised value falls back to `list` rather than erroring — the parameter is navigation, not input.
+
+| Parameter | Values | Default |
+|---|---|---|
+| `view` | `list`, `grid` | `list` |
+| `start` | `YYYY-MM-DD`, interpreted as the Monday of the week to show | the current week in the practice timezone |
+| `status` | a `request_status` value; applies to `view=list` only | unset (all) |
+
+`start` is a date rather than a week offset so a week is linkable and means the same thing tomorrow. A value that does not parse, or that is not a Monday, is snapped to the Monday of the week it falls in; a missing value means the current week. The grid **MUST NOT** carry the `status` filter: the view is defined by one rule instead, and the filter chips are replaced by the week navigation.
+
+The grid shows a request whose effective start falls in the week — `scheduled_start` when set, otherwise the `starts_at` of the slot in `slot_id` (§7.1 sets `scheduled_start` only at approval, so a held slot is what a pending request has). Statuses shown are `confirmed`, `completed`, `pending`, and `negotiating`. `completed` is included and rendered muted: the worker sweeps a confirmed session to `completed` once its end passes (§14), so a grid without it renders every past week as empty. `rejected`, `expired`, and `cancelled` do not appear.
+
+Requirements:
+
+- Seven day columns, Monday to Sunday, in the **practice** timezone — not the admin's browser and not the client's. Each column holds that day's entries in time order. There are no hour rows (DESIGN.md §15 gives the reasoning).
+- An entry **MUST** be placed by the local wall-clock date of its effective start: convert to the practice zone, then bucket by `.date()`. Placement **MUST NOT** be computed as an offset from the week's start instant. The difference shows up twice a year — a week containing a DST transition is not 168 hours long, and offset arithmetic silently shifts a day's worth of entries across the boundary.
+- The window queried **MUST** be widened by a day at each end and then filtered by local date, so a zone whose midnight moves cannot clip the first or last column.
+- Each entry renders its local start time, the client's display name, and its status, and links to `/admin/requests/{uuid}`. It carries **no** `problem_text` (hard rule 8), and no duration or modality — both are one click away on the request page, and the view was chosen for its quietness.
+- Requests that are `pending` or `negotiating` with **no** effective start — the free-text path, which has `desired_time_text` and neither a schedule nor a slot — **MUST** be listed below the grid rather than omitted. The list is capped and shows status, name, and the client's own wording.
+- The grid is **read-only**. There is no route that writes from it: no drag to reschedule, no click to create a slot, no inline approve.
+- Both views are English like the rest of the admin surface (§15, DESIGN.md §11) and add **no** translation keys.
+- No schema change. The read is served by `booking.scheduled_in_window` and `booking.unscheduled_for_admin` in `app/core/services/` — the channel does no scheduling logic of its own, and does not query per row.
 
 The maintenance page carries both halves of §16.7 and §16.6 and nothing else:
 
@@ -1334,6 +1357,9 @@ Each milestone ends with its acceptance criteria passing in CI.
 
 **M12 — Calendar attachment.** The iCalendar file in §13.5: `duration_min` on the `request.confirmed.client` payload (§10), an attachment field on the connector contract (§9), the emitter, the SMTP attachment, and the cancellation wording in all three locale files.
 *Accept:* a confirmed booking delivered by email arrives with exactly one `session.ics` that a strict RFC 5545 reader parses; its start and end match the request in UTC with no `VTIMEZONE` and no `TZID`; two delivery attempts of the same row carry the same `UID`, so the client's calendar holds one entry; the file carries no online join link and no problem text for either modality; an onsite session's `LOCATION` is the clinic link and an online session's is the translated word; a summary containing a comma, a backslash and Armenian text survives folding and escaping intact; no other intent and no other channel produces an attachment; `request.cancelled.client` tells the client to remove the entry by hand.
+
+**M13 — Week schedule.** The second view of `/admin/requests` from §12.2: `scheduled_in_window` and `unscheduled_for_admin` in `app/core/services/booking.py`, the `view=grid` branch, the template, and the styles. No migration and no new locale keys.
+*Accept:* `/admin/requests?view=grid` renders seven day columns in the practice timezone, each holding its day's entries in local time order; a `confirmed`, a `completed`, a `pending` with a held slot, and a `negotiating` request all appear in the column matching their local date, and a `rejected` one does not; a `pending` request with only `desired_time_text` appears in the unscheduled list and in no column; `start=` moves whole weeks and snaps a non-Monday date to its Monday; a week containing a DST transition renders seven columns with every entry on its correct local day; last week's grid shows its `completed` sessions rather than rendering empty; the grid HTML contains no `problem_text`; `view=list` and its status filters are unchanged; the architecture test passes and `alembic heads` still shows one head.
 
 ---
 
