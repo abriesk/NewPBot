@@ -411,6 +411,12 @@ What would still be required to serve several therapists — and is therefore *n
 | Import merges, never deletes | Replace-the-world import | A file from an older install would silently delete a topic the therapist added afterwards |
 | A `backup` sidecar container | A host cron entry (the original §17 answer); a worker sweep job | The operator should not have to configure anything on the host; and a backup that stops when the app crashes is a backup that stops when you need it |
 | Restore by CLI only | A restore button in the admin UI | One click that overwrites the database has no safe failure mode, and restore happens once a decade under supervision |
+| Health checks read the database | Scanning container logs for errors | Logs are unstructured, are lost on `docker compose down`, and describe the same failures the tables already record exactly |
+| Check results in a JSON file | A row in the table being monitored | A checker that reports into the database cannot report that the database is unreachable |
+| A file, not SQLite | SQLite beside Postgres | A second engine with its own locking and corruption modes, for one 2 KB record |
+| Exceptions recorded as class and location | Message and traceback | An exception message can carry an email address or a fragment of problem text (§16) |
+| Staleness of the status file is the liveness check | A heartbeat column | Free, needs no migration, and catches a wedged worker as well as a dead one |
+| External uptime check for total failure | Alerting directly from the worker when the database is down | A direct send breaks the outbox rule and only ever runs on the worst day of the year |
 
 ---
 
@@ -480,3 +486,71 @@ There is no restore button either, and this one is not a matter of cost. Restore
 ### 21.6 The consequence for data protection
 
 The dumps contain problem text, so the backup directory is a new place where §16's sensitive field lives at rest. That is stated rather than avoided: the directory needs restrictive permissions, the download route is behind admin authentication over TLS, and encrypting and copying off-host remains the operator's responsibility. The config file, by contrast, is designed to carry nothing sensitive at all — which is the whole reason it exists separately.
+
+---
+
+## 22. Knowing when something is wrong
+
+Every other section of this document is about the service working. This one is about the therapist finding out when it is not, without an operations team and without a terminal.
+
+### 22.1 What failure looks like in a practice this size
+
+The failures that matter here are silent. A client who never receives a confirmation does not file a ticket; they conclude the practice is disorganised and book with someone else. A reminder that never fires produces a no-show three days later that looks like an ordinary no-show. A backup container that died in February is indistinguishable from a healthy one until the day it is needed.
+
+None of these announce themselves. All of them are visible in the database within seconds of happening. The gap is not detection — it is that nobody is looking, and that the person who would look does not know what a `dead` outbox row is.
+
+So the goal is narrow and worth stating plainly: **the therapist should learn, in one glance and in plain language, whether to carry on or to call the person who runs the server.** Everything below serves that sentence, and anything that does not serve it is out of scope.
+
+### 22.2 Why this is not built on logs
+
+The obvious approach is to scan the container logs for errors. It is the wrong source here, for reasons that are specific rather than stylistic.
+
+Logs in this deployment live inside containers and are lost on `docker compose down` unless a logging driver keeps them. They are unstructured, so any check becomes a regular expression matched against English sentences that change whenever someone edits a log line. They carry no severity contract — a `WARNING` from a library is not a reason to alarm a therapist.
+
+And they are redundant with something better. This system was deliberately built so that failure is *durable state*: an undelivered message is an `outbox_message` row with a status, an attempt count, and the error that caused it (§12). A missed reminder is a `reminder` row still `scheduled` after its `due_at`. Reading those tables is more precise than parsing the log line emitted beside them, and it survives a restart.
+
+Logs remain what they are: the thing the IT person reads *after* the light turns red, to find out why. A diagnostic medium, not a monitoring input.
+
+There is one genuine gap the tables do not cover. An unhandled exception in a web request leaves no trace anywhere — the client sees a 500 and leaves — and a worker job that throws is caught on purpose so that one bad job cannot stop the others (§14), which means it can fail every twenty seconds for a month while nothing accumulates. The answer is still not to read logs: it is to **record the exception where it is already being caught**, as a row. Same durability as everything else, no parsing.
+
+### 22.3 Why the health record is a file beside the database, not a row inside it
+
+The first design put the check results in a table. That is circular: the most consequential thing the checker can discover is that the database is unreachable, and a checker that reports into the database cannot report that.
+
+So the worker writes its findings to a small JSON file on a mounted volume, atomically — a temporary name, then a rename, the same trick `backup.sh` already uses so that a half-written file is never read. The file is readable when Postgres is not, and it is readable over SSH with `cat`, which is exactly the situation the IT person is in when the admin UI will not load.
+
+SQLite was the other candidate and is rejected: a second database engine, with its own locking semantics and its own corruption modes, to hold a single record of about two kilobytes. A file is the smaller idea.
+
+The file also solves worker liveness for free, which the table version would have needed a heartbeat column for. The worker rewrites the file every pass. **If the file is older than a few minutes, the worker is dead** — that one fact replaces a set of heuristics about work piling up, and it catches a wedged worker as readily as a crashed one.
+
+Note what this does *not* change: exception records still go in the database. They originate in the `web` process and are consumed by the `worker` process, and Postgres is the one thing both already share. Routing them through a file or a socket instead would rebuild the cross-process queue that v1.0 had and that §3.3 exists to avoid.
+
+### 22.4 What a colour is allowed to mean
+
+A light that cries wolf is ignored within a week, and an ignored light is worse than none — it converts a real alarm into background furniture. Two rules keep it honest.
+
+**Red means clients are affected right now. Amber means something will break, or is degraded but working.** A dump that has not been taken for two days is amber: nothing is broken today, and on the day it matters it will be far too late. A `dead` outbox row is red: a specific person did not receive something the practice promised them.
+
+**The therapist's own queue is never coloured.** Ten unanswered requests is not a fault; it is Tuesday. Colouring it teaches the eye that the dot means "there is work", which is precisely the meaning that makes it useless for "there is a fault".
+
+A colour on its own is also not enough to act on. Every check produces two sentences: one for the therapist, in the language of consequences ("Messages have stopped going out; three people have had no reply since 14:20"), and one for whoever runs the server, in the language of causes (`outbox: 3 dead, oldest 2026-08-26T14:20Z, last error: SMTP 535`). The first tells them whether to call. The second is what they read down the phone.
+
+### 22.5 Recording exceptions without recording what people wrote
+
+An exception message is untrusted text. `ValueError: invalid address for lena@example.com`, or a `KeyError` carrying a fragment of somebody's problem text, would put exactly the content §16 protects into a new table, and from there onto a status page.
+
+So the record is the exception's **class, module, and line** — never its formatted message, never a traceback. That is enough to tell one recurring failure from another, and enough for the IT person to find it in the logs, which do have the detail, in the place where detail belongs.
+
+### 22.6 What this cannot see, stated rather than implied
+
+If Postgres is down, no admin page renders at all: every page needs it for the session and the navigation. The outbox cannot be written either, so no alert can be sent. Sending directly from the worker in that case would break the rule that every outbound message is a durable row (§12), and would add an untested code path that only ever runs on the worst day of the year.
+
+The correct answer is outside the box and costs nothing: an external uptime check against `/readyz`, which already fails when the database does not answer. A green dot means "everything visible from inside this deployment is fine" — it can never mean "the site is reachable from the internet". That distinction belongs in the README, not in a footnote.
+
+Similarly, the containers cannot inspect each other. Reading `docker compose ps` from inside `web` would mean mounting the Docker socket, which is root on the host handed to the process most exposed to the internet. Container death is inferred from its consequences instead — a dead worker stops writing the file, a dead backup container stops producing dumps — which is both safer and more meaningful, since a container can be running and useless.
+
+### 22.7 On proving the database is healthy
+
+A checker can confirm cheap invariants: the Alembic version matches the code, exactly one practice row exists, a handful of counts that should be zero are zero. Real corruption checking is `pg_amcheck` territory and does not belong anywhere near a page render.
+
+But the corruption that actually ruins a practice is not in the live database — it is in the dumps, discovered on the one day they are needed. So `backup.sh` verifies each dump immediately after writing it by asking `pg_restore` to list its contents. It costs about a second, and it turns "we have backups" into "we have backups that could be read this morning", which is the only version of that sentence worth having.

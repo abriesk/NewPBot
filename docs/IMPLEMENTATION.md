@@ -71,7 +71,7 @@ Do not invent features not specified here. Where this document says "configurabl
 │   │   └── web/                  # client + admin routers, templates, static
 │   ├── worker/
 │   │   ├── main.py               # loop
-│   │   └── jobs/                 # outbox, holds, expiry, reminders, completion, retention
+│   │   └── jobs/                 # outbox, holds, expiry, reminders, completion, retention, status
 │   ├── db.py                     # engine, session factory, unit of work
 │   ├── config.py                 # pydantic-settings
 │   └── main.py                   # FastAPI app assembly
@@ -129,6 +129,8 @@ All configuration is environment variables, loaded through Pydantic settings. `.
 | `BACKUP_PATH` | no | `/backups` | Container path `web` lists dumps from; the other end of the same mount |
 | `BACKUP_HOUR_UTC` | no | `3` | Compose only — hour of day the sidecar dumps; `0`–`23` |
 | `BACKUP_RETENTION_DAYS` | no | `30` | Compose only — dumps older than this are pruned after each successful run |
+| `STATE_DIR` | no | `./state` | Compose only — host path for the status file; `worker` read-write, `web` read-only |
+| `STATE_PATH` | no | `/state` | Container path both processes use; the other end of the same mount (§16.8) |
 
 If `SMTP_HOST` is unset the email channel **MUST** be disabled cleanly: no email identities can be created, the web UI **MUST** require Telegram login, and outbox rows for the `email` channel **MUST NOT** be created.
 
@@ -152,9 +154,11 @@ OutboxStatus     = pending | sending | sent | failed | dead
 ReminderState    = scheduled | sent | skipped | cancelled
 ActorType        = admin | client | system
 ContentBlockKind = text | link_button
+CheckState       = ok | warn | fail                          # rendered as green/amber/red (§16.8)
+ErrorSource      = web | worker
 ```
 
-Persist enums as **PostgreSQL native enum types**, values lowercase exactly as above. `RequestType` from v1.0 does not exist; session types are rows (§6.4).
+Persist enums as **PostgreSQL native enum types**, values lowercase exactly as above. `RequestType` from v1.0 does not exist; session types are rows (§6.4). `CheckState` is the exception: it is never stored in the database, only written to the status file (§16.8), so it needs no type and no migration.
 
 The first migration **MUST** create them explicitly, before any table that references them:
 
@@ -173,6 +177,7 @@ CREATE TYPE outbox_status      AS ENUM ('pending','sending','sent','failed','dea
 CREATE TYPE reminder_state     AS ENUM ('scheduled','sent','skipped','cancelled');
 CREATE TYPE actor_type         AS ENUM ('admin','client','system');
 CREATE TYPE content_block_kind AS ENUM ('text','link_button');
+CREATE TYPE error_source       AS ENUM ('web','worker');
 ```
 
 In SQLAlchemy, declare these with `sqlalchemy.Enum(PyEnum, name='<type_name>', native_enum=True, create_type=True)`; `values_callable` **MUST** be set so the *values* (lowercase) are persisted, not the Python member names.
@@ -523,6 +528,26 @@ CREATE TABLE audit_log (
 
 `payload` **MUST NOT** contain `problem_text` or negotiation bodies for the `email` channel (§13.4).
 
+### 6.9 Error events
+
+The one thing the domain tables cannot record: an exception that left no other trace (DESIGN.md §22.2).
+
+```
+error_event
+  id            bigserial pk
+  practice_id   int fk -> practice
+  source        error_source not null        -- web | worker
+  kind          text not null                -- exception class, e.g. 'OperationalError'
+  location      text not null                -- 'app.worker.jobs.outbox:184' or a job name
+  at            timestamptz not null default now()
+  index (at)
+```
+
+- Written where the exception is **already** being caught: the ASGI exception handler in `app/main.py`, and §14's per-job `except` in the worker loop.
+- Recording **MUST** be best-effort and **MUST NOT** mask the original exception. If the insert fails — most obviously because the database is what broke — the original error propagates unchanged and the failure is logged.
+- `kind` and `location` only. The exception's **message and traceback MUST NOT be stored**: either can carry an email address or a fragment of `problem_text` (hard rule 8, DESIGN.md §22.5). The logs keep the detail.
+- Pruned after 30 days by `prune_error_events` (§14).
+
 ---
 
 ## 7. State machines
@@ -672,6 +697,8 @@ Each intent has a key, a recipient, a payload schema, and available actions. Tra
 | `auth.login_link.client` | client (email) | login url, telegram deep link | open |
 | `auth.link_channel.client` | client | telegram deep link | open |
 | `system.delivery_failed.admin` | admin | intent, address, error | — |
+| `system.health.degraded.admin` | admin | overall state, failing check ids | open |
+| `system.health.recovered.admin` | admin | overall state | — |
 
 Payloads **MUST** be JSON-serialisable and **MUST NOT** embed rendered text.
 
@@ -739,7 +766,7 @@ A message *about a request* **MUST** link to `/r/{uuid}` carrying a `view_reques
 
 All under `/admin`, session-authenticated, CSRF-protected.
 
-`/admin/login`, `/admin/requests`, `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`), `/admin/help`.
+`/admin/login`, `/admin/requests`, `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`), `/admin/help`, `/admin/status`.
 
 The maintenance page carries both halves of §16.7 and §16.6 and nothing else:
 
@@ -757,6 +784,13 @@ The import route is one route with two modes on purpose: a preview that runs dif
 Uploads **MUST** be capped (5 MB) and rejected above it before parsing.
 
 `/admin/content/preview` **MUST** render a block exactly as each channel would, side by side.
+
+`/admin/status` shows the checks from §16.9 in full: for each, its state, the therapist's sentence, and the technical detail. `admin/base.html` carries a **dot** on every admin page, coloured from the overall state and linking here — the point of the feature is that nobody has to remember to look.
+
+- The page and the dot read `STATE_PATH/status.json` and **MUST NOT** run the checks themselves. Checking is the worker's job (§14); a page render does no filesystem walking, no `pg_dump` inspection, and no outbound HTTP.
+- A file that is missing, unparseable, or older than 3 minutes renders red with `worker_alive` failing (§16.9). This is the one check computed by the reader.
+- `ok` | `warn` | `fail` render as green, amber and red. The colour names appear only in the template, never in the data or the domain (§16.8).
+- The page **MUST** name what to do: carry on, or call whoever runs the server — and it links to the guide's troubleshooting section (§12.2's `/admin/help`) rather than restating it.
 
 `/admin/help` serves the admin guide from `app/channels/web/guides/admin-guide.<lang>.html`, session-authenticated like every other admin route. The guides are complete standalone documents — their own navigation, search, theme toggle, and print stylesheet — so they are returned as they are rather than rendered through `admin/base.html`.
 
@@ -844,6 +878,8 @@ One loop, every `WORKER_POLL_SECONDS`. Each job claims rows with `FOR UPDATE SKI
 | `purge_content` | Terminal requests older than `retention_months` | Null out `problem_text`, negotiation `body_text`, `contact_note`; keep the row |
 | `prune_tokens` | `auth_token.expires_at < now() - 7 days` | Delete |
 | `prune_revisions` | Blocks with more than 20 revisions | Delete the oldest |
+| `write_status` | The checks in §16.9 | Rewrite `STATE_PATH/status.json` atomically, **every pass**; on a transition into or out of `fail`, queue `system.health.degraded` / `system.health.recovered` (§16.10). **MUST NOT** raise: a failing check is a `warn` in the file, never a job that stops writing it |
+| `prune_error_events` | `error_event.at < now() - 30 days` | Delete |
 
 Every job **MUST** be idempotent and safe to run concurrently with a second worker, even though only one is deployed.
 
@@ -1002,6 +1038,8 @@ Under `tls`, `web` is reachable only on the internal network; Caddy is the sole 
 
 The base file also defines `backup` (§16.6), which is not behind a profile and runs in every deployment.
 
+`worker` and `web` both mount `${STATE_DIR:-./state}` — read-write for `worker`, read-only for `web` — so the status file survives a restart and can be read with `cat` when the application cannot answer (§16.8).
+
 ### 16.4 `Caddyfile`
 
 ```
@@ -1047,6 +1085,7 @@ Requirements on the script:
 - `pg_dump -h db -U "$POSTGRES_USER" -Fc "$POSTGRES_DB"` — custom format, so `pg_restore` can be selective.
 - Write to a temporary name in the same directory and `mv` into place, so a half-written dump is never named like a complete one and never listed by the admin UI.
 - Name `psychobooking-YYYY-MM-DD.dump`, matching the pattern §12.2 validates. A second run on the same day appends `-HHMMSS` rather than overwriting.
+- Verify the dump before moving it into place: `pg_restore --list` must read it and report a non-empty table of contents. A dump that fails verification is deleted and the run fails loudly — dumps that exist and cannot be read are the corruption that actually ruins a practice (DESIGN.md §22.7). Record the outcome for `backup_verified` (§16.9) by writing `.last-verify` beside the dumps: one line, `ok` or `failed`, plus the filename.
 - On success, delete dumps older than `BACKUP_RETENTION_DAYS`. **Never** prune when the dump failed — that is the run whose predecessors matter most.
 - Exit non-zero and log on failure; `restart: unless-stopped` retries. Failure **MUST NOT** be silent.
 - Compute the sleep from the wall clock each iteration, not by sleeping 86400 seconds, so a restart does not permanently shift the hour.
@@ -1129,6 +1168,68 @@ A translation key absent from the code's catalogue is **reported and skipped**, 
 
 **Audit.** `config.export` and `config.import` rows in `audit_log`, with per-section counts in `meta`. `meta` **MUST NOT** contain content bodies or translation values — counts and keys only.
 
+### 16.8 The status file
+
+The worker writes its health findings to `STATE_PATH/status.json` on a volume bind-mounted from the host: `worker` read-write, `web` read-only. It is deliberately **not** a database row (DESIGN.md §22.3) — the most consequential thing a check can discover is that the database is unreachable.
+
+Written atomically: a temporary name in the same directory, then `rename`. A reader **MUST** never see a partial file.
+
+```json
+{
+  "written_at": "2026-08-26T09:00:00+00:00",
+  "state": "warn",
+  "version": 1,
+  "checks": [
+    {
+      "id": "backup_fresh",
+      "state": "warn",
+      "summary": "The last backup is 2 days old.",
+      "detail": "newest dump psychobooking-2026-08-24.dump, age 51h, threshold 36h"
+    }
+  ]
+}
+```
+
+- `state` is `ok` | `warn` | `fail`, in code and in the file. Green, amber and red are the *rendering* of those three and appear nowhere in the data (§12.2).
+- The overall `state` is the worst of the individual checks.
+- `summary` is for the therapist: consequences, plain language, no jargon. `detail` is for whoever runs the server: counts, identifiers, timestamps, thresholds.
+- `detail` **MUST NOT** contain `problem_text`, message bodies, exception messages, tracebacks, client names, or email addresses (hard rule 8, DESIGN.md §22.5). Counts and identifiers only.
+- The file **MUST** be rewritten every pass even when nothing has changed: its `written_at` is the worker's liveness signal (§12.2).
+
+### 16.9 Checks and thresholds
+
+Normative. A check not in this table does not exist; thresholds are not tuning knobs and **MUST NOT** be exposed as settings — a threshold the therapist can raise is a threshold that gets raised the first time it is inconvenient.
+
+| id | `fail` | `warn` | Detects |
+|---|---|---|---|
+| `worker_alive` | `status.json` older than 3 min, or absent | — | Worker crashed, wedged, or never started. Computed by the **reader**, not the writer |
+| `outbox_dead` | ≥1 `dead` in the last 7 days | — | Somebody never got a confirmation or reminder |
+| `outbox_failing` | — | ≥3 `failed` in the last hour | Wrong SMTP credentials, a blocked bot, Telegram throttling |
+| `outbox_stalled` | `pending` with `next_attempt_at` overdue by >15 min | — | Dispatch is not running even though the worker is |
+| `reminders_overdue` | `scheduled` with `due_at` overdue by >15 min | — | As above, on the reminder path |
+| `web_errors` | ≥10 in the last hour | ≥1 in the last hour | Unhandled exception in a request — otherwise invisible (§6.9) |
+| `worker_errors` | same job in ≥3 consecutive passes | ≥1 in the last hour | A job failing silently behind §14's per-job `except` |
+| `backup_fresh` | newest dump older than 7 days | older than 36 h | The backup container is dead or failing |
+| `backup_verified` | last dump failed verification | — | Dumps exist and cannot be read (§16.6) |
+| `disk_space` | <5% or <500 MB free on `BACKUP_PATH` | <15% or <2 GB | The slow failure that takes everything with it |
+| `schema_version` | Alembic version in the database ≠ code head | — | A half-applied or skipped migration |
+| `practice_row` | not exactly one `practice` row | — | A seed that did not run, or a bad restore |
+
+Rules that apply to all of them:
+
+- The therapist's own workload is **never** a check. Pending requests, an empty slot grid, and a long waitlist are work, not faults (DESIGN.md §22.4).
+- Every check **MUST** be a bounded query. `outbox_stalled` and `reminders_overdue` use the existing `ix_outbox_message_status_next_attempt_at` and `ix_reminder_state_due_at`; nothing here may table-scan.
+- A check that cannot run (the filesystem is unreadable, a query raises) reports `warn` with a `detail` saying so. It **MUST NOT** report `ok`, and **MUST NOT** raise: one broken check may not take the status file down with it.
+
+### 16.10 Health notifications
+
+The dot is only useful to somebody looking at it. A transition **into** `fail` writes an outbox row for the admin (`system.health.degraded`, §10); a transition from `fail` back to `ok` writes `system.health.recovered`.
+
+- Transitions only. While the state stays `fail`, at most one further notification per 6 hours.
+- `dedupe_key = 'health:{state}:{iso8601 hour}'`, so a flapping check cannot spam the therapist even if the worker restarts.
+- The payload carries the failing check **ids** and the overall state — never a `detail` string, which is written for a different reader and under looser rules than §13.4 allows for email.
+- If the database is unreachable, no notification can be written; that case is covered by the external uptime check, not by code (DESIGN.md §22.6). The README **MUST** say so, next to the `/readyz` endpoint.
+
 ---
 
 ## 17. Security
@@ -1144,6 +1245,8 @@ A translation key absent from the code's catalogue is **reported and skipped**, 
 - Logging: **MUST NOT** log `problem_text`, negotiation bodies, tokens, or message payloads. Log identifiers.
 - Uploads: exactly one — the config file at `/admin/maintenance/config/import` (§16.7). `application/json`, 5 MB cap enforced before parsing, admin session and CSRF required, never written to disk. Clients upload nothing.
 - Backup dumps contain `problem_text`. The backup directory **MUST** be created `0700`; `web` mounts it read-only; the download route requires an admin session and validates the filename against a fixed pattern (§12.2). Hard rule 8 is unaffected — a dump reaching the therapist through the admin UI has not left it.
+- The status file and `/admin/status` carry counts, identifiers, timestamps and thresholds only — never `problem_text`, message bodies, client names, addresses, exception messages, or tracebacks (§16.8, DESIGN.md §22.5). `error_event` stores an exception's class and location, never its message.
+- The Docker socket **MUST NOT** be mounted into `web`, `worker`, or `backup`. It is root on the host, offered to the processes most exposed to the internet.
 
 ---
 
@@ -1162,6 +1265,9 @@ Required before a milestone is complete:
 - **Config round-trip test:** export → import into a freshly seeded database → export again produces an identical file apart from `exported_at`; the second import writes no revisions and reports every section as unchanged.
 - **Config rejection tests:** unknown language (including `am`), unknown settings field, unknown enum value, invalid Markdown, duplicate natural key — each aborts the whole import with the database untouched.
 - **Backup download tests:** traversal (`../`), an absolute path, and a name outside the dump pattern all return 404; a valid name streams the file.
+- **Health check tests:** each threshold in §16.9 asserted either side of its boundary; a check whose query raises reports `warn` without preventing the others from being written; `status.json` is written atomically and parses; a stale `written_at` is read as `worker_alive` failing.
+- **Health notification tests:** one outbox row on the transition into `fail`, none while it stays there inside the 6-hour floor, one on recovery; the payload carries check ids and no `detail` string.
+- **Error recording tests:** an unhandled exception in a request and a raising worker job each write one `error_event` carrying class and location; neither writes the exception message or a traceback; a failure to record **MUST NOT** mask the original exception.
 
 Tests run against a real PostgreSQL (Compose service or testcontainers). SQLite **MUST NOT** be used — the schema depends on native enums, arrays, and `FOR UPDATE SKIP LOCKED`.
 
@@ -1204,6 +1310,9 @@ Each milestone ends with its acceptance criteria passing in CI.
 **M10 — Portability and backups.** Config export and import (§16.7) with the maintenance page from §12.2; the `backup` sidecar and dump download (§16.6); README operations section covering both.
 *Accept:* exporting from a configured install and importing into a freshly seeded one reproduces its settings, session types, timezones, topics, blocks, and translations, and creates no clients or requests; re-importing the same file is a no-op that writes no content revisions; a file naming an unknown language, an unknown settings field, or invalid Markdown is rejected whole, leaving the database unchanged; the preview reports the same counts the apply performs; the `backup` container produces a restorable dump on schedule, prunes past the retention window, and never leaves a partial file visible; the download route rejects `../` and any name outside the dump pattern with 404.
 
+**M11 — Health signal.** `error_event` (§6.9) and its recorders in `web` and `worker`; the checks in §16.9; the `write_status` and `prune_error_events` jobs (§14); the status file (§16.8); the dot and `/admin/status` (§12.2); health notifications (§16.10); dump verification in `backup.sh` (§16.6); README and admin-guide sections including the external uptime check.
+*Accept:* with everything healthy the dot is green on every admin page and `status.json` lists every check in §16.9 as `ok`; stopping the `worker` container turns the dot red within 4 minutes with `worker_alive` failing, without any admin page erroring; a `dead` outbox row turns it red and writes exactly one `system.health.degraded` outbox row, and a second `dead` row within the hour writes none; an unhandled exception in a request creates an `error_event` carrying the exception class and location and **no** message or traceback; removing the newest dump and ageing the rest turns `backup_fresh` amber; a corrupt dump fails `backup_verified`; a check whose query raises reports `warn` and the other checks still write; `status.json` is readable and parseable with the application stopped.
+
 ---
 
 ## 20. Seed data
@@ -1223,3 +1332,5 @@ Each milestone ends with its acceptance criteria passing in CI.
 Do not implement, even if it seems natural: payments, client-initiated cancellation, calendar synchronisation, WhatsApp, multi-practice onboarding, session notes, file uploads from clients, analytics beyond the audit log. `practice_id` exists on every table but only one practice is served; do not build practice switching.
 
 Also not to be built, now that §16.6 and §16.7 exist: a restore button or any other write path for dumps in the admin UI; a "back up now" trigger; a replace-mode config import that deletes rows absent from the file; slots in the config file; scheduled or automatic import from a watched file.
+
+Also not to be built as part of §16.8's health checking: log shipping or a log-scanning pipeline; an external APM or error-reporting service; mounting the Docker socket into any application container; alert thresholds as admin settings; paging, escalation, or on-call rotation; and any check that colours the therapist's own workload.
