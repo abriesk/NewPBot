@@ -103,7 +103,11 @@ table.health p { margin: .15rem 0; }
 
 /* The week schedule (§12.2). Seven day columns, no hour ruling: a practice
    this size books a handful of hours a day, and an hour-ruled week is mostly
-   blank rows (DESIGN.md §15). */
+   blank rows (DESIGN.md §15).
+
+   The columns are named `wday`, not `day`: the client slot picker owns `.day`
+   and dresses it as a full-width heading with a rule through it, which is the
+   opposite of a column. */
 .views { display: flex; gap: .5rem; align-items: center; margin-bottom: .75rem; }
 .views a {
   color: var(--muted); text-decoration: none; border: 1px solid var(--line);
@@ -120,16 +124,16 @@ table.health p { margin: .15rem 0; }
   display: grid; grid-template-columns: repeat(7, minmax(9rem, 1fr));
   gap: .4rem; align-items: start;
 }
-.week .day {
+.week .wday {
   border: 1px solid var(--line); border-radius: var(--radius);
   background: var(--surface); padding: .5rem; min-height: 6rem;
 }
-.week .day.is-today { border-color: var(--accent); }
-.week .day h3 {
+.week .wday.is-today { border-color: var(--accent); }
+.week .wday h3 {
   margin: 0 0 .4rem; font-size: .82rem; font-weight: 600; color: var(--muted);
   border-bottom: 1px solid var(--line); padding-bottom: .3rem;
 }
-.week .day.is-today h3 { color: var(--accent); }
+.week .wday.is-today h3 { color: var(--accent); }
 .week .empty { margin: .2rem 0 0; font-size: .85rem; }
 
 .week .entry {
@@ -164,11 +168,8 @@ h2 .count {
   font-size: .78rem; font-weight: 400; color: var(--muted); vertical-align: middle;
 }
 
-/* On a narrow screen the seven columns stack: each is already a list, so the
-   day-column layout degrades into a readable agenda rather than a side-scroll.
-   Empty days keep their heading -- an empty Thursday is a fact worth seeing,
-   and hiding it would make the view mean something different on a phone. */
-@media (max-width: 60rem) {
-  .week { grid-template-columns: 1fr; }
-  .week .day { min-height: 0; }
-}
+/* The week stays a week at every width. Stacking the columns turned it into a
+   list on a narrow screen -- which is the view it exists to be an alternative
+   to, and it changed shape under zoom on an ordinary desktop. The `.scroll`
+   wrapper carries the overflow sideways instead, so the page itself never
+   scrolls horizontally and a day is always a column. */

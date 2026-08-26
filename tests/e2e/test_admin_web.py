@@ -835,7 +835,7 @@ def _day_sections(html: str) -> list[str]:
     making everything listed *beside* the grid look as though it were on it.
     """
     grid = html.split("<h2>Unscheduled")[0]
-    return [chunk.split("</section>")[0] for chunk in grid.split('<section class="day')[1:]]
+    return [chunk.split("</section>")[0] for chunk in grid.split('<section class="wday')[1:]]
 
 
 def _columns(html: str) -> list[str]:
