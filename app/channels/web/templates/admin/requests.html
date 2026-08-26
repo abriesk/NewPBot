@@ -2,6 +2,17 @@
 {% block title %}{{ t.nav_requests }}{% endblock %}
 {% block content %}
 <h1>{{ t.nav_requests }}</h1>
+
+{# §12.2: two views of one query. The list answers "what needs answering";
+   the schedule answers "what does my week look like". #}
+<p class="views">
+  <a href="/admin/requests" {% if view != "grid" %}class="on"{% endif %}>list</a>
+  <a href="/admin/requests?view=grid" {% if view == "grid" %}class="on"{% endif %}>schedule</a>
+</p>
+
+{% if view == "grid" %}
+  {% include "admin/partials/schedule.html" %}
+{% else %}
 <p class="filters">
   <a href="/admin/requests" {% if not active %}class="on"{% endif %}>all</a>
   {% for s in statuses %}
@@ -31,4 +42,5 @@
   </tbody>
 </table>
 </div>
+{% endif %}
 {% endblock %}

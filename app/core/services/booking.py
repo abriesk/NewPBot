@@ -25,11 +25,12 @@ and slot bookkeeping honest (DESIGN.md §7).
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import (
@@ -83,6 +84,35 @@ SUBMISSION_WINDOW = timedelta(hours=1)
 ACTIVE_STATUSES = frozenset(
     {RequestStatus.pending, RequestStatus.negotiating, RequestStatus.confirmed}
 )
+
+#: §12.2: what the week schedule draws. `completed` is here and `cancelled` is
+#: not, which is the difference between a record of the week and a wish for it.
+SCHEDULE_STATUSES = frozenset(
+    {
+        RequestStatus.pending,
+        RequestStatus.negotiating,
+        RequestStatus.confirmed,
+        RequestStatus.completed,
+    }
+)
+
+
+@dataclass(frozen=True, slots=True)
+class ScheduleEntry:
+    """One row of §12.2's week schedule, flat enough to render without a query.
+
+    Exactly two shapes exist and they are mutually exclusive: an entry with a
+    `starts_at` goes in a day column, and an entry with `desired_time_text` goes
+    in the list beneath it. Deliberately not carrying duration or modality --
+    the view is a quiet one and both are a click away on the request page.
+    """
+
+    uuid: UUID
+    status: RequestStatus
+    display_name: str | None
+    starts_at: datetime | None = None
+    desired_time_text: str | None = None
+
 
 #: §7.1: where a client note is accepted -- the same set, for the same reason.
 #: Not part of `ALLOWED` on purpose: a note is not a transition, and putting it
@@ -224,6 +254,73 @@ async def upcoming_sessions(
         )
     ).scalars()
     return list(rows.all())
+
+
+async def scheduled_in_window(
+    session: AsyncSession, *, window_from: datetime, window_to: datetime
+) -> list[ScheduleEntry]:
+    """§12.2's week schedule: everything with a time, in `[from, to)`.
+
+    "With a time" means `requested_start` would answer: `scheduled_start` once
+    approval has set it, the held slot's instant before that. Expressed as one
+    `coalesce` so a week is one query -- the caller draws seven columns and must
+    not go back to the database per row.
+
+    `completed` belongs here with `confirmed`. The worker sweeps a session to it
+    the moment its end passes (§14), so a schedule without it would render every
+    past week empty, which is a false statement about a week that happened.
+    """
+    effective = func.coalesce(BookingRequest.scheduled_start, Slot.starts_at)
+    rows = await session.execute(
+        select(
+            BookingRequest.uuid,
+            BookingRequest.status,
+            BookingRequest.display_name,
+            effective.label("starts_at"),
+        )
+        .outerjoin(Slot, Slot.id == BookingRequest.slot_id)
+        .where(
+            BookingRequest.status.in_(SCHEDULE_STATUSES),
+            effective >= window_from,
+            effective < window_to,
+        )
+        .order_by(effective, BookingRequest.id)
+    )
+    return [
+        ScheduleEntry(uuid=uuid, status=status, display_name=name, starts_at=starts_at)
+        for uuid, status, name, starts_at in rows.all()
+    ]
+
+
+async def unscheduled_for_admin(session: AsyncSession, *, limit: int = 20) -> list[ScheduleEntry]:
+    """§12.2: the requests the week schedule has no honest cell for.
+
+    A free-text request carries wording rather than an instant -- "some evening
+    next week?" -- so it has neither `scheduled_start` nor a slot, and belongs
+    beside the grid rather than nowhere. These are the ones most in need of an
+    answer; dropping them would hide exactly the wrong thing.
+    """
+    rows = await session.execute(
+        select(
+            BookingRequest.uuid,
+            BookingRequest.status,
+            BookingRequest.display_name,
+            BookingRequest.desired_time_text,
+        )
+        .where(
+            BookingRequest.status.in_(
+                (RequestStatus.pending, RequestStatus.negotiating),
+            ),
+            BookingRequest.scheduled_start.is_(None),
+            BookingRequest.slot_id.is_(None),
+        )
+        .order_by(BookingRequest.created_at.desc(), BookingRequest.id.desc())
+        .limit(limit)
+    )
+    return [
+        ScheduleEntry(uuid=uuid, status=status, display_name=name, desired_time_text=wanted)
+        for uuid, status, name, wanted in rows.all()
+    ]
 
 
 async def requested_start(session: AsyncSession, request: BookingRequest) -> datetime | None:

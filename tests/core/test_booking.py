@@ -586,3 +586,217 @@ async def test_terminal_states_accept_nothing(
 async def test_slot_service_is_reachable_without_any_channel_import() -> None:
     """A canary for the architecture rule: the core is importable on its own."""
     assert slot_service.hold_slot is not None
+
+
+# --- the week schedule (§12.2) ----------------------------------------------
+
+
+async def _at(
+    db: AsyncSession,
+    practice: Practice,
+    client: Client,
+    session_type_id: int,
+    status: RequestStatus,
+    *,
+    scheduled: datetime | None = None,
+    slot: Slot | None = None,
+    desired: str | None = None,
+) -> BookingRequest:
+    """A request placed directly in a status, bypassing the transitions.
+
+    The schedule is a read, so what matters is the shape of the row, not the
+    path that produced it -- and driving four statuses through §7.1 here would
+    test the state machine a third time instead of the query.
+    """
+    request = BookingRequest(
+        practice_id=practice.id,
+        client_id=client.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        status=status,
+        source_channel=Channel.web,
+        slot_id=slot.id if slot is not None else None,
+        scheduled_start=scheduled,
+        # The `confirmed_requires_schedule` check constraint (§6.5).
+        confirmed_at=datetime.now(UTC) if status is RequestStatus.confirmed else None,
+        desired_time_text=desired,
+    )
+    db.add(request)
+    await db.flush()
+    return request
+
+
+async def test_schedule_places_confirmed_by_its_scheduled_start(
+    db: AsyncSession, practice: Practice, client: Client, session_type_id: int
+) -> None:
+    request = await _at(
+        db, practice, client, session_type_id, RequestStatus.confirmed, scheduled=LATER
+    )
+
+    entries = await booking.scheduled_in_window(
+        db, window_from=LATER - timedelta(days=1), window_to=LATER + timedelta(days=1)
+    )
+
+    assert [(e.uuid, e.starts_at) for e in entries] == [(request.uuid, LATER)]
+
+
+async def test_schedule_places_a_pending_request_by_its_held_slot(
+    db: AsyncSession,
+    practice: Practice,
+    client: Client,
+    session_type_id: int,
+    future_slot: Slot,
+) -> None:
+    """§7.1 sets `scheduled_start` only at approval, so before that the instant
+    the therapist needs to see is the one the client is holding."""
+    request = await _at(
+        db, practice, client, session_type_id, RequestStatus.pending, slot=future_slot
+    )
+
+    entries = await booking.scheduled_in_window(
+        db,
+        window_from=future_slot.starts_at - timedelta(hours=1),
+        window_to=future_slot.starts_at + timedelta(hours=1),
+    )
+
+    assert [(e.uuid, e.starts_at) for e in entries] == [(request.uuid, future_slot.starts_at)]
+
+
+async def test_schedule_shows_completed_so_a_past_week_is_not_empty(
+    db: AsyncSession, practice: Practice, client: Client, session_type_id: int
+) -> None:
+    """The worker sweeps confirmed to completed once the end passes (§14).
+    Without this the previous week renders blank, which is a lie."""
+    last_week = datetime.now(UTC) - timedelta(days=5)
+    request = await _at(
+        db, practice, client, session_type_id, RequestStatus.completed, scheduled=last_week
+    )
+
+    entries = await booking.scheduled_in_window(
+        db, window_from=last_week - timedelta(days=1), window_to=last_week + timedelta(days=1)
+    )
+
+    assert [e.uuid for e in entries] == [request.uuid]
+
+
+@pytest.mark.parametrize(
+    "finished",
+    [RequestStatus.rejected, RequestStatus.expired, RequestStatus.cancelled],
+)
+async def test_schedule_omits_requests_that_will_not_happen(
+    db: AsyncSession,
+    practice: Practice,
+    client: Client,
+    session_type_id: int,
+    finished: RequestStatus,
+) -> None:
+    await _at(db, practice, client, session_type_id, finished, scheduled=LATER)
+
+    entries = await booking.scheduled_in_window(
+        db, window_from=LATER - timedelta(days=1), window_to=LATER + timedelta(days=1)
+    )
+
+    assert entries == []
+
+
+async def test_schedule_window_includes_its_start_and_excludes_its_end(
+    db: AsyncSession, practice: Practice, client: Client, session_type_id: int
+) -> None:
+    """Half-open, so consecutive weeks neither drop a session nor show it twice."""
+    opening = await _at(
+        db, practice, client, session_type_id, RequestStatus.confirmed, scheduled=LATER
+    )
+    await _at(
+        db,
+        practice,
+        client,
+        session_type_id,
+        RequestStatus.confirmed,
+        scheduled=LATER + timedelta(days=7),
+    )
+
+    entries = await booking.scheduled_in_window(
+        db, window_from=LATER, window_to=LATER + timedelta(days=7)
+    )
+
+    assert [e.uuid for e in entries] == [opening.uuid]
+
+
+async def test_schedule_orders_a_day_the_way_it_is_lived(
+    db: AsyncSession, practice: Practice, client: Client, session_type_id: int
+) -> None:
+    evening = await _at(
+        db,
+        practice,
+        client,
+        session_type_id,
+        RequestStatus.confirmed,
+        scheduled=LATER + timedelta(hours=8),
+    )
+    morning = await _at(
+        db, practice, client, session_type_id, RequestStatus.confirmed, scheduled=LATER
+    )
+
+    entries = await booking.scheduled_in_window(
+        db, window_from=LATER - timedelta(days=1), window_to=LATER + timedelta(days=1)
+    )
+
+    assert [e.uuid for e in entries] == [morning.uuid, evening.uuid]
+
+
+async def test_unscheduled_carries_the_wording_and_no_instant(
+    db: AsyncSession, practice: Practice, client: Client, session_type_id: int
+) -> None:
+    request = await _at(
+        db,
+        practice,
+        client,
+        session_type_id,
+        RequestStatus.negotiating,
+        desired="some evening next week?",
+    )
+
+    entries = await booking.unscheduled_for_admin(db)
+
+    assert [(e.uuid, e.desired_time_text, e.starts_at) for e in entries] == [
+        (request.uuid, "some evening next week?", None)
+    ]
+
+
+async def test_a_request_with_a_time_is_never_in_both_places(
+    db: AsyncSession,
+    practice: Practice,
+    client: Client,
+    session_type_id: int,
+    future_slot: Slot,
+) -> None:
+    """The two lists partition the work; an entry appearing in both would be
+    counted twice by the only person reading them."""
+    scheduled = await _at(
+        db, practice, client, session_type_id, RequestStatus.confirmed, scheduled=LATER
+    )
+    holding = await _at(
+        db, practice, client, session_type_id, RequestStatus.pending, slot=future_slot
+    )
+    timeless = await _at(
+        db, practice, client, session_type_id, RequestStatus.pending, desired="mornings"
+    )
+
+    placed = {
+        e.uuid
+        for e in await booking.scheduled_in_window(
+            db,
+            window_from=datetime.now(UTC) - timedelta(days=1),
+            window_to=LATER + timedelta(days=30),
+        )
+    }
+    beside = {e.uuid for e in await booking.unscheduled_for_admin(db, limit=200)}
+
+    # Scoped to the rows this test made: the window is deliberately wide, and
+    # the database it runs against is not empty.
+    mine = {scheduled.uuid, holding.uuid, timeless.uuid}
+    assert placed & mine == {scheduled.uuid, holding.uuid}
+    assert beside & mine == {timeless.uuid}
+    # Disjoint everywhere, not just here: one query wants an instant and the
+    # other wants none, so no request can be counted twice.
+    assert placed & beside == set()

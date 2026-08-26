@@ -100,3 +100,75 @@ table.health td { vertical-align: top; }
 table.health tr.health-fail td { background: color-mix(in srgb, #b3261e 7%, transparent); }
 table.health tr.health-warn td { background: color-mix(in srgb, #b8860b 7%, transparent); }
 table.health p { margin: .15rem 0; }
+
+/* The week schedule (§12.2). Seven day columns, no hour ruling: a practice
+   this size books a handful of hours a day, and an hour-ruled week is mostly
+   blank rows (DESIGN.md §15). */
+.views { display: flex; gap: .5rem; align-items: center; margin-bottom: .75rem; }
+.views a {
+  color: var(--muted); text-decoration: none; border: 1px solid var(--line);
+  border-radius: 999px; padding: .1rem .7rem; font-size: .85rem;
+}
+.views a.on { color: var(--ink); border-color: var(--accent); background: var(--accent-soft); }
+
+.weeknav { display: flex; gap: .75rem; align-items: baseline; flex-wrap: wrap; }
+.weeknav a { color: var(--muted); text-decoration: none; font-size: .9rem; }
+.weeknav a:hover { color: var(--ink); }
+.weeknav a.on { color: var(--accent); }
+
+.week {
+  display: grid; grid-template-columns: repeat(7, minmax(9rem, 1fr));
+  gap: .4rem; align-items: start;
+}
+.week .day {
+  border: 1px solid var(--line); border-radius: var(--radius);
+  background: var(--surface); padding: .5rem; min-height: 6rem;
+}
+.week .day.is-today { border-color: var(--accent); }
+.week .day h3 {
+  margin: 0 0 .4rem; font-size: .82rem; font-weight: 600; color: var(--muted);
+  border-bottom: 1px solid var(--line); padding-bottom: .3rem;
+}
+.week .day.is-today h3 { color: var(--accent); }
+.week .empty { margin: .2rem 0 0; font-size: .85rem; }
+
+.week .entry {
+  display: flex; flex-wrap: wrap; gap: .25rem .4rem; align-items: baseline;
+  text-decoration: none; color: var(--ink); padding: .3rem .35rem;
+  border-radius: var(--radius-sm); margin-bottom: .25rem;
+  border-left: 3px solid var(--line);
+}
+.week .entry:hover { background: var(--bg-tint); }
+.week .entry .at { font-variant-numeric: tabular-nums; font-weight: 600; font-size: .88rem; }
+.week .entry .who { font-size: .88rem; }
+.week .entry .badge { font-size: .72rem; }
+
+/* A finished session is on the grid so a past week is not empty, but it is
+   not work: it recedes (DESIGN.md §15). */
+.week .entry.completed { opacity: .62; }
+.week .entry.confirmed { border-left-color: var(--accent); }
+.week .entry.pending, .week .entry.negotiating { border-left-color: #b8860b; }
+
+.unscheduled { list-style: none; padding: 0; margin: .5rem 0 0; }
+.unscheduled li {
+  display: flex; flex-wrap: wrap; gap: .5rem; align-items: baseline;
+  padding: .4rem 0; border-bottom: 1px solid var(--line);
+}
+.unscheduled a {
+  display: flex; gap: .5rem; align-items: baseline; text-decoration: none; color: var(--ink);
+}
+.unscheduled .wanted { font-size: .9rem; }
+
+h2 .count {
+  border: 1px solid var(--line); border-radius: 999px; padding: .05rem .5rem;
+  font-size: .78rem; font-weight: 400; color: var(--muted); vertical-align: middle;
+}
+
+/* On a narrow screen the seven columns stack: each is already a list, so the
+   day-column layout degrades into a readable agenda rather than a side-scroll.
+   Empty days keep their heading -- an empty Thursday is a fact worth seeing,
+   and hiding it would make the view mean something different on a phone. */
+@media (max-width: 60rem) {
+  .week { grid-template-columns: 1fr; }
+  .week .day { min-height: 0; }
+}
