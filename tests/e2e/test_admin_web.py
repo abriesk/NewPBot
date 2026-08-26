@@ -33,6 +33,7 @@ from app.core.models import (
     Reminder,
     SessionType,
     Slot,
+    Translation,
 )
 from app.main import create_app
 
@@ -696,6 +697,72 @@ async def test_the_delivery_page_lists_outbox_state(
     await committed.rollback()
     await committed.execute(delete(AdminSession))
     await committed.commit()
+
+
+# --- Translations (§12.2, §15) ----------------------------------------------
+
+
+async def test_the_translations_page_is_grouped_and_shows_the_english_wording(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """§15's catalogue is 158 keys; one alphabetical list of them is not a
+    screen anyone can work in."""
+    from app.channels.web.translation_groups import GROUPS
+
+    _sign_in(web)
+    page = web.get("/admin/translations", params={"lang": "ru"})
+
+    assert page.status_code == 200
+    for group in GROUPS:
+        if group.slug == "admin":
+            # DESIGN.md §11: ru carries no admin keys, so the box is not drawn.
+            assert group.title not in page.text
+        else:
+            assert group.title in page.text, group.slug
+
+    # The English wording sits beside the field, so she is not translating a
+    # bare key name from memory.
+    assert "What should I call you?" in page.text
+    # And a key with no Russian row yet is offered for editing rather than
+    # merely named.
+    assert 'name="key" value="auth.sign_in"' in page.text
+
+    await committed.rollback()
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
+async def test_a_translation_still_saves_from_the_grouped_page(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """The grouping is presentation; the form it wraps is the one that worked
+    before."""
+    from app.core.services.translations import get_text, invalidate_cache
+
+    _sign_in(web)
+    web.get("/admin/translations", params={"lang": "ru"})
+    response = web.post(
+        "/admin/translations",
+        data={
+            "csrf_token": _csrf(web),
+            "lang": "ru",
+            "key": "request.thread",
+            "value": "Переписка",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    await committed.rollback()
+    invalidate_cache()
+    assert await get_text(committed, "ru", "request.thread") == "Переписка"
+
+    await committed.execute(
+        delete(Translation).where(Translation.lang == "ru", Translation.key == "request.thread")
+    )
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+    invalidate_cache()
 
 
 # --- Settings validation ----------------------------------------------------

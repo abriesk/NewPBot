@@ -11,35 +11,52 @@
 </p>
 
 {% if missing %}
-  <div class="card">
-    <h2>Missing here ({{ missing | length }})</h2>
-    <p class="muted">
-      These fall back to the practice default, then to English. Untranslated
-      copy is expected; the wording is yours to write.
-    </p>
-    <ul class="keys">{% for key in missing %}<li><code>{{ key }}</code></li>{% endfor %}</ul>
-  </div>
+  <p class="muted">
+    {{ missing | length }} not written in this language yet — marked below, and
+    editable where they stand. Until then they fall back to the practice
+    language, then to English.
+  </p>
 {% endif %}
 
-<div class="scroll">
-<table>
-  <thead><tr><th>Key</th><th>Value</th><th></th></tr></thead>
-  <tbody>
-  {% for row in rows %}
-    <tr>
-      <td><code>{{ row.key }}</code></td>
-      <td colspan="2">
-        <form method="post" action="/admin/translations" class="inline">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="hidden" name="lang" value="{{ lang }}">
-          <input type="hidden" name="key" value="{{ row.key }}">
-          <input type="text" name="value" value="{{ row.value }}">
-          <button type="submit">Save</button>
-        </form>
-      </td>
-    </tr>
-  {% endfor %}
-  </tbody>
-</table>
-</div>
+{# Grouped by where the therapist sees the text (translation_groups.py). The
+   grouping is presentation: the keys themselves are untouched (§15). #}
+{% for section in groups %}
+  <details class="group" {% if section.group.start_open %}open{% endif %}>
+    <summary>
+      {{ section.group.title }}
+      <span class="count">{{ section.entries | length }}</span>
+      {% if section.missing %}<span class="count todo">{{ section.missing }} to write</span>{% endif %}
+    </summary>
+    <p class="muted">{{ section.group.blurb }}</p>
+    <div class="scroll">
+      <table>
+        <thead>
+          <tr>
+            <th>Key</th>
+            {% if lang != 'en' %}<th>English</th>{% endif %}
+            <th>{{ lang }}</th>
+          </tr>
+        </thead>
+        <tbody>
+        {% for entry in section.entries %}
+          <tr {% if entry.missing %}class="todo"{% endif %}>
+            <td><code>{{ entry.key }}</code></td>
+            {% if lang != 'en' %}<td class="reference">{{ entry.english }}</td>{% endif %}
+            <td>
+              <form method="post" action="/admin/translations" class="inline">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                <input type="hidden" name="lang" value="{{ lang }}">
+                <input type="hidden" name="key" value="{{ entry.key }}">
+                <input type="text" name="value" value="{{ entry.value }}"
+                       placeholder="{{ entry.english }}">
+                <button type="submit">Save</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+{% endfor %}
 {% endblock %}

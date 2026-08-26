@@ -38,6 +38,7 @@ from app.channels.web.security import (
     issue_csrf,
     start_admin_session,
 )
+from app.channels.web.translation_groups import Entry, arrange
 from app.core.enums import ActorType, BookingMode, Modality, OutboxStatus, RequestStatus
 from app.core.errors import DomainError, NotFound
 from app.core.models import (
@@ -668,27 +669,43 @@ def build_router() -> APIRouter:
                 return _back("/admin/login")
 
             chosen = lang if lang in LANGUAGES else "ru"
-            rows = (
-                (
-                    await session.execute(
-                        select(Translation)
-                        .where(Translation.lang == chosen)
-                        .order_by(Translation.key)
-                    )
+
+            async def wording(of: str) -> dict[str, str]:
+                rows = await session.execute(
+                    select(Translation.key, Translation.value).where(Translation.lang == of)
                 )
-                .scalars()
-                .all()
-            )
+                return {str(key): str(value) for key, value in rows.all()}
+
+            stored = await wording(chosen)
+            # §15: a key with no row falls back rather than failing, so it has
+            # no row to edit either. Listed anyway, blank and marked, because
+            # "the ones you have not written yet" is exactly what she is here
+            # for -- the old page could only name them.
+            missing = await missing_keys(session, chosen)
+
+            # The English wording, to show beside the field she is filling in.
+            english = await wording("en") if chosen != "en" else {}
+
+            entries = [
+                Entry(
+                    key=key,
+                    value=stored.get(key, ""),
+                    english=english.get(key, ""),
+                    missing=key in set(missing),
+                )
+                for key in sorted(set(stored) | set(missing))
+            ]
+
             return _render(
                 "admin/translations.html",
                 await _context(
                     session,
                     request,
                     admin,
-                    rows=rows,
+                    groups=arrange(entries),
                     lang=chosen,
                     languages=LANGUAGES,
-                    missing=await missing_keys(session, chosen),
+                    missing=missing,
                 ),
             )
 
