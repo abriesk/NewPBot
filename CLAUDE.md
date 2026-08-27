@@ -98,6 +98,15 @@ Not set, or a command that changes `requirements.txt`, `alembic.ini`,
 compose up -d web worker` first, and check the change is really in the container
 before believing a green suite.
 
+**Looking at a change in the browser needs `docker compose restart web` too.**
+There is no `--reload` on the `uvicorn` command, so the running process keeps
+the Python it imported at start — while Jinja re-reads templates from disk on
+every request. A template change therefore appears immediately against the old
+route code, which is worse than seeing nothing: a new column renders empty, or a
+new context variable is simply missing, and it looks like a bug in the query.
+`pytest` does not have this problem — each `exec` is a fresh process — so a
+green suite is not evidence that what you are looking at is current.
+
 **Editing `locales/*.yaml` needs `docker compose restart web`.** The mount makes
 the files live, but seeding runs once at container start, so until you restart
 the `translation` rows still hold the old copy and the seed tests fail on a

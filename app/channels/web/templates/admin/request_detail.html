@@ -1,4 +1,5 @@
 {% extends "admin/base.html" %}
+{% from "admin/partials/contact.html" import contact_link %}
 {% block title %}Request {{ summary.uuid[:8] }}{% endblock %}
 {% block content %}
 <h1>Request <code>{{ summary.uuid }}</code></h1>
@@ -16,7 +17,7 @@
      leaving to be discovered in the delivery log. #}
   {% if identities %}
     <p>Reachable at:<br>
-      {% for label in identities %}<code>{{ label }}</code><br>{% endfor %}
+      {% for c in identities %}{{ contact_link(c) }}<br>{% endfor %}
     </p>
   {% endif %}
 </div>
@@ -43,37 +44,62 @@
 {% endif %}
 
 <h2>Actions</h2>
+{# §7.1 decides what may be offered, so this page cannot offer what the core
+   would refuse -- §13.2 has required exactly that of the Telegram panel all
+   along. A form the status disallows is greyed with its reason rather than
+   removed, so the page keeps one shape and a therapist looking for cancel
+   finds out why it is not for this request instead of hunting for it. #}
 <div class="admin-actions">
-  <form method="post" action="/admin/requests/{{ req.uuid }}/approve" class="card">
+  <form method="post" action="/admin/requests/{{ req.uuid }}/approve"
+        class="card{% if 'admin_approve' in unavailable %} unavailable{% endif %}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <h3>{{ t.approve }}</h3>
-    <label>Time (practice timezone; blank uses the held slot)
-      <input type="datetime-local" name="scheduled_start">
-    </label>
-    <label>{{ t.meeting_url }}<input type="text" name="meeting_url"></label>
-    <button type="submit">{{ t.approve }}</button>
+    {% if 'admin_approve' in unavailable %}
+      <p class="why">{{ unavailable['admin_approve'] }}</p>
+    {% else %}
+      <label>Time (practice timezone; blank uses the held slot)
+        <input type="datetime-local" name="scheduled_start">
+      </label>
+      <label>{{ t.meeting_url }}<input type="text" name="meeting_url"></label>
+      <button type="submit">{{ t.approve }}</button>
+    {% endif %}
   </form>
 
-  <form method="post" action="/admin/requests/{{ req.uuid }}/propose" class="card">
+  <form method="post" action="/admin/requests/{{ req.uuid }}/propose"
+        class="card{% if 'admin_propose' in unavailable %} unavailable{% endif %}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <h3>{{ t.propose }}</h3>
-    <label>Time <input type="datetime-local" name="scheduled_start"></label>
-    <label>Note <input type="text" name="body"></label>
-    <button type="submit">{{ t.propose }}</button>
+    {% if 'admin_propose' in unavailable %}
+      <p class="why">{{ unavailable['admin_propose'] }}</p>
+    {% else %}
+      <label>Time <input type="datetime-local" name="scheduled_start"></label>
+      <label>Note <input type="text" name="body"></label>
+      <button type="submit">{{ t.propose }}</button>
+    {% endif %}
   </form>
 
-  <form method="post" action="/admin/requests/{{ req.uuid }}/reject" class="card">
+  <form method="post" action="/admin/requests/{{ req.uuid }}/reject"
+        class="card{% if 'admin_reject' in unavailable %} unavailable{% endif %}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <h3>{{ t.reject }}</h3>
-    <label>Reason <input type="text" name="reason"></label>
-    <button type="submit">{{ t.reject }}</button>
+    {% if 'admin_reject' in unavailable %}
+      <p class="why">{{ unavailable['admin_reject'] }}</p>
+    {% else %}
+      <label>Reason <input type="text" name="reason"></label>
+      <button type="submit">{{ t.reject }}</button>
+    {% endif %}
   </form>
 
-  <form method="post" action="/admin/requests/{{ req.uuid }}/cancel" class="card">
+  <form method="post" action="/admin/requests/{{ req.uuid }}/cancel"
+        class="card{% if 'admin_cancel' in unavailable %} unavailable{% endif %}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <h3>{{ t.cancel }}</h3>
-    <label>Reason <input type="text" name="reason"></label>
-    <button type="submit">{{ t.cancel }}</button>
+    {% if 'admin_cancel' in unavailable %}
+      <p class="why">{{ unavailable['admin_cancel'] }}</p>
+    {% else %}
+      <label>Reason <input type="text" name="reason"></label>
+      <button type="submit">{{ t.cancel }}</button>
+    {% endif %}
   </form>
 </div>
 <p><a href="/admin/requests">Back to requests</a></p>

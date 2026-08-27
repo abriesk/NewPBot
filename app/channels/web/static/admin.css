@@ -31,6 +31,12 @@ th { color: var(--muted); font-weight: 600; }
 
 .admin-actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: end; }
 .admin-actions form { margin: 0; }
+
+/* An action §7.1 does not allow from this status. Greyed rather than removed,
+   so the page keeps one shape and the reason is read where the button was. */
+.admin-actions form.unavailable { opacity: .55; }
+.admin-actions form.unavailable h3 { color: var(--muted); }
+.why { color: var(--muted); font-size: .85rem; margin: .35rem 0 0; max-width: 22rem; }
 form.inline { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
 form.inline input[type=text] { width: auto; flex: 1; min-width: 12rem; margin: 0; }
 .row { display: flex; flex-wrap: wrap; gap: 1rem; }

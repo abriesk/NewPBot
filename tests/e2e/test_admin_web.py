@@ -1318,9 +1318,9 @@ async def test_identities_say_whether_an_address_is_verified() -> None:
     log."""
     from types import SimpleNamespace
 
-    from app.channels.web.admin import _identity_labels
+    from app.channels.web.admin import _identity_contacts
 
-    labels = _identity_labels(
+    contacts = _identity_contacts(
         [
             SimpleNamespace(channel=Channel.email, external_id="a@b.test", verified_at=None),
             SimpleNamespace(
@@ -1330,9 +1330,185 @@ async def test_identities_say_whether_an_address_is_verified() -> None:
         ]
     )
 
-    assert labels == [
+    assert [c.label for c in contacts] == [
         "email: a@b.test (unverified)",
         "email: c@d.test (verified)",
         # Telegram vouches for the id, so verified state is not a question there.
         "telegram: 100200300",
     ]
+
+
+async def test_a_contact_is_something_to_click_rather_than_copy() -> None:
+    """Interim, until the UI pass: answering somebody should not begin with
+    selecting an address. An identity with no way of being opened stays plain
+    text rather than becoming a link that goes nowhere."""
+    from types import SimpleNamespace
+
+    from app.channels.web.admin import _identity_contacts
+
+    contacts = _identity_contacts(
+        [
+            SimpleNamespace(channel=Channel.email, external_id="a@b.test", verified_at=None),
+            SimpleNamespace(channel=Channel.telegram, external_id="100200300", verified_at=None),
+            SimpleNamespace(channel=Channel.web, external_id="session-only", verified_at=None),
+        ]
+    )
+
+    assert [c.href for c in contacts] == [
+        "mailto:a@b.test",
+        # Resolves only where her own Telegram client knows the person; where it
+        # does not, this reads as the id it always was.
+        "tg://user?id=100200300",
+        None,
+    ]
+
+
+async def test_the_list_says_how_to_reach_the_client(
+    db: AsyncSession, client: Client, session_type_id: int
+) -> None:
+    """§12.2: the list is where she decides what to open, so a row she cannot
+    answer from should say so there rather than one click later. Both identities
+    appear when both exist, Telegram first, because §13.3 tries Telegram first.
+    """
+    from app.channels.web.admin import _summaries
+
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    db.add(
+        Identity(
+            practice_id=practice.id,
+            client_id=client.id,
+            channel=Channel.email,
+            external_id="anna@example.test",
+            verified_at=None,
+        )
+    )
+    booking_request = BookingRequest(
+        practice_id=practice.id,
+        client_id=client.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        status=RequestStatus.pending,
+        source_channel=Channel.web,
+    )
+    db.add(booking_request)
+    await db.flush()
+
+    rows = await _summaries(db, [booking_request])
+
+    assert [c.label for c in rows[0]["contact"]] == [
+        # The `client` fixture is Telegram-identified; the address above is not
+        # verified, and §13.3 would deliver nothing to it.
+        "telegram: 100200300",
+        "email: anna@example.test (unverified)",
+    ]
+
+
+async def test_a_client_with_nothing_left_to_reach_them_by_shows_nothing(
+    db: AsyncSession, session_type_id: int
+) -> None:
+    """An erased client keeps their bookings and loses every identity (§16), so
+    the join has a row and no channel on it. That must read as "no contact",
+    not as a missing key or a crash."""
+    from app.channels.web.admin import _summaries
+
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    erased = Client(practice_id=practice.id, language="ru")
+    db.add(erased)
+    await db.flush()
+    booking_request = BookingRequest(
+        practice_id=practice.id,
+        client_id=erased.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        status=RequestStatus.pending,
+        source_channel=Channel.web,
+    )
+    db.add(booking_request)
+    await db.flush()
+
+    rows = await _summaries(db, [booking_request])
+
+    assert rows[0]["contact"] == ()
+    assert rows[0]["name"] == ""
+
+
+# --- Offering only what §7.1 allows (§12.2, §13.2) --------------------------
+
+
+def _action_form(html: str, uuid: object, action: str) -> str:
+    """The one form on the request page that posts `action`."""
+    marker = f'action="/admin/requests/{uuid}/{action}"'
+    assert marker in html, f"no {action} form on the page"
+    return html.split(marker, 1)[1].split("</form>", 1)[0]
+
+
+def test_the_page_knows_about_every_admin_transition_the_core_has() -> None:
+    """A transition added to §7.1 that this page has never heard of is a control
+    it can only render as always-available, which is the fault being fixed."""
+    from app.channels.web.admin import UNAVAILABLE_BECAUSE
+    from app.core.services import booking
+
+    in_the_table = {
+        event
+        for events in booking.ALLOWED.values()
+        for event in events
+        if event.startswith("admin_")
+    }
+    assert in_the_table == set(UNAVAILABLE_BECAUSE)
+
+
+def test_each_status_offers_what_7_1_allows_and_greys_the_rest() -> None:
+    """§7.1's table, spelled out per status, so a change to either side has to
+    be made deliberately rather than discovered by a therapist."""
+    from app.channels.web.admin import UNAVAILABLE_BECAUSE
+    from app.core.services import booking
+
+    expected = {
+        RequestStatus.pending: {"admin_approve", "admin_propose", "admin_reject"},
+        # A client who counters with a time has said what suits them, so
+        # agreeing is an approval -- but nothing here is confirmed yet, and
+        # cancel is for a confirmed session. This is the reported case.
+        RequestStatus.negotiating: {"admin_approve", "admin_propose", "admin_reject"},
+        RequestStatus.confirmed: {"admin_cancel"},
+        RequestStatus.rejected: set(),
+        RequestStatus.expired: set(),
+        RequestStatus.cancelled: set(),
+        RequestStatus.completed: set(),
+    }
+
+    for status, offered in expected.items():
+        greyed = {e for e in UNAVAILABLE_BECAUSE if e not in booking.ALLOWED[status]}
+        assert set(UNAVAILABLE_BECAUSE) - greyed == offered, status
+
+
+async def test_cancel_on_a_negotiation_is_greyed_with_its_reason(
+    web: TestClient, scratch: dict[str, object], committed: AsyncSession
+) -> None:
+    """The reported fault. Pressing Cancel on a `negotiating` request could only
+    ever end in `InvalidTransition`, and the page said "refused" -- which
+    explains nothing to somebody who has just been told that the obvious way to
+    call a session off does not work."""
+    _sign_in(web)
+    await committed.execute(
+        update(BookingRequest)
+        .where(BookingRequest.id == scratch["request_id"])
+        .values(status=RequestStatus.negotiating)
+    )
+    await committed.commit()
+
+    page = web.get(f"/admin/requests/{scratch['request_uuid']}")
+    assert page.status_code == 200
+
+    cancel = _action_form(page.text, scratch["request_uuid"], "cancel")
+    assert "Only a confirmed session can be cancelled" in cancel
+    assert "<button" not in cancel, "a greyed action must not still be pressable"
+
+    # Reject is the verb that fits a request which was never confirmed, and §7.1
+    # allows it from here -- so it keeps its button.
+    reject = _action_form(page.text, scratch["request_uuid"], "reject")
+    assert "<button" in reject
+    assert "Only a request that is still open can be rejected" not in reject
+
+    await committed.rollback()
+    await committed.execute(delete(AdminSession))
+    await committed.commit()

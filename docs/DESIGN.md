@@ -502,34 +502,41 @@ Found in use, August 2026. Ordered by the size of the change rather than by
 importance, so the small ones can be cleared without waiting on the two that
 need design first. Each entry says what is actually wrong, what closing it
 takes, and whether IMPLEMENTATION.md has to move — where it does, the normative
-wording is written there as the work is done, not in advance.
+wording is written there as the work is done, not in advance. An entry leaves
+this list when it is fixed: the reasoning goes to §12.2 or wherever the rule now
+lives, so what is left here is what is left to do.
 
-**A cancel button on a request that cannot be cancelled.** The request page
-renders all four action forms — approve, propose, reject, cancel — whatever the
-request's status. §7.1 allows `admin_cancel` only from `confirmed`, so pressing
-Cancel on a `negotiating` request raises `InvalidTransition` and the page comes
-back with a flash saying the action was refused. Telegram never had this
-problem: §13.2 requires the panel's buttons to be derived from the transition
-table, so it cannot offer what the core would refuse. Either the web page does
-the same, or the button is greyed out in place — which keeps the page's shape
-constant across statuses and says the control exists but is not for this
-request. Reject is the verb that fits a request that was never confirmed; the
-two are not interchangeable, they write different columns and send the client
-different messages, so cancel must not quietly become reject. §12.2 gains the
-sentence §13.2 already carries.
+Two are already gone. The request page offered all four actions whatever the
+status, so Cancel on a negotiation could only end in a refusal; §7.1 now decides
+what that page renders, as §13.2 has always required of the Telegram panel. And
+the requests list could not say how to reach anybody, which §12.2 had already
+argued for one level down on the request page.
 
-**The requests list cannot say how to reach anybody.** Its columns are UUID,
-status, type, modality, name, requested and scheduled, and the name is empty for
-most web requests. §12.2 puts the client's identities on the request *page* and
-gives the reason: an unverified address receives nothing, and a request with no
-name and no contact note is otherwise unanswerable. That reasoning applies one
-level up, because the list is where the therapist decides what to open. It
-should carry a contact column — the Telegram identity, the email identity, or
-both where both exist. The constraint is query count: the list was brought down
-to two queries deliberately, so identities are fetched for the whole page at
-once, the way client names already are. Contact identities are not
-`problem_text` and hard rule 8 does not reach them, which §12.2 settles; the
-sentence scoping identities to the detail page widens to include the list.
+**What the contact column shows, and what it could show.** It shows identities
+— where a message would actually land, and for an address whether §13.3 would
+send to it at all. It does not show `contact_note`, which is the client's own
+sentence about how they would like to be reached: "телеграм @ab, после шести".
+Those are different facts and the second is often the more useful one. Two ways
+to add it, neither urgent:
+
+1. **Both**, the note above and the identities below. The most informative and
+   the widest column.
+2. **The note when there is one, identities otherwise.** The narrowest, but it
+   hides the verified marker in exactly the case where she is most likely to try
+   to reach somebody — which is the whole reason §12.2 argued for identities.
+
+Identities alone were chosen for now because they are always there and always
+true. Revisit when the column has been lived with, and prefer 1 if the answer is
+not obvious: the verified marker is a fact, and trading a fact for column width
+is the wrong way round.
+
+Each identity is also a link — `mailto:` for an address, `tg://user?id=` for a
+Telegram id — so answering somebody does not begin with selecting text and
+copying it. The Telegram half is best-effort: it resolves only where the
+therapist's own client already knows that person, and the *bot* is what has
+spoken to them. **This is interim.** Replying to a client belongs somewhere of
+its own rather than in a table cell, and that is a question for the UI pass, not
+for a column.
 
 **A note reaches the therapist as an announcement rather than as the note.**
 When a client adds information, `request.note.admin` says "… added information

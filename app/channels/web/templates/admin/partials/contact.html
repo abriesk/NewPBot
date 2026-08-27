@@ -1,0 +1,16 @@
+{# One way of reaching a client, rendered the same on the list and on the
+   request page (§12.2).
+
+   A link so that answering somebody does not begin with selecting an address
+   and copying it: `mailto:` for email, `tg://user?id=` for Telegram. The
+   Telegram one resolves only where her own client already knows that person --
+   the bot has spoken to them, her account may not have -- so it degrades to
+   text that looks exactly like the id it always was. Interim, until the UI pass
+   gives replying a place of its own (DESIGN.md §20.2). #}
+{% macro contact_link(c) -%}
+  {%- if c.href -%}
+    <a href="{{ c.href }}"><code>{{ c.label }}</code></a>
+  {%- else -%}
+    <code>{{ c.label }}</code>
+  {%- endif -%}
+{%- endmacro %}
