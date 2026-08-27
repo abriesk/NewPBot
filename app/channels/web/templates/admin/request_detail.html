@@ -11,6 +11,14 @@
   {% if summary.desired %}<p>Asked for: {{ summary.desired }}</p>{% endif %}
   {% if req.client_timezone %}<p class="muted">Client timezone: {{ req.client_timezone }}</p>{% endif %}
   {% if req.contact_note %}<p>Contact: {{ req.contact_note }}</p>{% endif %}
+  {# §12.2: often the only thing identifying a web request. An unverified
+     address receives nothing (§13.3), which is worth saying here rather than
+     leaving to be discovered in the delivery log. #}
+  {% if identities %}
+    <p>Reachable at:<br>
+      {% for label in identities %}<code>{{ label }}</code><br>{% endfor %}
+    </p>
+  {% endif %}
 </div>
 
 {% if req.problem_text %}

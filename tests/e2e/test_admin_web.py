@@ -1271,3 +1271,68 @@ async def test_the_requests_list_does_not_query_per_row(
 
     assert six == one, f"{six} queries for six rows against {one} for one"
     assert one <= 3, f"{one} queries to render a single row"
+
+
+# --- Naming and reaching the person behind a request (§12.2) ----------------
+
+
+async def test_a_request_with_no_name_of_its_own_shows_the_client_s(
+    db: AsyncSession, client: Client, session_type_id: int
+) -> None:
+    """A web booking carries a name only if the client typed one that time. The
+    client behind it may still have one, and a row the therapist cannot
+    attribute to anybody is not much of a row."""
+    from app.channels.web.admin import _summaries
+
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    client.display_name = "Anna"
+    anonymous = BookingRequest(
+        practice_id=practice.id,
+        client_id=client.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        status=RequestStatus.pending,
+        source_channel=Channel.web,
+    )
+    named = BookingRequest(
+        practice_id=practice.id,
+        client_id=client.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        status=RequestStatus.pending,
+        source_channel=Channel.web,
+        display_name="Anna B",
+    )
+    db.add_all([anonymous, named])
+    await db.flush()
+
+    rows = await _summaries(db, [anonymous, named])
+
+    assert rows[0]["name"] == "Anna", "falls back to the client"
+    assert rows[1]["name"] == "Anna B", "the request's own name still wins"
+
+
+async def test_identities_say_whether_an_address_is_verified() -> None:
+    """§13.3 delivers nothing to an unverified address, so a therapist waiting
+    on a reply needs to see that here rather than deduce it from the delivery
+    log."""
+    from types import SimpleNamespace
+
+    from app.channels.web.admin import _identity_labels
+
+    labels = _identity_labels(
+        [
+            SimpleNamespace(channel=Channel.email, external_id="a@b.test", verified_at=None),
+            SimpleNamespace(
+                channel=Channel.email, external_id="c@d.test", verified_at=datetime.now(UTC)
+            ),
+            SimpleNamespace(channel=Channel.telegram, external_id="100200300", verified_at=None),
+        ]
+    )
+
+    assert labels == [
+        "email: a@b.test (unverified)",
+        "email: c@d.test (verified)",
+        # Telegram vouches for the id, so verified state is not a question there.
+        "telegram: 100200300",
+    ]

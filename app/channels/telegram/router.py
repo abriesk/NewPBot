@@ -29,6 +29,7 @@ from app.core.policies import BookingPath, now_utc, resolve_booking_mode
 from app.core.services import booking, content, flow, notifications, waitlist
 from app.core.services.clients import (
     consume_token,
+    identities_for,
     issue_token,
     link_identity,
     looks_like_email,
@@ -130,6 +131,31 @@ async def handle(session: AsyncSession, update: Update) -> Reply | None:
         return Reply(await get_text(session, client.language, "common.error.generic"))
 
     return None
+
+
+def _client_name(client: Client | None) -> str | None:
+    return (client.display_name or None) if client else None
+
+
+async def _client_display_name(session: AsyncSession, client_id: UUID) -> str | None:
+    return (
+        await session.execute(select(Client.display_name).where(Client.id == client_id))
+    ).scalar_one_or_none()
+
+
+def _identity_labels(identities: list[Any]) -> list[str]:
+    """How to reach a client, one line per channel (§13.2).
+
+    The email carries whether it is verified, because §13.3 delivers nothing to
+    an unverified address -- worth knowing before waiting for a reply to it.
+    """
+    labels = []
+    for identity in identities:
+        line = f"{identity.channel.value}: {identity.external_id}"
+        if identity.channel is Channel.email:
+            line += " (verified)" if identity.verified_at else " (unverified)"
+        labels.append(line)
+    return labels
 
 
 async def _known_client(session: AsyncSession, chat_id: int) -> Client | None:
@@ -1249,7 +1275,8 @@ async def _admin_line(
         if when
         else (request.desired_time_text or "no time yet")
     )
-    return f"{stamp} · {escape_telegram(request.display_name or 'no name')}"
+    name = request.display_name or await _client_display_name(session, request.client_id)
+    return f"{stamp} · {escape_telegram(name or 'no name')}"
 
 
 async def _admin_requests(
@@ -1318,8 +1345,15 @@ async def _admin_request(
     lines = [
         f"{ADMIN_GLYPHS.get(request.status, '·')} {request.status.value}",
         str(request.uuid),
-        f"Client: {escape_telegram(request.display_name or 'no name')}",
+        # §12.2: the request carries whatever name it was submitted under, which
+        # for a web booking is usually nothing. The client may still have one.
+        f"Client: {escape_telegram(request.display_name or _client_name(client) or 'no name')}",
     ]
+    # §13.2: how to answer somebody who left no name and no contact note. This
+    # is the surface for triaging away from a desk, and a request nobody can be
+    # reached about is not triageable.
+    for label in _identity_labels(await identities_for(session, request.client_id)):
+        lines.append(escape_telegram(label))
     if when is not None:
         lines.append(f"When: {when.astimezone(zone).strftime('%a %d %b %H:%M')} ({zone.key})")
         client_zone = request.client_timezone or (client.timezone if client else None)

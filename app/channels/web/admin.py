@@ -43,7 +43,14 @@ from app.channels.web.security import (
 )
 from app.channels.web.status import read_status
 from app.channels.web.translation_groups import Entry, arrange
-from app.core.enums import ActorType, BookingMode, Modality, OutboxStatus, RequestStatus
+from app.core.enums import (
+    ActorType,
+    BookingMode,
+    Channel,
+    Modality,
+    OutboxStatus,
+    RequestStatus,
+)
 from app.core.errors import DomainError, NotFound
 from app.core.models import (
     AdminUser,
@@ -309,6 +316,10 @@ def build_router() -> APIRouter:
                     req=booking_request,
                     summary=await _summary(session, booking_request),
                     client=client,
+                    # §12.2: how to reach this person. Often the only thing
+                    # identifying a web request, which carries no name unless
+                    # the client typed one.
+                    identities=_identity_labels(await identities_for(session, client.id)),
                     thread=thread,
                     turn=await booking.whose_turn(session, booking_request.id),
                 ),
@@ -1353,6 +1364,43 @@ async def _session_type_codes(session: AsyncSession) -> dict[int, str]:
     return {int(row[0]): str(row[1]) for row in rows}
 
 
+def _identity_labels(identities: Sequence[Any]) -> list[str]:
+    """How to reach a client, one line per channel (§12.2).
+
+    The email says whether it is verified, because §13.3 delivers nothing to an
+    unverified address -- a therapist waiting on a reply that was never sent
+    should not have to work that out from the delivery log.
+    """
+    labels = []
+    for identity in identities:
+        line = f"{identity.channel.value}: {identity.external_id}"
+        if identity.channel is Channel.email:
+            line += " (verified)" if identity.verified_at else " (unverified)"
+        labels.append(line)
+    return labels
+
+
+async def _client_names(
+    session: AsyncSession, requests: Sequence[BookingRequest]
+) -> dict[Any, str]:
+    """The display name of every client behind these requests, by client id.
+
+    §12.2: a request carries the name it was submitted under, which is often
+    nothing. The client behind it may still have one.
+    """
+    ids = {request.client_id for request in requests}
+    if not ids:
+        return {}
+    rows = (
+        await session.execute(
+            select(Client.id, Client.display_name).where(
+                Client.id.in_(ids), Client.display_name.isnot(None)
+            )
+        )
+    ).all()
+    return {row[0]: str(row[1]) for row in rows if row[1]}
+
+
 async def _summaries(
     session: AsyncSession, requests: Sequence[BookingRequest]
 ) -> list[dict[str, Any]]:
@@ -1365,22 +1413,35 @@ async def _summaries(
     practice = await get_practice(session)
     zone = ZoneInfo(practice.timezone)
     codes = await _session_type_codes(session)
-    return [_summary_row(request, zone, codes) for request in requests]
+    names = await _client_names(session, requests)
+    return [_summary_row(request, zone, codes, names) for request in requests]
 
 
 async def _summary(session: AsyncSession, request: BookingRequest) -> dict[str, Any]:
     """One row, fetching what it needs. For the pages that render exactly one."""
     practice = await get_practice(session)
-    return _summary_row(request, ZoneInfo(practice.timezone), await _session_type_codes(session))
+    return _summary_row(
+        request,
+        ZoneInfo(practice.timezone),
+        await _session_type_codes(session),
+        await _client_names(session, [request]),
+    )
 
 
 def _summary_row(
-    request: BookingRequest, zone: ZoneInfo, session_type_codes: dict[int, str]
+    request: BookingRequest,
+    zone: ZoneInfo,
+    session_type_codes: dict[int, str],
+    client_names: dict[Any, str],
 ) -> dict[str, Any]:
     """One row of the requests list.
 
     `uuid` MUST appear (§6.5). `problem_text` is included on the *detail* page
     only, never in a list, a log, or an email (hard rule 8).
+
+    The name falls back to the client's (§12.2): a request carries whatever it
+    was submitted under, which for the web is usually nothing at all, and a row
+    the therapist cannot attribute to anybody is not much of a row.
     """
     session_type = session_type_codes[request.session_type_id]
 
@@ -1389,7 +1450,7 @@ def _summary_row(
         "status": request.status.value,
         "session_type": session_type,
         "modality": request.modality.value,
-        "name": request.display_name or "",
+        "name": request.display_name or client_names.get(request.client_id, ""),
         "created": request.created_at.astimezone(zone).strftime("%Y-%m-%d %H:%M"),
         "scheduled": request.scheduled_start.astimezone(zone).strftime("%Y-%m-%d %H:%M")
         if request.scheduled_start
