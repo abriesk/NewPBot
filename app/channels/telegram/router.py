@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -57,6 +57,10 @@ logger = logging.getLogger(__name__)
 
 #: How far ahead the slot picker looks.
 SLOT_WINDOW = timedelta(days=30)
+
+#: DESIGN.md §11: the admin surface is English, so §13.2 writes its day headings
+#: in it whatever language the therapist's own client record says.
+LOCALE = "en"
 
 #: §13.1: the deep-link payload that merges an email-first client with Telegram.
 LINK_PREFIX = "link_"
@@ -967,8 +971,9 @@ async def _counter_options(
 
     The same question the web asks and the same gate on it, because a client
     answering a proposal on a phone and one answering it in a browser are being
-    asked the same thing. There is no date picker in a chat, so where the web
-    shows one this keeps the typed format and says what it looks like.
+    asked the same thing -- and where the web shows a `datetime-local`, this
+    offers the picker §13.2 gives the therapist. Typing survives beneath both,
+    for `18:30` and for the words §9 keeps either way.
     """
     practice = await get_practice(session)
     tz = request.client_timezone or client.timezone or practice.timezone
@@ -1006,6 +1011,14 @@ async def _counter_options(
         )
         lines.append(await get_text(session, client.language, "intent.request.counter.client.ask"))
         lines.append(await get_text(session, client.language, "request.counter.time_hint"))
+        extra.append(
+            [
+                (
+                    await get_text(session, client.language, "request.counter.other_time"),
+                    f"{kb.COUNTER_MONTHS}:{request.id}",
+                )
+            ]
+        )
     else:
         await flow.clear(session, client.id, Channel.telegram)
         extra.append(
@@ -1028,6 +1041,94 @@ async def _counter_options(
             extra=extra,
         ),
     )
+
+
+#: §12.1's picker screens, reached the same way as §13.2's and drawn by the same
+#: builders.
+_COUNTER_PICKER_SCREENS = frozenset(
+    {kb.COUNTER_MONTHS, kb.COUNTER_DAYS, kb.COUNTER_HOURS, kb.COUNTER_AT}
+)
+
+
+async def _client_picker(session: AsyncSession, client: Client) -> kb.Picker:
+    """§12.1's picker, written in the client's own language.
+
+    Two months rather than the therapist's three: a time four months out is not
+    a suggestion she can act on. `taken` is never passed to it -- marking her
+    filled hours here would tell a client when other people have sessions, and
+    omitting them would say the same thing by the gap.
+    """
+    lang = client.language
+    return kb.Picker(
+        days=kb.COUNTER_DAYS,
+        hours=kb.COUNTER_HOURS,
+        at=kb.COUNTER_AT,
+        months=kb.COUNTER_MONTHS,
+        cancel=kb.COUNTER,
+        months_ahead=2,
+        month_names={
+            number: await get_text(session, lang, f"date.month.{number}")
+            for number in range(1, 13)
+        },
+        weekdays=[
+            await get_text(session, lang, f"date.weekday.{number}") for number in range(7)
+        ],
+        back_to_months=await get_text(session, lang, "request.counter.back_months"),
+        back_to_days=await get_text(session, lang, "request.counter.back_days"),
+        cancel_label=await get_text(session, lang, "common.cancel"),
+    )
+
+
+async def _counter_picker(
+    session: AsyncSession, client: Client, request: BookingRequest, action: str, rest: str
+) -> Reply:
+    """§12.1's month -> day -> hour, in the client's own timezone."""
+    practice = await get_practice(session)
+    tz = request.client_timezone or client.timezone or practice.timezone
+    today = now_utc().astimezone(ZoneInfo(tz)).date()
+    picker = await _client_picker(session, client)
+
+    if action == kb.COUNTER_MONTHS:
+        return Reply(
+            await get_text(session, client.language, "request.counter.pick_month"),
+            keyboard=kb.months_keyboard(picker, request.id, today),
+        )
+
+    if action == kb.COUNTER_DAYS:
+        try:
+            year, month = (int(part) for part in rest.split("-", 1))
+            date(year, month, 1)
+        except ValueError:
+            return Reply(await get_text(session, client.language, "common.error.generic"))
+        return Reply(
+            await get_text(session, client.language, "request.counter.pick_day"),
+            keyboard=kb.days_keyboard(picker, request.id, year, month, today=today),
+        )
+
+    if action == kb.COUNTER_HOURS:
+        try:
+            day = date.fromisoformat(rest)
+        except ValueError:
+            return Reply(await get_text(session, client.language, "common.error.generic"))
+        # No `taken`: see `_client_picker`.
+        return Reply(
+            await get_text(session, client.language, "request.counter.pick_hour"),
+            keyboard=kb.hours_keyboard(picker, request.id, day),
+        )
+
+    # kb.COUNTER_AT
+    when = _local_hour(rest, tz)
+    if when is None:
+        return Reply(await get_text(session, client.language, "common.error.generic"))
+
+    await flow.clear(session, client.id, Channel.telegram)
+    try:
+        await booking.client_counter(session, request.id, proposed_start=when)
+    except DomainError:
+        return Reply(await get_text(session, client.language, "common.error.generic"))
+
+    await notifications.publish(session)
+    return Reply(await get_text(session, client.language, "intent.request.counter.client.sent"))
 
 
 async def _counter_with_slot(
@@ -1068,19 +1169,19 @@ async def _negotiation_action(
     A refusal is answered with an explanation rather than silence -- the client
     pressed a button and deserves to know it did nothing.
     """
-    # §13.1: a slot tapped in answer to a proposal carries both ids, so the
-    # button still works when the parked flow has since been cleared.
+    # §13.1: a slot tapped in answer to a proposal carries both ids, and §12.1's
+    # picker carries its answer so far, so the button still works when the
+    # parked flow has since been cleared.
+    head, _, rest = argument.partition(":")
     slot_id: int | None = None
     if action == kb.COUNTER_SLOT:
-        head, _, tail = argument.partition(":")
-        argument = head
         try:
-            slot_id = int(tail)
+            slot_id = int(rest)
         except ValueError:
             return None
 
     try:
-        request_id = int(argument)
+        request_id = int(head)
     except ValueError:
         return None
 
@@ -1093,6 +1194,9 @@ async def _negotiation_action(
 
     if action == kb.COUNTER_SLOT and slot_id is not None:
         return await _counter_with_slot(session, client, request, slot_id)
+
+    if action in _COUNTER_PICKER_SCREENS:
+        return await _counter_picker(session, client, request, action, rest)
 
     if action == kb.COUNTER_WAITLIST:
         # §12.1: the way out where a counter may not be words.
@@ -1161,6 +1265,198 @@ def _local(value: datetime | None, client: Client, practice: Practice) -> str:
 # --- Negotiation, admin side (§13.2) ----------------------------------------
 
 
+#: §13.2's propose screens, all reached the same way and all carrying the answer
+#: so far in their callback.
+_PROPOSE_SCREENS = frozenset(
+    {
+        kb.PROPOSE,
+        kb.PROPOSE_SLOT,
+        kb.PROPOSE_MONTHS,
+        kb.PROPOSE_DAYS,
+        kb.PROPOSE_HOURS,
+        kb.PROPOSE_AT,
+        kb.PROPOSE_TYPE,
+    }
+)
+
+
+async def _propose_screen(
+    session: AsyncSession,
+    chat_id: int,
+    request: BookingRequest,
+    action: str,
+    rest: str,
+) -> Reply:
+    """§13.2: propose a time without typing an ISO timestamp.
+
+    The slots she has already published first, then month -> day -> hour for a
+    time she has not, and typing kept for `18:30` and for the proposal of words
+    §7.1 still allows. Nothing is parked until she asks to type: every screen
+    carries its own answer, so there is no half-finished picker to abandon.
+    """
+    practice = await get_practice(session)
+    zone = ZoneInfo(practice.timezone)
+    today = now_utc().astimezone(zone).date()
+
+    if action == kb.PROPOSE:
+        await _clear_admin_input(session, chat_id)
+        return await _propose_slots(session, request, practice)
+
+    if action == kb.PROPOSE_SLOT:
+        # Re-read: the panel may have been sitting in her chat for an hour, and
+        # a slot taken since is not hers to offer.
+        starts_at = (
+            await session.execute(
+                select(Slot.starts_at).where(
+                    Slot.id == _int_or_none(rest), Slot.status == SlotStatus.available
+                )
+            )
+        ).scalar_one_or_none()
+        if starts_at is None:
+            return await _admin_request(session, request, toast="That time has gone.")
+        return await _propose_at(session, chat_id, request, starts_at, practice)
+
+    if action == kb.PROPOSE_TYPE:
+        await _park_admin_input(session, chat_id, Step.admin_entering_proposal, request.id)
+        return Reply(
+            f"Propose a time for {request.uuid}.\n\n"
+            f"Send it as YYYY-MM-DD HH:MM in {practice.timezone}, or send words.",
+            keyboard=kb.panel_keyboard([[("✕ Cancel", f"{kb.PANEL_OPEN}:{request.id}")]]),
+            edit=True,
+        )
+
+    if action == kb.PROPOSE_MONTHS:
+        return Reply(
+            f"Which month? Times are in {practice.timezone}.",
+            keyboard=kb.months_keyboard(kb.ADMIN_PICKER, request.id, today),
+            edit=True,
+        )
+
+    if action == kb.PROPOSE_DAYS:
+        try:
+            year, month = (int(part) for part in rest.split("-", 1))
+            date(year, month, 1)
+        except ValueError:
+            return await _admin_request(session, request, toast="That month is not a month.")
+        return Reply(
+            f"{date(year, month, 1):%B %Y}. Which day?",
+            keyboard=kb.days_keyboard(kb.ADMIN_PICKER, request.id, year, month, today=today),
+            edit=True,
+        )
+
+    if action == kb.PROPOSE_HOURS:
+        try:
+            day = date.fromisoformat(rest)
+        except ValueError:
+            return await _admin_request(session, request, toast="That day is not a day.")
+        taken = await booking.taken_hours_on(session, day=day, tz=practice.timezone)
+        return Reply(
+            f"{day:%A %d %B}. Which hour? Marked ones already have something in them.",
+            keyboard=kb.hours_keyboard(kb.ADMIN_PICKER, request.id, day, taken),
+            edit=True,
+        )
+
+    # kb.PROPOSE_AT: she has picked an hour.
+    when = _local_hour(rest, practice.timezone)
+    if when is None:
+        return await _admin_request(session, request, toast="That is not a time.")
+    return await _propose_at(session, chat_id, request, when, practice)
+
+
+async def _propose_at(
+    session: AsyncSession,
+    chat_id: int,
+    request: BookingRequest,
+    when: datetime,
+    practice: Practice,
+) -> Reply:
+    """Send the proposal and answer with the request screen (§13.2).
+
+    The toast names the time in her own clock, so a mis-tap is visible at once
+    rather than after the client replies to something she did not mean.
+    """
+    await _clear_admin_input(session, chat_id)
+    try:
+        await booking.admin_propose(session, request.id, proposed_start=when)
+    except DomainError as exc:
+        return await _admin_request(session, request, toast=f"Not possible: {type(exc).__name__}.")
+
+    await notifications.publish(session)
+    await session.refresh(request)
+    local = when.astimezone(ZoneInfo(practice.timezone))
+    return await _admin_request(session, request, toast=f"Proposed {local:%a %d %b, %H:%M}.")
+
+
+def _int_or_none(value: str) -> int | None:
+    try:
+        return int(value)
+    except ValueError:
+        return None
+
+
+async def _propose_slots(
+    session: AsyncSession, request: BookingRequest, practice: Practice
+) -> Reply:
+    """Screen one: the openings she has already published for this request.
+
+    One tap, and if the client accepts it, §7.1's `_matching_slot` books that
+    very slot -- so an offer she has already made stays an offer she has made.
+    """
+    slots = await list_available_slots(
+        session,
+        window_from=now_utc(),
+        window_to=now_utc() + SLOT_WINDOW,
+        session_type_id=request.session_type_id,
+        modality=request.modality,
+        tz=practice.timezone,
+    )
+
+    zone = ZoneInfo(practice.timezone)
+    labels: dict[str, str] = {}
+    for slot in slots:
+        day = slot.starts_at_utc.astimezone(zone).strftime("%Y-%m-%d")
+        if day not in labels:
+            labels[day] = await day_label(session, LOCALE, slot.starts_at_utc, practice.timezone)
+
+    lines = [f"Propose a time for {request.uuid}.", f"Times are in {practice.timezone}."]
+    if slots:
+        lines.insert(1, "Tap one of your free times, or pick another.")
+    else:
+        lines.insert(1, "You have no free times published. Pick one below.")
+
+    return Reply(
+        "\n\n".join(lines),
+        keyboard=kb.slot_keyboard(
+            slots,
+            practice.timezone,
+            labels,
+            action=kb.PROPOSE_SLOT,
+            prefix=f"{request.id}:",
+            extra=[
+                [
+                    ("Another time", f"{kb.PROPOSE_MONTHS}:{request.id}"),
+                    ("Type it", f"{kb.PROPOSE_TYPE}:{request.id}"),
+                ],
+                [("✕ Cancel", f"{kb.PANEL_OPEN}:{request.id}")],
+            ],
+        ),
+        edit=True,
+    )
+
+
+def _local_hour(value: str, tz: str) -> datetime | None:
+    """`YYYY-MM-DDTHH` in the practice's clock -> an aware UTC instant.
+
+    Her own clock, never the client's: §13.2 is her surface, and DESIGN.md §8
+    converts only at the edges.
+    """
+    try:
+        naive = datetime.strptime(value, "%Y-%m-%dT%H")  # noqa: DTZ007 - zone applied next
+    except ValueError:
+        return None
+    return naive.replace(tzinfo=ZoneInfo(tz)).astimezone(UTC)
+
+
 async def _admin_action(
     session: AsyncSession, chat_id: int, action: str, argument: str
 ) -> Reply | None:
@@ -1192,8 +1488,11 @@ async def _admin_action(
     if action == kb.PANEL_SESSIONS:
         return await _admin_sessions(session, 7 if argument == "7" else 2)
 
+    # §13.2's picker holds no state, so its screens carry the answer so far
+    # after the request id. Everything else has a bare id.
+    head, _, rest = argument.partition(":")
     try:
-        request_id = int(argument)
+        request_id = int(head)
     except ValueError:
         return None
 
@@ -1208,14 +1507,8 @@ async def _admin_action(
         await _clear_admin_input(session, chat_id)
         return await _admin_request(session, request)
 
-    if action == kb.PROPOSE:
-        await _park_admin_input(session, chat_id, Step.admin_entering_proposal, request.id)
-        return Reply(
-            f"Propose a time for {request.uuid}.\n\n"
-            "Send it as YYYY-MM-DD HH:MM in the practice timezone, or send words.",
-            keyboard=kb.panel_keyboard([[("✕ Cancel", f"{kb.PANEL_OPEN}:{request.id}")]]),
-            edit=True,
-        )
+    if action in _PROPOSE_SCREENS:
+        return await _propose_screen(session, chat_id, request, action, rest)
 
     if action == kb.CANCEL_REQUEST:
         await _park_admin_input(session, chat_id, Step.admin_entering_cancel_reason, request.id)

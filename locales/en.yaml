@@ -143,6 +143,11 @@ request:
   counter.note_label: "Anything you would like to add?"
   counter.join_waitlist: "Tell me when something opens up"
   counter.time_hint: "A time written as 2026-09-02 18:00 is the easiest to act on."
+  counter.pick_month: "Which month?"
+  counter.pick_day: "Which day?"
+  counter.pick_hour: "What time suits you?"
+  counter.back_months: "« Months"
+  counter.back_days: "« Days"
   when: "When"
 
 intent:

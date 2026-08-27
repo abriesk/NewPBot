@@ -506,7 +506,8 @@ wording is written there as the work is done, not in advance. An entry leaves
 this list when it is fixed: the reasoning goes to §12.2 or wherever the rule now
 lives, so what is left here is what is left to do.
 
-Five are already gone. The request page offered all four actions whatever the
+All six are gone; what is left below is what they turned up on the way. The
+request page offered all four actions whatever the
 status, so Cancel on a negotiation could only end in a refusal; §7.1 now decides
 what that page renders, as §13.2 has always required of the Telegram panel. The
 requests list could not say how to reach anybody, which §12.2 had already argued
@@ -550,6 +551,25 @@ negotiation the client walked away from was something she would have found out
 by noticing the request had stopped moving. The event now says which side closed
 it, which is the only thing that could distinguish news from her own action read
 back to her.
+
+The sixth was the propose prompt asking for `YYYY-MM-DD HH:MM` on the surface
+that exists for answering from a phone. It now opens on her own free slots, with
+a month → day → hour picker behind them and typing kept for `18:30` and for the
+proposal of words §7.1 allows.
+
+Two things settled it, and both came from the therapists rather than from
+reasoning. **Working hours were the wrong model**: on-site practices keep them
+loosely and month to month, and an online one can work different hours week to
+week — so a stored set would have been wrong more often than right, and wrong
+here means hiding an hour she can actually work. And the objection that killed
+the calendar for me — that the time row had no honest source — turned out not to
+need one. There are twenty-four hours and thirty-one days; if a day grid fits on
+a phone, an hour grid fits more easily. She knows what she works.
+
+An existing library was looked at and not taken. It stops at dates, which is the
+half that was never the problem, and it would have added a five-year-dormant
+dependency to a stack §2 keeps deliberately short. The three screens are stdlib
+`calendar` and a hundred lines of pure keyboard building.
 
 **What the contact column shows, and what it could show.** It shows identities
 — where a message would actually land, and for an address whether §13.3 would
@@ -597,36 +617,6 @@ between people is not a recoverable mistake, and an admin merge is that mistake
 with a button. It wants an audit entry, a confirmation that names both people,
 and a decision about what happens to the losing row — none of which is worth
 designing before the duplicate case has actually been hit. Revisit when it has.
-
-**The therapist has to type an ISO timestamp to propose a time.** The panel's
-propose prompt asks for `YYYY-MM-DD HH:MM`, and the parser accepts three
-formats, every one of which needs a full date. This is the surface that exists
-for answering away from a desk, and typing a full timestamp on a phone is the
-least usable thing in it. What is wanted is a pick: the practice's own free
-slots first, and a date-and-time picker when the answer is not one of them, with
-typing kept as the escape hatch.
-
-Two reasons it is last. §13.2 states that propose and cancel need typing, so the
-panel's table changes and the section is rewritten rather than extended. And the
-Bot API has no date picker, so the shape has to be chosen by trying it:
-
-1. An inline-keyboard calendar — a month of day buttons, then a row of times. A
-   well-worn Telegram pattern, entirely within the existing panel keyboard, at
-   the cost of two or three taps and a keyboard that is large on a small screen.
-2. A list of the next open slots as buttons. One tap, covers the common case,
-   and says nothing about a time the practice has not published.
-3. A Mini App: a `web_app` button opening a real date-time control served from
-   the admin ingress already running under TLS. The best control, and a whole
-   new surface to authenticate and maintain.
-
-Settle it with the therapist on her own phone before any of it is written, the
-way §20's item 6 says to settle the Telegram schedule.
-
-A widened parser helps whichever shape wins and is independently small, but it
-does not belong in the parser clients' answers go through. That one is shared,
-and clients write in Russian and Armenian, so relative wording — "tomorrow
-15:00" — and a bare `15:00` want a separate admin parser: the same question
-asked of a different person, in a known language and a known timezone.
 
 ---
 

@@ -7,7 +7,11 @@ made decisions into buttons.
 
 from __future__ import annotations
 
+from calendar import month_name, monthrange
 from collections import defaultdict
+from collections.abc import Mapping, Sequence
+from dataclasses import dataclass
+from datetime import date
 from zoneinfo import ZoneInfo
 
 from aiogram.types import (
@@ -51,11 +55,39 @@ COUNTER_SLOT = "cslot"
 #: §12.1's way out where a counter may not be words.
 COUNTER_WAITLIST = "cwait"
 
+#: §12.1's picker, the client's half of §13.2's. Same three screens, their own
+#: language, their own timezone, and never a word about the therapist's diary.
+COUNTER_MONTHS = "cm"
+COUNTER_DAYS = "cmd"
+COUNTER_HOURS = "cd"
+COUNTER_AT = "ch"
+
 #: The admin actions §13.2 keeps on the phone.
 APPROVE = "approve"
 PROPOSE = "propose"
 REJECT = "reject"
 CANCEL_REQUEST = "cancelreq"
+
+#: §13.2's propose picker: month -> day -> hour, and the slots offered above it.
+#: Every screen's callback carries the whole answer so far, so the picker holds
+#: no state and a button tapped in an old message still means what it said.
+PROPOSE_SLOT = "pslot"
+PROPOSE_MONTHS = "pm"
+PROPOSE_DAYS = "pmd"
+PROPOSE_HOURS = "pd"
+PROPOSE_AT = "ph"
+#: What the therapist presses to type a time instead. §7.1 still allows a
+#: proposal of words, and `18:30` is not on an hour grid.
+PROPOSE_TYPE = "ptype"
+
+#: A button that is there to be read, not pressed -- a day heading, or an hour
+#: §13.2 says is taken. The webhook answers every callback carrying an id, so
+#: these resolve rather than leaving the therapist's client spinning.
+NOOP = "noop"
+
+#: Telegram inline keyboards have no colour and no rendered disabled state, so a
+#: label is the only way to say "there is something here already".
+TAKEN_MARK = "✕"
 
 #: §13.2's panel navigation. Short names: the argument shares the 64 bytes.
 PANEL = "apanel"
@@ -66,11 +98,29 @@ PANEL_WAITLIST = "awl"
 PANEL_AVAILABILITY = "aavail"
 PANEL_SKIP = "askip"
 
-CLIENT_ACTIONS = frozenset({ACCEPT, COUNTER, DECLINE, COUNTER_SLOT, COUNTER_WAITLIST})
+CLIENT_ACTIONS = frozenset(
+    {
+        ACCEPT,
+        COUNTER,
+        DECLINE,
+        COUNTER_SLOT,
+        COUNTER_WAITLIST,
+        COUNTER_MONTHS,
+        COUNTER_DAYS,
+        COUNTER_HOURS,
+        COUNTER_AT,
+    }
+)
 ADMIN_ACTIONS = frozenset(
     {
         APPROVE,
         PROPOSE,
+        PROPOSE_SLOT,
+        PROPOSE_MONTHS,
+        PROPOSE_DAYS,
+        PROPOSE_HOURS,
+        PROPOSE_AT,
+        PROPOSE_TYPE,
         REJECT,
         CANCEL_REQUEST,
         PANEL,
@@ -96,6 +146,178 @@ def panel_keyboard(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
             for row in rows
         ]
     )
+
+
+@dataclass(frozen=True, slots=True)
+class Picker:
+    """The callback names and the words one month -> day -> hour picker is drawn
+    with.
+
+    Two exist, and they differ in every way a picker can: §13.2's belongs to the
+    therapist, is English because her surface is, and marks the hours she has
+    already filled. §12.1's belongs to a client answering a proposal, is written
+    in their language, and says **nothing** about her diary -- marking her taken
+    hours there would tell a client when other people have sessions, and quietly
+    omitting them would say the same thing by the gap it left.
+
+    Words arrive already written because this module is synchronous and holds no
+    session, which is the same reason `slot_keyboard` takes its day headings
+    that way (§15).
+    """
+
+    #: Callback actions, in the order the screens go.
+    days: str
+    hours: str
+    at: str
+    months: str
+    #: Complete callback data for backing out altogether.
+    cancel: str
+    #: How far ahead to offer. Two for a client, three for the therapist: a
+    #: suggestion four months out is not one she can act on.
+    months_ahead: int
+    month_names: Mapping[int, str]
+    #: Seven, Monday first, matching `date.weekday()`.
+    weekdays: Sequence[str]
+    back_to_months: str
+    back_to_days: str
+    cancel_label: str
+
+
+#: §13.2's. English throughout, from `calendar` rather than the catalogue --
+#: DESIGN.md §11 never translates the admin surface.
+ADMIN_PICKER = Picker(
+    days=PROPOSE_DAYS,
+    hours=PROPOSE_HOURS,
+    at=PROPOSE_AT,
+    months=PROPOSE_MONTHS,
+    cancel=PANEL_OPEN,
+    months_ahead=3,
+    month_names={number: month_name[number] for number in range(1, 13)},
+    weekdays=("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su"),
+    back_to_months="« Months",
+    back_to_days="« Days",
+    cancel_label="✕ Cancel",
+)
+
+
+def _dead(label: str) -> InlineKeyboardButton:
+    """A button that is there to be read. See `NOOP`."""
+    return InlineKeyboardButton(text=label, callback_data=NOOP)
+
+
+def _cancel(picker: Picker, request_id: int) -> InlineKeyboardButton:
+    return InlineKeyboardButton(
+        text=picker.cancel_label, callback_data=f"{picker.cancel}:{request_id}"
+    )
+
+
+def months_keyboard(picker: Picker, request_id: int, today: date) -> InlineKeyboardMarkup:
+    """Screen one: this month and the next `months_ahead - 1`."""
+    rows: list[list[InlineKeyboardButton]] = []
+    year, month = today.year, today.month
+    for _ in range(picker.months_ahead):
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=f"{picker.month_names[month]} {year}",
+                    callback_data=f"{picker.days}:{request_id}:{year:04d}-{month:02d}",
+                )
+            ]
+        )
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+
+    rows.append([_cancel(picker, request_id)])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def days_keyboard(
+    picker: Picker, request_id: int, year: int, month: int, *, today: date
+) -> InlineKeyboardMarkup:
+    """Screen two: that month's days, Monday first.
+
+    A day already past is dead rather than missing, so the grid keeps the shape
+    of a calendar instead of starting halfway through a row somewhere. A whole
+    week already gone is dropped, though: late in a month the alignment was
+    being paid for with five rows of dots and four live days.
+    """
+    first = date(year, month, 1)
+    _, length = monthrange(year, month)
+
+    weeks: list[list[InlineKeyboardButton]] = []
+    week: list[InlineKeyboardButton] = [_dead(" ") for _ in range(first.weekday())]
+
+    for number in range(1, length + 1):
+        day = date(year, month, number)
+        week.append(
+            _dead("·")
+            if day < today
+            else InlineKeyboardButton(
+                text=str(number),
+                callback_data=f"{picker.hours}:{request_id}:{day.isoformat()}",
+            )
+        )
+        if len(week) == 7:
+            weeks.append(week)
+            week = []
+
+    if week:
+        weeks.append(week + [_dead(" ") for _ in range(7 - len(week))])
+
+    def _live(row: list[InlineKeyboardButton]) -> bool:
+        return any(button.callback_data != NOOP for button in row)
+
+    while weeks and not _live(weeks[0]):
+        weeks.pop(0)
+
+    rows: list[list[InlineKeyboardButton]] = [[_dead(day) for day in picker.weekdays], *weeks]
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=picker.back_to_months,
+                callback_data=f"{picker.months}:{request_id}",
+            ),
+            _cancel(picker, request_id),
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def hours_keyboard(
+    picker: Picker, request_id: int, day: date, taken: frozenset[int] = frozenset()
+) -> InlineKeyboardMarkup:
+    """Screen three: all twenty-four hours of `day`.
+
+    Never filtered to working hours: none are stored, a practice's are flexible
+    month to month, and a model of them would hide hours she can actually work.
+
+    `taken` is dead **in place** and marked, so the absence reads as "there is
+    something there" rather than as a gap. It is empty for a client, and must
+    stay so -- see `Picker`.
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    for start in range(0, 24, 6):
+        rows.append(
+            [
+                _dead(f"{TAKEN_MARK}{hour:02d}")
+                if hour in taken
+                else InlineKeyboardButton(
+                    text=f"{hour:02d}",
+                    callback_data=f"{picker.at}:{request_id}:{day.isoformat()}T{hour:02d}",
+                )
+                for hour in range(start, start + 6)
+            ]
+        )
+
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text=picker.back_to_days,
+                callback_data=f"{picker.days}:{request_id}:{day.year:04d}-{day.month:02d}",
+            ),
+            _cancel(picker, request_id),
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def language_keyboard() -> InlineKeyboardMarkup:

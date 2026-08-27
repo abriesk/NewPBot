@@ -929,7 +929,15 @@ A message whose text exactly matches a main-keyboard label is **navigation, not 
 
 Multi-step input state is stored in the database against the client, **not** in aiogram FSM memory, so a restart does not lose a half-finished booking.
 
-**Counter offers the free slots here too**, under §12.1's rules — the same slots, the same gate, the same waitlist exit. A client answering a proposal on a phone and one answering it in a browser are being asked the same question, and a rule that lives in one adapter is one the other gets wrong. The slot buttons **MUST** carry their own callback action rather than the booking picker's `slot:<id>`: a tap in a negotiation means "I suggest this", not "hold this for me", and one action doing both would depend on parked flow state to tell them apart. There is no date picker in a chat, so where §12.1 shows one Telegram keeps the typed format and its hint.
+**Counter offers the free slots here too**, under §12.1's rules — the same slots, the same gate, the same waitlist exit. A client answering a proposal on a phone and one answering it in a browser are being asked the same question, and a rule that lives in one adapter is one the other gets wrong. The slot buttons **MUST** carry their own callback action rather than the booking picker's `slot:<id>`: a tap in a negotiation means "I suggest this", not "hold this for me", and one action doing both would depend on parked flow state to tell them apart.
+
+**Where §12.1 shows a `datetime-local`, Telegram shows §13.2's picker.** The same month → day → hour screens and the same builders, because the question is the same one; typing stays beneath it for `18:30` and for the words §9 keeps either way. It differs from the therapist's in three ways, and each is the point rather than an accident:
+
+- **It never shows what she has booked.** `taken` is not passed and **MUST NOT** be: marking her filled hours would tell a client when *other people* have sessions, and quietly omitting those hours would say the same thing by the gap it left. All twenty-four are offered. A client may therefore suggest an hour she already has something in, and she declines or proposes again — an ordinary round trip, and a far better trade than leaking her diary.
+- **Two months ahead, not three.** A suggestion four months out is not one she can act on, and a shorter row nudges toward something sooner.
+- **The client's timezone and the client's language.** Month and weekday names come from `date.month.*` and `date.weekday.*`, the keys the slot picker's day headings already use (§15) — the admin's come from `calendar` and are never translated (DESIGN.md §11).
+
+It sits behind `fallback_to_negotiation` with the typed counter: the picker is the free-text half in another shape, so switching words off must not leave the way in open.
 
 ### 13.2 Admin
 
@@ -942,6 +950,7 @@ The surface is a **panel**: one message with an inline keyboard, which the thera
 | Panel | `apanel` | availability, pending and negotiating counts, next confirmed session, waitlist size, admin URL | requests, sessions, waitlist, availability toggle |
 | Requests | `areq:<page>` | pending and negotiating, newest first, 5 a page | one request; panel |
 | Request | `aopen:<id>` | uuid, status, client name, client identities, contact note, session type, modality, time, `problem_text`, last 3 thread messages | its permitted actions; requests; panel |
+| Propose | `propose:<id>` | the request's free slots, and a way into the month → day → hour picker | the picker; typing; the request |
 | Sessions | `asess:<days>` | confirmed sessions in the next `days` (2 or 7), with join links, at most 10 | one request; the other window; panel |
 | Waitlist | `awl:<page>` | entries, 5 a page, **read-only** | panel |
 
@@ -949,7 +958,22 @@ Requirements:
 
 - Every screen **MUST** offer a way back. No reply may end in text with nothing to press — including the outcome of an action, which **MUST** be the re-rendered request screen rather than a bare "Confirmed …".
 - A request's action buttons **MUST** be derived from §7.1's transition table, so the panel never offers what the core would refuse. `negotiating` therefore offers propose and reject but not approve.
-- `propose` and `cancel` need typing, so they park the request id in `flow_state` (§13.1's store, not aiogram FSM) and answer with a prompt carrying `✕` to abandon. Cancel's prompt carries `Skip`; the reason reaches the client in `request.cancelled.client`, so it is asked for rather than invented. Approve uses the practice's default meeting link; a per-request `meeting_url` stays web-only.
+- `cancel` needs typing, so it parks the request id in `flow_state` (§13.1's store, not aiogram FSM) and answers with a prompt carrying `✕` to abandon and `Skip` beside it; the reason reaches the client in `request.cancelled.client`, so it is asked for rather than invented. Approve uses the practice's default meeting link; a per-request `meeting_url` stays web-only.
+
+**`propose` MUST be answerable without typing.** It asked for `YYYY-MM-DD HH:MM` in the practice timezone, on the one surface that exists for answering away from a desk — a full ISO timestamp thumbed into a phone. The screen now offers, in order: the practice's own free slots for that request as one-tap buttons, a **month → day → hour** picker for a time it has not published, and typing kept as the escape hatch for anything neither covers (`18:30`, or words, which §7.1 still allows as a proposal).
+
+| Screen | Callback | Shows |
+|---|---|---|
+| Months | `pm:<id>` | the current month and the two after it |
+| Days | `pmd:<id>:<YYYY-MM>` | that month's days, Monday first, past days dead |
+| Hours | `pd:<id>:<YYYY-MM-DD>` | `00`–`23` in the **practice** timezone |
+| Chosen | `ph:<id>:<YYYY-MM-DDTHH>` | proposes it and re-renders the request screen |
+
+- The picker **MUST** hold no state. Every screen's callback carries the whole answer so far, which stays inside §9's 64-byte limit (`ph:` with a five-digit request id is 24 bytes) — so there is no half-finished picker to abandon, and a button tapped in an old message still means what it said.
+- Hours are **not** derived from stored working hours, and none are introduced. A practice's hours are flexible month to month and week to week; a model of them would be wrong more often than right, and wrong here means hiding an hour the therapist can actually work. All twenty-four are offered and she picks — there are fewer of them than a month has days.
+- An hour already **taken MUST NOT be selectable**: a confirmed or completed session starting in it, or a slot in it that is `booked` or `blocked`. Held slots stay available — a hold is transient and lapses on its own. A taken hour is rendered dead **in place** rather than removed, carrying a marker in its label, so the absence is legible as "there is something there" rather than as a gap. Telegram inline keyboards have no colour and no rendered disabled state, so the label is the only signal available.
+- Minutes have no screen. Every slot this practice publishes is on the hour and its sessions are an hour long, so a fourth tap would serve a case the escape hatch already covers.
+- The read is `booking.taken_hours_on` in `app/core/services/` — the channel draws the grid and decides nothing about what is free.
 - A reply caused by a **button** edits that message in place; a reply caused by **typed text** is a new message. An edit rejected as unmodified **MUST** be treated as success, and an edit refused because the message is too old (Telegram's 48-hour limit, reached by pressing a button on an old notification) **MUST** fall back to sending a new message.
 - The webhook **MUST** answer the callback query, or the therapist's client spins on every tap. A refused action answers with its reason.
 - `/admin` while a typed answer is pending abandons it, exactly as a main-keyboard label does in §13.1.

@@ -132,6 +132,11 @@ request:
   counter.note_label: "Хотите что-то добавить?"
   counter.join_waitlist: "Сообщите мне, когда появится место"
   counter.time_hint: "Удобнее всего время в виде 02.09.2026 18:00."
+  counter.pick_month: "Какой месяц?"
+  counter.pick_day: "Какой день?"
+  counter.pick_hour: "В какое время вам удобно?"
+  counter.back_months: "« Месяцы"
+  counter.back_days: "« Дни"
   when: "Когда"
 
 intent:

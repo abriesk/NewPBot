@@ -925,7 +925,9 @@ async def test_admin_navigation_abandons_a_half_typed_answer(
 ) -> None:
     """§13.2, the same rule §13.1 gives the client's menu."""
     request = await _admin_request(db, future_slot, session_type_id)
-    await handle(db, Update(chat_id=1, callback_data=f"{kb.PROPOSE}:{request.id}"))
+    # Propose now opens the picker, and only "Type it" parks an answer -- which
+    # is the state this rule is about.
+    await handle(db, Update(chat_id=1, callback_data=f"{kb.PROPOSE_TYPE}:{request.id}"))
     admin_client = await resolve_client(db, Channel.telegram, "1", verified=True)
     assert (
         await flow.current_step(db, admin_client.id, Channel.telegram)

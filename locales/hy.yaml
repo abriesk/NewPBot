@@ -138,6 +138,11 @@ request:
   counter.note_label: "Ցանկանո՞ւմ եք որևէ բան ավելացնել։"  # TODO: review
   counter.join_waitlist: "Տեղեկացրեք ինձ, երբ տեղ ազատվի"  # TODO: review
   counter.time_hint: "Ամենահարմարը 02.09.2026 18:00 ձևաչափով ժամանակն է։"   # TODO: review
+  counter.pick_month: "Ո՞ր ամիսը"                             # TODO: review
+  counter.pick_day: "Ո՞ր օրը"                                # TODO: review
+  counter.pick_hour: "Ո՞ր ժամն է ձեզ հարմար"                 # TODO: review
+  counter.back_months: "« Ամիսներ"                           # TODO: review
+  counter.back_days: "« Օրեր"                                # TODO: review
   when: "Երբ"                                    # TODO: review
 
 intent:
