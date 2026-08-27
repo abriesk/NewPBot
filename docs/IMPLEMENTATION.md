@@ -942,6 +942,7 @@ The surface is a **panel**: one message with an inline keyboard, which the thera
 | Panel | `apanel` | availability, pending and negotiating counts, next confirmed session, waitlist size, admin URL | requests, sessions, waitlist, availability toggle |
 | Requests | `areq:<page>` | pending and negotiating, newest first, 5 a page | one request; panel |
 | Request | `aopen:<id>` | uuid, status, client name, client identities, contact note, session type, modality, time, `problem_text`, last 3 thread messages | its permitted actions; requests; panel |
+| Propose | `propose:<id>` | the request's free slots, and a way into the month → day → hour picker | the picker; typing; the request |
 | Sessions | `asess:<days>` | confirmed sessions in the next `days` (2 or 7), with join links, at most 10 | one request; the other window; panel |
 | Waitlist | `awl:<page>` | entries, 5 a page, **read-only** | panel |
 
@@ -949,7 +950,22 @@ Requirements:
 
 - Every screen **MUST** offer a way back. No reply may end in text with nothing to press — including the outcome of an action, which **MUST** be the re-rendered request screen rather than a bare "Confirmed …".
 - A request's action buttons **MUST** be derived from §7.1's transition table, so the panel never offers what the core would refuse. `negotiating` therefore offers propose and reject but not approve.
-- `propose` and `cancel` need typing, so they park the request id in `flow_state` (§13.1's store, not aiogram FSM) and answer with a prompt carrying `✕` to abandon. Cancel's prompt carries `Skip`; the reason reaches the client in `request.cancelled.client`, so it is asked for rather than invented. Approve uses the practice's default meeting link; a per-request `meeting_url` stays web-only.
+- `cancel` needs typing, so it parks the request id in `flow_state` (§13.1's store, not aiogram FSM) and answers with a prompt carrying `✕` to abandon and `Skip` beside it; the reason reaches the client in `request.cancelled.client`, so it is asked for rather than invented. Approve uses the practice's default meeting link; a per-request `meeting_url` stays web-only.
+
+**`propose` MUST be answerable without typing.** It asked for `YYYY-MM-DD HH:MM` in the practice timezone, on the one surface that exists for answering away from a desk — a full ISO timestamp thumbed into a phone. The screen now offers, in order: the practice's own free slots for that request as one-tap buttons, a **month → day → hour** picker for a time it has not published, and typing kept as the escape hatch for anything neither covers (`18:30`, or words, which §7.1 still allows as a proposal).
+
+| Screen | Callback | Shows |
+|---|---|---|
+| Months | `pm:<id>` | the current month and the two after it |
+| Days | `pmd:<id>:<YYYY-MM>` | that month's days, Monday first, past days dead |
+| Hours | `pd:<id>:<YYYY-MM-DD>` | `00`–`23` in the **practice** timezone |
+| Chosen | `ph:<id>:<YYYY-MM-DDTHH>` | proposes it and re-renders the request screen |
+
+- The picker **MUST** hold no state. Every screen's callback carries the whole answer so far, which stays inside §9's 64-byte limit (`ph:` with a five-digit request id is 24 bytes) — so there is no half-finished picker to abandon, and a button tapped in an old message still means what it said.
+- Hours are **not** derived from stored working hours, and none are introduced. A practice's hours are flexible month to month and week to week; a model of them would be wrong more often than right, and wrong here means hiding an hour the therapist can actually work. All twenty-four are offered and she picks — there are fewer of them than a month has days.
+- An hour already **taken MUST NOT be selectable**: a confirmed or completed session starting in it, or a slot in it that is `booked` or `blocked`. Held slots stay available — a hold is transient and lapses on its own. A taken hour is rendered dead **in place** rather than removed, carrying a marker in its label, so the absence is legible as "there is something there" rather than as a gap. Telegram inline keyboards have no colour and no rendered disabled state, so the label is the only signal available.
+- Minutes have no screen. Every slot this practice publishes is on the hour and its sessions are an hour long, so a fourth tap would serve a case the escape hatch already covers.
+- The read is `booking.taken_hours_on` in `app/core/services/` — the channel draws the grid and decides nothing about what is free.
 - A reply caused by a **button** edits that message in place; a reply caused by **typed text** is a new message. An edit rejected as unmodified **MUST** be treated as success, and an edit refused because the message is too old (Telegram's 48-hour limit, reached by pressing a button on an old notification) **MUST** fall back to sending a new message.
 - The webhook **MUST** answer the callback query, or the therapist's client spins on every tap. A refused action answers with its reason.
 - `/admin` while a typed answer is pending abandons it, exactly as a main-keyboard label does in §13.1.

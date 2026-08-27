@@ -26,9 +26,10 @@ and slot bookkeeping honest (DESIGN.md §7).
 from __future__ import annotations
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from uuid import UUID
+from zoneinfo import ZoneInfo
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -41,6 +42,7 @@ from app.core.enums import (
     ReminderState,
     RequestStatus,
     SenderType,
+    SlotStatus,
 )
 from app.core.errors import (
     BookingClosed,
@@ -410,6 +412,51 @@ async def unscheduled_for_admin(session: AsyncSession, *, limit: int = 20) -> li
         ScheduleEntry(uuid=uuid, status=status, display_name=name, desired_time_text=wanted)
         for uuid, status, name, wanted in rows.all()
     ]
+
+
+async def taken_hours_on(
+    session: AsyncSession, *, day: date, tz: str
+) -> frozenset[int]:
+    """§13.2: the local hours of `day` the therapist cannot be offered.
+
+    A confirmed or completed session starting in the hour, or a slot in it she
+    has already booked out or blocked off. A *held* slot is not taken: a hold
+    lapses on its own and belongs to a client who has not finished a form.
+
+    Bucketed by local wall-clock hour rather than by an offset from midnight,
+    for the reason §12.2 gives about the week grid -- a day containing a DST
+    transition is not twenty-four hours long, and arithmetic that assumes it is
+    silently moves everything after the boundary.
+    """
+    zone = ZoneInfo(tz)
+    start = datetime.combine(day, time.min, tzinfo=zone).astimezone(UTC)
+    end = datetime.combine(day + timedelta(days=1), time.min, tzinfo=zone).astimezone(UTC)
+
+    sessions = (
+        await session.execute(
+            select(BookingRequest.scheduled_start).where(
+                BookingRequest.status.in_((RequestStatus.confirmed, RequestStatus.completed)),
+                BookingRequest.scheduled_start >= start,
+                BookingRequest.scheduled_start < end,
+            )
+        )
+    ).scalars()
+
+    blocked = (
+        await session.execute(
+            select(Slot.starts_at).where(
+                Slot.status.in_((SlotStatus.booked, SlotStatus.blocked)),
+                Slot.starts_at >= start,
+                Slot.starts_at < end,
+            )
+        )
+    ).scalars()
+
+    return frozenset(
+        instant.astimezone(zone).hour
+        for instant in (*sessions.all(), *blocked.all())
+        if instant is not None
+    )
 
 
 async def requested_start(session: AsyncSession, request: BookingRequest) -> datetime | None:

@@ -7,7 +7,9 @@ made decisions into buttons.
 
 from __future__ import annotations
 
+from calendar import monthrange
 from collections import defaultdict
+from datetime import date
 from zoneinfo import ZoneInfo
 
 from aiogram.types import (
@@ -57,6 +59,27 @@ PROPOSE = "propose"
 REJECT = "reject"
 CANCEL_REQUEST = "cancelreq"
 
+#: §13.2's propose picker: month -> day -> hour, and the slots offered above it.
+#: Every screen's callback carries the whole answer so far, so the picker holds
+#: no state and a button tapped in an old message still means what it said.
+PROPOSE_SLOT = "pslot"
+PROPOSE_MONTHS = "pm"
+PROPOSE_DAYS = "pmd"
+PROPOSE_HOURS = "pd"
+PROPOSE_AT = "ph"
+#: What the therapist presses to type a time instead. §7.1 still allows a
+#: proposal of words, and `18:30` is not on an hour grid.
+PROPOSE_TYPE = "ptype"
+
+#: A button that is there to be read, not pressed -- a day heading, or an hour
+#: §13.2 says is taken. The webhook answers every callback carrying an id, so
+#: these resolve rather than leaving the therapist's client spinning.
+NOOP = "noop"
+
+#: Telegram inline keyboards have no colour and no rendered disabled state, so a
+#: label is the only way to say "there is something here already".
+TAKEN_MARK = "✕"
+
 #: §13.2's panel navigation. Short names: the argument shares the 64 bytes.
 PANEL = "apanel"
 PANEL_REQUESTS = "areq"
@@ -71,6 +94,12 @@ ADMIN_ACTIONS = frozenset(
     {
         APPROVE,
         PROPOSE,
+        PROPOSE_SLOT,
+        PROPOSE_MONTHS,
+        PROPOSE_DAYS,
+        PROPOSE_HOURS,
+        PROPOSE_AT,
+        PROPOSE_TYPE,
         REJECT,
         CANCEL_REQUEST,
         PANEL,
@@ -96,6 +125,128 @@ def panel_keyboard(rows: list[list[tuple[str, str]]]) -> InlineKeyboardMarkup:
             for row in rows
         ]
     )
+
+
+#: §13.2's picker looks this far ahead. Three months is a season, which is
+#: further than a consultation is ever proposed and short enough to be three
+#: buttons rather than a year view.
+PROPOSE_MONTHS_AHEAD = 3
+
+#: Monday first, matching `date.weekday()`. English, like the rest of §13.2.
+_WEEKDAYS = ("Mo", "Tu", "We", "Th", "Fr", "Sa", "Su")
+
+
+def _dead(label: str) -> InlineKeyboardButton:
+    """A button that is there to be read. See `NOOP`."""
+    return InlineKeyboardButton(text=label, callback_data=NOOP)
+
+
+def propose_months_keyboard(request_id: int, today: date) -> InlineKeyboardMarkup:
+    """§13.2, screen one: this month and the two after it."""
+    rows: list[list[InlineKeyboardButton]] = []
+    year, month = today.year, today.month
+    for _ in range(PROPOSE_MONTHS_AHEAD):
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    text=date(year, month, 1).strftime("%B %Y"),
+                    callback_data=f"{PROPOSE_DAYS}:{request_id}:{year:04d}-{month:02d}",
+                )
+            ]
+        )
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+
+    rows.append(
+        [InlineKeyboardButton(text="✕ Cancel", callback_data=f"{PANEL_OPEN}:{request_id}")]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def propose_days_keyboard(
+    request_id: int, year: int, month: int, *, today: date
+) -> InlineKeyboardMarkup:
+    """§13.2, screen two: that month's days, Monday first.
+
+    A day already past is dead rather than missing, so the grid keeps the shape
+    of a calendar instead of starting halfway through a row somewhere. A whole
+    week already gone is dropped, though: late in a month the alignment was
+    being paid for with five rows of dots and four live days.
+    """
+    first = date(year, month, 1)
+    _, length = monthrange(year, month)
+
+    weeks: list[list[InlineKeyboardButton]] = []
+    week: list[InlineKeyboardButton] = [_dead(" ") for _ in range(first.weekday())]
+
+    for number in range(1, length + 1):
+        day = date(year, month, number)
+        week.append(
+            _dead("·")
+            if day < today
+            else InlineKeyboardButton(
+                text=str(number),
+                callback_data=f"{PROPOSE_HOURS}:{request_id}:{day.isoformat()}",
+            )
+        )
+        if len(week) == 7:
+            weeks.append(week)
+            week = []
+
+    if week:
+        weeks.append(week + [_dead(" ") for _ in range(7 - len(week))])
+
+    def _live(row: list[InlineKeyboardButton]) -> bool:
+        return any(button.callback_data != NOOP for button in row)
+
+    while weeks and not _live(weeks[0]):
+        weeks.pop(0)
+
+    rows: list[list[InlineKeyboardButton]] = [[_dead(day) for day in _WEEKDAYS], *weeks]
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="« Months", callback_data=f"{PROPOSE_MONTHS}:{request_id}"
+            ),
+            InlineKeyboardButton(text="✕ Cancel", callback_data=f"{PANEL_OPEN}:{request_id}"),
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def propose_hours_keyboard(
+    request_id: int, day: date, taken: frozenset[int]
+) -> InlineKeyboardMarkup:
+    """§13.2, screen three: all twenty-four hours of `day`.
+
+    Not filtered to working hours, because there are none stored and a practice's
+    are flexible month to month -- a model of them would hide hours she can
+    actually work. `taken` is dead **in place** and marked, so the absence reads
+    as "there is something there" rather than as a gap.
+    """
+    rows: list[list[InlineKeyboardButton]] = []
+    for start in range(0, 24, 6):
+        rows.append(
+            [
+                _dead(f"{TAKEN_MARK}{hour:02d}")
+                if hour in taken
+                else InlineKeyboardButton(
+                    text=f"{hour:02d}",
+                    callback_data=f"{PROPOSE_AT}:{request_id}:{day.isoformat()}T{hour:02d}",
+                )
+                for hour in range(start, start + 6)
+            ]
+        )
+
+    rows.append(
+        [
+            InlineKeyboardButton(
+                text="« Days",
+                callback_data=f"{PROPOSE_DAYS}:{request_id}:{day.year:04d}-{day.month:02d}",
+            ),
+            InlineKeyboardButton(text="✕ Cancel", callback_data=f"{PANEL_OPEN}:{request_id}"),
+        ]
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def language_keyboard() -> InlineKeyboardMarkup:

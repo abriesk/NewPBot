@@ -12,7 +12,8 @@ one place can be answered in another.
 
 from __future__ import annotations
 
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, time, timedelta
+from zoneinfo import ZoneInfo
 
 import pytest
 import time_machine
@@ -343,12 +344,14 @@ async def test_a_client_can_decline_from_telegram(
 async def test_the_therapist_can_propose_from_telegram(
     db: AsyncSession, session_type_id: int, future_slot: Slot
 ) -> None:
-    """§13.2 keeps propose on the phone; the time is typed."""
+    """§13.2 keeps propose on the phone. Typing is the escape hatch now rather
+    than the only way in, and it still has to work: `18:30` is on no hour grid,
+    and §7.1 allows a proposal of words."""
     tg = await _tg_client(db)
     request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
 
     # The admin chat is a different chat id (configured in TELEGRAM_ADMIN_IDS).
-    await handle(db, Update(chat_id=1, callback_data=f"{kb.PROPOSE}:{request.id}"))
+    await handle(db, Update(chat_id=1, callback_data=f"{kb.PROPOSE_TYPE}:{request.id}"))
     reply = await handle(db, Update(chat_id=1, text="2027-06-01 11:00"))
 
     assert reply is not None
@@ -817,3 +820,234 @@ async def test_the_waitlist_button_closes_the_request_and_leaves_an_entry(
         .all()
     )
     assert entries
+
+
+# --- Proposing without typing an ISO timestamp (§13.2) ----------------------
+
+
+ADMIN_CHAT = 1
+
+
+async def test_propose_opens_with_her_own_free_times(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """The reported fault: it asked for YYYY-MM-DD HH:MM on the one surface that
+    exists for answering away from a desk."""
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+    # Booking holds the slot, so publish another for her to be offered.
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    spare = Slot(
+        practice_id=practice.id,
+        starts_at=now_utc() + timedelta(days=12, minutes=3),
+        duration_min=60,
+        status=SlotStatus.available,
+    )
+    db.add(spare)
+    await db.flush()
+
+    reply = await handle(db, Update(chat_id=ADMIN_CHAT, callback_data=f"propose:{request.id}"))
+    assert reply is not None
+
+    offered = _callbacks(reply)
+    assert f"{kb.PROPOSE_SLOT}:{request.id}:{spare.id}" in offered
+    assert f"{kb.PROPOSE_MONTHS}:{request.id}" in offered, "a way into the picker"
+    assert f"{kb.PROPOSE_TYPE}:{request.id}" in offered, "and typing is still there"
+    # Nothing is parked until she asks to type.
+    admin = await resolve_client(db, Channel.telegram, str(ADMIN_CHAT), verified=True)
+    assert await flow.current_step(db, admin.id, Channel.telegram) is not (
+        Step.admin_entering_proposal
+    )
+
+
+async def test_the_picker_walks_month_then_day_then_hour(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """Three screens, each carrying the whole answer so far, so the picker holds
+    no state at all."""
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    today = now_utc().astimezone(ZoneInfo(practice.timezone)).date()
+
+    months = await handle(
+        db, Update(chat_id=ADMIN_CHAT, callback_data=f"{kb.PROPOSE_MONTHS}:{request.id}")
+    )
+    assert months is not None
+    this_month = f"{kb.PROPOSE_DAYS}:{request.id}:{today.year:04d}-{today.month:02d}"
+    assert this_month in _callbacks(months)
+
+    days = await handle(db, Update(chat_id=ADMIN_CHAT, callback_data=this_month))
+    assert days is not None
+    day_callbacks = [c for c in _callbacks(days) if c.startswith(f"{kb.PROPOSE_HOURS}:")]
+    assert day_callbacks, "the month's days"
+    # Today itself is offered; anything before it is dead rather than missing.
+    assert f"{kb.PROPOSE_HOURS}:{request.id}:{today.isoformat()}" in day_callbacks
+
+    hours = await handle(db, Update(chat_id=ADMIN_CHAT, callback_data=day_callbacks[-1]))
+    assert hours is not None
+    picked_day = day_callbacks[-1].rsplit(":", 1)[1]
+    hour_callbacks = [c for c in _callbacks(hours) if c.startswith(f"{kb.PROPOSE_AT}:")]
+
+    # Every hour of the day is a cell: the live ones plus the ones §13.2 marks
+    # as taken. Counted against the core rather than assumed to be twenty-four,
+    # because this database is shared and may genuinely have a session that day.
+    taken = await booking.taken_hours_on(
+        db, day=date.fromisoformat(picked_day), tz=practice.timezone
+    )
+    assert len(hour_callbacks) + len(taken) == 24, (
+        "all twenty-four offered or marked, never filtered to working hours"
+    )
+    for hour in range(24):
+        expected = f"{kb.PROPOSE_AT}:{request.id}:{picked_day}T{hour:02d}"
+        assert (expected in hour_callbacks) is (hour not in taken), hour
+
+
+async def test_picking_an_hour_proposes_it_in_her_own_clock(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """DESIGN.md §8: she thinks in the practice timezone; storage is UTC."""
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    zone = ZoneInfo(practice.timezone)
+    day = (now_utc().astimezone(zone) + timedelta(days=6)).date()
+
+    reply = await handle(
+        db,
+        Update(
+            chat_id=ADMIN_CHAT,
+            callback_data=f"{kb.PROPOSE_AT}:{request.id}:{day.isoformat()}T18",
+        ),
+    )
+    assert reply is not None
+
+    await db.refresh(request)
+    assert request.status is RequestStatus.negotiating
+
+    proposal = (
+        await db.execute(
+            select(NegotiationMessage)
+            .where(NegotiationMessage.request_id == request.id)
+            .order_by(NegotiationMessage.id.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+    assert proposal.sender is SenderType.admin
+    assert proposal.proposed_start is not None
+    local = proposal.proposed_start.astimezone(zone)
+    assert (local.date(), local.hour) == (day, 18)
+
+
+async def test_an_hour_already_taken_cannot_be_picked(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """§13.2: dead in place and marked, so the absence reads as "there is
+    something there" rather than as a gap. Telegram has no colour."""
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    zone = ZoneInfo(practice.timezone)
+    day = (now_utc().astimezone(zone) + timedelta(days=7)).date()
+
+    # A session she has already confirmed, and an hour she has blocked off.
+    busy = datetime.combine(day, time(14, 0), tzinfo=zone)
+    db.add(
+        BookingRequest(
+            practice_id=practice.id,
+            client_id=tg.id,
+            session_type_id=session_type_id,
+            modality=Modality.online,
+            status=RequestStatus.confirmed,
+            source_channel=Channel.web,
+            scheduled_start=busy.astimezone(UTC),
+            confirmed_at=now_utc(),
+        )
+    )
+    db.add(
+        Slot(
+            practice_id=practice.id,
+            starts_at=datetime.combine(day, time(9, 0), tzinfo=zone).astimezone(UTC),
+            duration_min=60,
+            status=SlotStatus.blocked,
+        )
+    )
+    await db.flush()
+
+    reply = await handle(
+        db,
+        Update(
+            chat_id=ADMIN_CHAT,
+            callback_data=f"{kb.PROPOSE_HOURS}:{request.id}:{day.isoformat()}",
+        ),
+    )
+    assert reply is not None
+
+    offered = _callbacks(reply)
+    assert f"{kb.PROPOSE_AT}:{request.id}:{day.isoformat()}T14" not in offered
+    assert f"{kb.PROPOSE_AT}:{request.id}:{day.isoformat()}T09" not in offered
+    assert f"{kb.PROPOSE_AT}:{request.id}:{day.isoformat()}T15" in offered, "the rest still are"
+
+    labels = [
+        button.text
+        for row in reply.keyboard.inline_keyboard
+        for button in row
+    ]
+    assert f"{kb.TAKEN_MARK}14" in labels, "marked, not removed"
+    assert f"{kb.TAKEN_MARK}09" in labels
+
+
+async def test_a_held_slot_does_not_make_an_hour_taken(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """A hold belongs to a client who has not finished a form, and lapses on its
+    own. Treating it as taken would hide an hour that is about to be free."""
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    zone = ZoneInfo(practice.timezone)
+    day = (now_utc().astimezone(zone) + timedelta(days=8)).date()
+
+    # `future_slot` is held by the booking below, at its own instant.
+    tg = await _tg_client(db)
+    await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.held
+
+    held_day = future_slot.starts_at.astimezone(zone).date()
+    taken = await booking.taken_hours_on(db, day=held_day, tz=practice.timezone)
+
+    assert future_slot.starts_at.astimezone(zone).hour not in taken
+    assert await booking.taken_hours_on(db, day=day, tz=practice.timezone) == frozenset()
+
+
+async def test_a_slot_taken_since_the_panel_was_drawn_is_refused(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """The panel may have sat in her chat for an hour."""
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    spare = Slot(
+        practice_id=practice.id,
+        starts_at=now_utc() + timedelta(days=13, minutes=5),
+        duration_min=60,
+        status=SlotStatus.available,
+    )
+    db.add(spare)
+    await db.flush()
+    spare_id = spare.id
+
+    spare.status = SlotStatus.blocked
+    await db.flush()
+
+    reply = await handle(
+        db,
+        Update(
+            chat_id=ADMIN_CHAT,
+            callback_data=f"{kb.PROPOSE_SLOT}:{request.id}:{spare_id}",
+        ),
+    )
+    assert reply is not None
+    assert reply.toast == "That time has gone."
+
+    await db.refresh(request)
+    assert request.status is RequestStatus.pending, "nothing proposed"

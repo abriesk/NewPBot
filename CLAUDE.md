@@ -40,9 +40,10 @@ DESIGN.md §15). One open question is recorded there: a negotiation whose
 proposal named a *different* time has no instant on the request, so it falls
 to the unscheduled list with only a name.
 
-With the milestones done, the queue is `DESIGN.md` §20.2 — six defects and
-refinements found in use, ordered smallest change first. Work down that list.
-The last two need a decision from me before any code is written.
+**All six defects in `DESIGN.md` §20.2 are fixed.** What remains under that
+heading is what fixing them turned up and we chose not to do yet — the contact
+column's other shapes, and merging one person's two client rows. Both say what
+would settle them; neither is urgent. Read it before proposing new work here.
 
 Milestones run M0 → M13 (`IMPLEMENTATION.md` §19). Work them **in order**. Each
 one's acceptance criteria must pass before starting the next. Do not implement
