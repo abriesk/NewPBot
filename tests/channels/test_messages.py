@@ -549,3 +549,135 @@ async def test_a_sign_in_email_without_a_merge_link_offers_no_telegram_action(
 
     assert "t.me" not in message.text
     assert [action.key for action in message.actions] == ["open"]
+
+
+# --- A note reaches the therapist as the note (§10, §13.4) ------------------
+
+
+async def test_a_note_reaches_telegram_as_the_note_itself(db: AsyncSession) -> None:
+    """It carried the identifier alone, so the one sentence a client wanted read
+    before the session meant opening a browser to read it."""
+    message = await render(
+        db,
+        intent_key="request.note.admin",
+        payload={"uuid": "abc", "name": "Ab", "note": "I may be five minutes late."},
+        locale="en",
+        channel=Channel.telegram,
+        tz="Asia/Yerevan",
+        base_url="https://example.test",
+    )
+
+    assert "Ab added information to request abc." in message.text
+    assert "I may be five minutes late." in message.text
+    # §13.4's reasoning is about inboxes, and this is not one -- but a short
+    # note and its announcement are still one message, not two.
+    assert len(message.parts) == 1
+
+
+async def test_the_same_note_by_email_stays_an_announcement(db: AsyncSession) -> None:
+    """§13.4: negotiation bodies never reach an inbox. The notification service
+    strips `note` from an email payload, so this renders what is left."""
+    message = await render(
+        db,
+        intent_key="request.note.admin",
+        payload={"uuid": "abc", "name": "Ab"},
+        locale="en",
+        channel=Channel.email,
+        tz="Asia/Yerevan",
+        base_url="https://example.test",
+    )
+
+    assert "Ab added information to request abc." in message.text
+    assert "five minutes" not in message.text
+    assert "They wrote" not in message.text
+
+
+async def test_a_note_from_a_client_with_no_name_does_not_open_on_a_blank(
+    db: AsyncSession,
+) -> None:
+    """§12.2. The body opened on `{name}`, so a client the service cannot name
+    produced a sentence beginning with a space."""
+    message = await render(
+        db,
+        intent_key="request.note.admin",
+        payload={"uuid": "abc", "name": None, "note": "a thought"},
+        locale="en",
+        channel=Channel.telegram,
+        tz="UTC",
+        base_url="https://example.test",
+    )
+
+    assert message.text.startswith("New information on request abc.")
+    assert "a thought" in message.text
+
+
+async def test_a_note_at_the_cap_is_split_rather_than_refused_by_telegram(
+    db: AsyncSession,
+) -> None:
+    """§17 lets a client write 4096 characters and §11.2 caps a part at 3500, so
+    the longest legal note does not fit in one message -- and escaping makes it
+    worse. Concatenating the lines built a message Telegram rejects outright,
+    which is a notification the therapist simply never receives."""
+    from app.core.policies import CLIENT_TEXT_MAX_CHARS
+    from app.render.markdown import TELEGRAM_PART_LIMIT
+
+    # Every character escapes to five, which is the worst case §11.2 has to
+    # survive: 4096 ampersands are 20480 characters on the wire.
+    note = "&" * CLIENT_TEXT_MAX_CHARS
+    message = await render(
+        db,
+        intent_key="request.note.admin",
+        payload={"uuid": "abc", "name": "Ab", "note": note},
+        locale="en",
+        channel=Channel.telegram,
+        tz="UTC",
+        base_url="https://example.test",
+    )
+
+    assert len(message.parts) > 1
+    assert all(len(part) <= TELEGRAM_PART_LIMIT for part in message.parts)
+    # Nothing is lost in the splitting, and no part carries half an entity --
+    # `&amp;` cut into `&am` and `p;` is not markup Telegram accepts.
+    assert "".join(message.parts).count("&amp;") == CLIENT_TEXT_MAX_CHARS
+    assert all(part.count("&") == part.count("&amp;") for part in message.parts)
+
+
+async def test_a_counter_of_4096_characters_also_survives(db: AsyncSession) -> None:
+    """The same fault, and it was live before any of this: `request.counter.admin`
+    has carried a client's words since it was written."""
+    from app.render.markdown import TELEGRAM_PART_LIMIT
+
+    message = await render(
+        db,
+        intent_key="request.counter.admin",
+        payload={"uuid": "abc", "time": None, "note": "ж" * 4096},
+        locale="en",
+        channel=Channel.telegram,
+        tz="UTC",
+        base_url="https://example.test",
+    )
+
+    assert len(message.parts) > 1
+    assert all(len(part) <= TELEGRAM_PART_LIMIT for part in message.parts)
+
+
+async def test_a_client_cannot_put_formatting_in_the_therapists_chat(
+    db: AsyncSession,
+) -> None:
+    """The packing is shared with the markdown emitter and the parsing is not.
+    Rendering a note as markdown would make `**shouting**` bold in her chat, and
+    a `<b>` in it something Telegram either honours or rejects the message for.
+    """
+    message = await render(
+        db,
+        intent_key="request.note.admin",
+        payload={"uuid": "abc", "name": "Ab", "note": "**shout** <b>and</b> & more"},
+        locale="en",
+        channel=Channel.telegram,
+        tz="UTC",
+        base_url="https://example.test",
+    )
+
+    assert "**shout**" in message.text
+    assert "&lt;b&gt;and&lt;/b&gt;" in message.text
+    assert "&amp; more" in message.text

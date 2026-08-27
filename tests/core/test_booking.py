@@ -30,6 +30,7 @@ from app.core.events import (
     RequestAccepted,
     RequestConfirmed,
     RequestCounter,
+    RequestNote,
     RequestSubmitted,
     drain,
     pending,
@@ -496,6 +497,53 @@ async def test_a_note_is_audited_by_identifier_only(
     assert entry.entity_id == str(request.uuid)
     assert entry.actor_type is ActorType.client
     assert "something private" not in str(entry.meta)
+
+
+async def test_an_over_long_note_is_refused_rather_than_shortened(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """It used to cut at 2000 characters and tell nobody. The client lost the
+    end of what they wrote -- which is where people put the thing they were
+    working up to -- and the therapist had no way to know she was reading part
+    of a sentence. §17 caps every client free-text field at the same number."""
+    from app.core.errors import TextTooLong
+    from app.core.policies import CLIENT_TEXT_MAX_CHARS
+
+    request = await _submit(db, client, session_type_id, future_slot)
+
+    at_the_cap = "x" * CLIENT_TEXT_MAX_CHARS
+    await booking.client_note(db, request.id, body_text=at_the_cap)
+    written = (
+        (
+            await db.execute(
+                select(NegotiationMessage)
+                .where(NegotiationMessage.request_id == request.id)
+                .order_by(NegotiationMessage.id.desc())
+                .limit(1)
+            )
+        )
+        .scalars()
+        .one()
+    )
+    assert written.body_text == at_the_cap, "nothing may be cut in silence"
+
+    with pytest.raises(TextTooLong):
+        await booking.client_note(db, request.id, body_text="x" * (CLIENT_TEXT_MAX_CHARS + 1))
+
+
+async def test_a_note_carries_its_body_to_whoever_is_notified(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """§10: the event carries the note, so the notification can be the note
+    rather than an announcement that one exists. §13.4 strips it again for
+    email, at the outbox row rather than here."""
+    request = await _submit(db, client, session_type_id, future_slot)
+    drain(db)
+
+    await booking.client_note(db, request.id, body_text="  I may be five minutes late  ")
+
+    events = [e for e in pending(db) if isinstance(e, RequestNote)]
+    assert [e.note for e in events] == ["I may be five minutes late"]
 
 
 async def test_client_decline_rejects_and_releases(

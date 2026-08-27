@@ -253,9 +253,19 @@ async def envelopes_for(session: AsyncSession, event: DomainEvent) -> list[Envel
             Envelope(
                 "request.note.admin",
                 Recipient.admin,
-                # §10: the identifier only. The note itself is read in the
-                # admin UI, like every other negotiation body (§13.4).
-                {"uuid": str(request.uuid), "name": request.display_name},
+                {
+                    "uuid": str(request.uuid),
+                    # §12.2's fallback: the request carries a name only if the
+                    # client typed one this time.
+                    "name": request.display_name
+                    or await _client_name(session, request.client_id),
+                    # §10: the note itself, not an announcement that one exists.
+                    # §13.4 keeps it out of email, and it does so through
+                    # `EMAIL_FORBIDDEN_FIELDS` rather than through this call --
+                    # so an email row gets the announcement and nothing here has
+                    # to know which channel it is bound for.
+                    "note": event.note,
+                },
                 request_id=request.id,
             )
         ]

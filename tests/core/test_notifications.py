@@ -90,17 +90,50 @@ async def test_a_submission_names_the_time_it_is_asking_about(
         ), key
 
 
-async def test_a_note_tells_the_admin_without_carrying_what_it_says(
+async def test_a_note_reaches_telegram_with_what_it_says(
     db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
 ) -> None:
-    """§7.1 and §13.4: she is told a note arrived and opens it to read it."""
+    """§10. This carried the identifier alone, so being told that a client had
+    written something meant opening a browser to read one sentence -- on the
+    surface that exists for answering away from a desk. Telegram already carries
+    `problem_text` in the panel and a counter's words in `request.counter.admin`,
+    so the note was the odd one out."""
+    request = await _submit(db, client, session_type_id, future_slot)
+    await notifications.publish(db)
+    await booking.client_note(db, request.id, body_text="I may be five minutes late")
+    await notifications.publish(db)
+
+    rows = [r for r in await _rows(db, "request.note.admin") if r.channel is Channel.telegram]
+    assert rows
+    for row in rows:
+        assert row.payload["uuid"] == str(request.uuid)
+        assert row.payload["note"] == "I may be five minutes late"
+
+
+async def test_the_same_note_by_email_carries_only_that_one_arrived(
+    db: AsyncSession,
+    client: Client,
+    session_type_id: int,
+    future_slot: Slot,
+    email_enabled: None,
+) -> None:
+    """§13.4, unchanged and unweakened: email is shared inboxes and lock-screen
+    previews, and a negotiation body must not appear in one. `note` is already
+    in `EMAIL_FORBIDDEN_FIELDS`, so the split costs the note intent no special
+    case -- the Telegram row carries the body and the email row does not."""
+    from app.core.models import AdminUser
+
+    admin = (await db.execute(select(AdminUser).limit(1))).scalars().one()
+    admin.email = "therapist@example.test"
+    await db.flush()
+
     request = await _submit(db, client, session_type_id, future_slot)
     await notifications.publish(db)
     await booking.client_note(db, request.id, body_text="deeply private")
     await notifications.publish(db)
 
-    rows = await _rows(db, "request.note.admin")
-    assert rows
+    rows = [r for r in await _rows(db, "request.note.admin") if r.channel is Channel.email]
+    assert rows, "the admin has an address in this configuration"
     for row in rows:
         assert row.payload["uuid"] == str(request.uuid)
         assert "deeply private" not in str(row.payload)

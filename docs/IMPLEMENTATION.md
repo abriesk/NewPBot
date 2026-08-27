@@ -706,7 +706,7 @@ Each intent has a key, a recipient, a payload schema, and available actions. Tra
 | `request.cancelled.client` | client | uuid, scheduled_start, reason | — |
 | `reminder.client` | client | uuid, scheduled_start, offset_min, modality, join info | open |
 | `waitlist.joined.client` | client | — | — |
-| `request.note.admin` | admin | uuid | — |
+| `request.note.admin` | admin | uuid, name, note | — |
 | `waitlist.joined.admin` | admin | uuid, problem, contact note | — |
 | `auth.login_link.client` | client (email) | login url, telegram deep link | open |
 | `auth.link_channel.client` | client | telegram deep link | open |
@@ -715,6 +715,10 @@ Each intent has a key, a recipient, a payload schema, and available actions. Tra
 | `system.health.recovered.admin` | admin | overall state | — |
 
 Payloads **MUST** be JSON-serialisable and **MUST NOT** embed rendered text.
+
+**A notification that says only that a client wrote something is not a notification.** `request.note.admin` carried the identifier alone, on the reasoning that negotiation bodies are read in the admin UI. That reasoning is §13.4's and it is about **inboxes**: Telegram is an admin surface that already carries `problem_text` in the panel and the client's words in `request.counter.admin`, so a note is the one thing there that made her open a browser to read one sentence. The body therefore travels in `note`, which `EMAIL_FORBIDDEN_FIELDS` strips, so email keeps exactly the announcement it sends today and §13.4 needs no exception.
+
+**An intent carrying client free text MUST be split into parts, not concatenated into one.** `note`, and any other field a client can fill to §17's cap, can exceed one Telegram message on its own — escaping expands it, and §11.2's part limit is below Telegram's. The renderer therefore builds parts at block boundaries under the same limit §11.2 gives the markdown emitter. It **MUST NOT** reuse the markdown path to do it: intent bodies are translated text with client text interpolated, escaped rather than parsed, and rendering that as markdown would let a client put formatting into the therapist's chat. A short note and its announcement stay **one** message; splitting happens only when the text would not otherwise fit.
 
 **Join info** resolves as: `booking_request.meeting_url` if set, else `practice.online_meeting_url`, else omitted. It is included only when `modality='online'`, only in `request.confirmed.client` and `reminder.client`, and only for non-email channels — for `channel='email'` the message links to `/r/{uuid}` instead, where the client sees it after authenticating. For `modality='onsite'`, `practice.clinic_onsite_url` takes its place and **MAY** be sent by email. The admin sets a per-request `meeting_url` at approval time; leaving it blank uses the practice default.
 
@@ -792,7 +796,7 @@ All under `/admin`, session-authenticated, CSRF-protected.
 
 **A refused action MUST say so.** Both the admin and the client routes catch `DomainError` and redirect; a redirect with nothing on it is indistinguishable from a click that did nothing. The client's negotiation actions in particular **MUST** report a refusal, because the one that gets refused in practice is accepting a proposal that named no time.
 
-**Every admin surface that names a client MUST be able to name them.** `booking_request.display_name` is what that request was submitted under and may be empty; where it is, the surface falls back to `client.display_name`. This applies to the requests list, the week schedule, the request page, and the Telegram card (§13.2).
+**Every admin surface that names a client MUST be able to name them.** `booking_request.display_name` is what that request was submitted under and may be empty; where it is, the surface falls back to `client.display_name`. This applies to the requests list, the week schedule, the request page, the Telegram card (§13.2), and every admin **notification** whose body names somebody. Where neither name exists the body **MUST** have a variant that does not mention one: a sentence opening with a blank, or with the word `None`, is worse than a sentence that never promised a name.
 
 **An admin surface MUST NOT offer an action §7.1 would refuse.** §13.2 requires this of the Telegram panel and the requirement is not the panel's: it belongs to every surface that renders the transitions. `/admin/requests/{uuid}` rendered approve, propose, reject and cancel whatever the status, so Cancel on a `negotiating` request was a control whose only possible outcome was `InvalidTransition` — and the refusal reported by the rule above says only that something was refused, which explains nothing to a therapist who has just been told that the obvious way to call a session off does not work. Reject is the transition that closes a request which was never confirmed; cancel **MUST NOT** be quietly rerouted to it, because they write different columns and send the client different messages.
 
@@ -1322,6 +1326,8 @@ The dot is only useful to somebody looking at it. A transition **into** `fail` w
 - CSRF token on every mutating admin and client form.
 - Rate limits: admin login 5 per 15 min per IP; magic-link issuance 3 per hour per email and 10 per hour per IP; booking submission 5 per hour per client.
 - Telegram webhook secret header checked before body parsing.
+- Client free text is capped at **4096 characters** — `problem_text`, `contact_note`, negotiation bodies, notes. The number is Telegram's message limit rather than a taste of ours: a lower cap would accept text one channel could not carry, and a higher one would take an essay on the web and refuse it on the bot. One cap, every field, both channels.
+- **An over-long field MUST be refused, never truncated.** Silently storing the first *n* characters loses what somebody wrote and tells neither them nor the therapist that anything is missing — and the half that goes missing is the end, which is where people put the thing they were working up to. The web form carries `maxlength` so the typing stops at the limit, and a counter appears for the last tenth of it so a field going quiet is explained rather than mysterious. The cap is enforced in the core regardless: a form is a courtesy, not a guarantee.
 - All web-rendered content passes the sanitiser.
 - SQL exclusively through SQLAlchemy; no string-built queries.
 - `.env` git-ignored; `.env.example` committed with placeholders.

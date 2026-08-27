@@ -506,11 +506,24 @@ wording is written there as the work is done, not in advance. An entry leaves
 this list when it is fixed: the reasoning goes to §12.2 or wherever the rule now
 lives, so what is left here is what is left to do.
 
-Two are already gone. The request page offered all four actions whatever the
+Three are already gone. The request page offered all four actions whatever the
 status, so Cancel on a negotiation could only end in a refusal; §7.1 now decides
-what that page renders, as §13.2 has always required of the Telegram panel. And
-the requests list could not say how to reach anybody, which §12.2 had already
-argued for one level down on the request page.
+what that page renders, as §13.2 has always required of the Telegram panel. The
+requests list could not say how to reach anybody, which §12.2 had already argued
+for one level down on the request page. And a client's note reached the
+therapist as an announcement that a note existed, which on the surface built for
+answering away from a desk meant opening a browser to read one sentence.
+
+That third one turned out to be four faults rather than one, which is worth
+remembering the next time something looks like a missing line of copy. The body
+was absent from the payload. The renderer concatenated its lines into a single
+Telegram message and never split, so any body carrying client free text at §17's
+cap built a message Telegram refuses outright — live already in
+`request.counter.admin`, which has carried a client's words since it was
+written, and a notification that is refused is one she simply never receives.
+The note was truncated at 2000 characters in silence, by a cap that field had to
+itself. And the body opened on the client's name with no variant for the client
+who has none. Only the first was the thing reported.
 
 **What the contact column shows, and what it could show.** It shows identities
 — where a message would actually land, and for an address whether §13.3 would
@@ -537,38 +550,6 @@ therapist's own client already knows that person, and the *bot* is what has
 spoken to them. **This is interim.** Replying to a client belongs somewhere of
 its own rather than in a table cell, and that is a question for the UI pass, not
 for a column.
-
-**A note reaches the therapist as an announcement rather than as the note.**
-When a client adds information, `request.note.admin` says "… added information
-to request …. Open the request to read it." — the identifier and nothing else,
-on the ground that negotiation bodies are read in the admin UI. That is right
-for email and wrong for Telegram. §13.4's restriction is about inboxes, and
-Telegram already carries `problem_text` and the client's counter text, which has
-a note line of its own. `EMAIL_FORBIDDEN_FIELDS` already strips `note`, so
-putting the body in the payload gives Telegram the note and leaves email with
-exactly the sentence it sends today: the mechanism is in place and this one
-intent is not using it. Three things ride along.
-
-Nothing may be cut in silence. `client_note` truncates at 2000 characters
-without telling anyone; the cap becomes the 4096 that §17 already applies to
-every other free-text field — Telegram's own limit, which is the reason that
-number was chosen — and over-long text is refused rather than shortened.
-
-The intent renderer joins its lines into a single Telegram part and never
-splits, so a note near the cap would build a message over the limit and the send
-would be refused. The block-boundary splitter in `app/render/markdown.py`
-already exists for exactly this; the renderer has to go through it.
-
-The note box on `/r/{uuid}`, and the counter field beside it, carry neither
-`maxlength` nor the character counter, while the booking and waitlist forms
-carry both. The behaviour wanted — a hard limit, silent until the last tenth of
-it, then a count — is already written and simply is not attached to these two
-boxes.
-
-Separately, `request.note.admin` has no no-name variant and does not fall back
-to the client's own name, so a note from a nameless client opens with a blank
-where the name belongs. §12.2 requires every admin surface that names a client
-to be able to name them, and the submission intent already has both halves.
 
 **"Clients" is the data-protection page wearing the wrong name.** It lists every
 `client` row with its identities and offers export and erasure. That is §16's
