@@ -137,6 +137,48 @@ def test_the_limits_are_the_numbers_in_section_17() -> None:
     assert SUBMISSIONS_PER_HOUR == 5
 
 
+def test_asking_what_is_left_does_not_create_an_entry() -> None:
+    """`remaining` is a diagnostic. Reading through a defaultdict made every
+    call leak one key for an address that had never actually done anything."""
+    ratelimit.reset()
+
+    assert ratelimit.remaining(ratelimit.ADMIN_LOGIN, "198.51.100.7") == 5
+    assert ratelimit._hits == {}
+
+
+def test_spent_windows_do_not_accumulate_for_ever() -> None:
+    """Pruning empties a deque but leaves its key. One key per address that ever
+    called is unbounded growth, however small each one is -- so the map is swept
+    once it grows past the threshold.
+    """
+    import time
+    from collections import deque
+
+    ratelimit.reset()
+    stale = time.monotonic() - ratelimit._MAX_WINDOW - 1
+    for i in range(ratelimit._SWEEP_AT):
+        ratelimit._hits[("admin_login", f"10.0.0.{i}")] = deque([stale])
+
+    assert len(ratelimit._hits) == ratelimit._SWEEP_AT
+
+    ratelimit.check(ratelimit.ADMIN_LOGIN, "203.0.113.1")
+
+    # Every stale window is gone; only the caller that just arrived is left.
+    assert list(ratelimit._hits) == [("admin_login", "203.0.113.1")]
+
+
+def test_the_sweep_keeps_windows_that_still_matter() -> None:
+    """The other half: a sweep that dropped live windows would quietly hand
+    everybody a fresh allowance."""
+    ratelimit.reset()
+    for _ in range(3):
+        ratelimit.check(ratelimit.ADMIN_LOGIN, "203.0.113.2")
+
+    ratelimit._sweep(__import__("time").monotonic())
+
+    assert ratelimit.remaining(ratelimit.ADMIN_LOGIN, "203.0.113.2") == 2
+
+
 def test_a_window_allows_exactly_its_allowance() -> None:
     limit = ratelimit.Limit("probe", 3, 60)
     assert [ratelimit.check(limit, "k") for _ in range(4)] == [True, True, True, False]
