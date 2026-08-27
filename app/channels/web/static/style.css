@@ -394,6 +394,19 @@ label.choice {
   cursor: pointer;
   transition: border-color .15s ease, background .15s ease;
 }
+/* An explanation under a toggle, not beside it: `label.choice` is a centred
+   row, so a hint left inline would push the label off its own checkbox. The
+   indent lines it up with the label text rather than the box. */
+label.choice:has(small) { flex-wrap: wrap; align-items: flex-start; }
+label.choice small {
+  flex: 1 0 100%;
+  margin-left: 1.7rem;
+  color: var(--muted);
+  font-size: .85rem;
+  line-height: 1.45;
+  cursor: default;
+}
+
 label.choice:hover { border-color: var(--line-strong); }
 label.choice:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
 label.choice:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
@@ -559,6 +572,11 @@ button.secondary:hover { background: var(--bg-tint); color: var(--ink); }
 .actions input[type=text] { margin: 0; }
 
 /* --- Utilities -------------------------------------------------------- */
+
+/* Only ever visible in the last tenth of a capped field (§17). Right-aligned
+   under its input so it reads as a property of that field, not a new one. */
+.counter { display: block; text-align: right; color: var(--muted); font-size: .85rem; margin-top: .2rem; }
+.counter[hidden] { display: none; }
 
 .muted { color: var(--muted); font-size: .92rem; }
 .steps .muted { margin: .55rem 0 0; }

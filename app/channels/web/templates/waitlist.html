@@ -8,10 +8,10 @@
 <form method="post" action="/waitlist" class="card">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label>{{ t.waitlist_problem }}
-    <textarea name="problem" rows="4"></textarea>
+    <textarea name="problem" rows="4" maxlength="{{ text_max }}" data-counter></textarea>
   </label>
   <label>{{ t.waitlist_contact }}
-    <input type="text" name="contact">
+    <input type="text" name="contact" maxlength="{{ text_max }}" data-counter>
   </label>
   <label>{{ t.email_label }}
     <input type="email" name="email" required>

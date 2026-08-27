@@ -154,7 +154,12 @@ async def _send(update: Update, reply: Reply | None) -> None:
     except Exception as exc:  # a reply that fails must not fail the webhook
         logger.warning("could not reply to chat %s: %s", update.chat_id, type(exc).__name__)
     finally:
-        await bot.session.close()
+        # Suppressed for the same reason as the `except` above: raising out of
+        # the `finally` would let a failed cleanup do exactly what a failed
+        # reply is not allowed to do, and fail the webhook. Telegram retries a
+        # webhook it did not get a 200 for, so the update would arrive again.
+        with suppress(Exception):
+            await bot.session.close()
 
 
 async def _edit(bot: object, update: Update, reply: Reply) -> bool:

@@ -92,7 +92,7 @@ booking:
   timezone.detected: "We detected {timezone}. Is that right?"
   choose_slot: "Choose a time that suits you. Times are shown in {timezone}."
   slot.none_available: "There are no free times at the moment."
-  slot.held: "This time is reserved for you for {minutes} minutes while you finish."
+  slot.held: "Please finish within {minutes} minutes. The time is not held until you submit, so someone else can still choose it."
   slot.taken: "Sorry, that time has just been taken. Please choose another."
   slot.hold_expired: "Your reservation expired. Please choose a time again."
   ask_desired_time: "When would suit you? Write it in your own words — a day, a part of the day, or a specific time."
@@ -108,6 +108,7 @@ booking:
   contact.email_taken: "That address is already connected to another profile. Please use a different one."
   contact.email_sent: "I have sent a confirmation link to {email}. Open it and confirmations and reminders will reach you by email as well."
   submitted: "Thank you. Your request has been sent, number {uuid}. I will get back to you shortly."
+  check_email: "A sign-in link is on its way to your address. Follow it to open this request and to receive reminders."
   cancelled_by_user: "Booking cancelled. You are back at the main menu."
   unavailable: "New bookings are closed at the moment."
 

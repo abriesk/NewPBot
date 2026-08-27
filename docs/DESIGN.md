@@ -147,7 +147,13 @@ The fix separates the person from the credential:
 - `client` — the person, with a stable internal ID.
 - `identity` — `(client_id, channel, external_id, verified_at)`.
 
-A Telegram identity is created on first `/start` and is verified by construction: Telegram vouches for the user ID. An email identity is created on the web and is verified by a magic link — an unverified email must not be able to book, or the system becomes a way to send unsolicited mail in the therapist's name.
+A Telegram identity is created on first `/start` and is verified by construction: Telegram vouches for the user ID. An email identity is created on the web and is verified by a magic link.
+
+**Verification gates identity, not booking.** The request is submitted either way — IMPLEMENTATION.md §12.1 is normative on this, and a client who typed their address has done everything the form asked of them. What waits for the magic link is anything that says *who this browser is*: an unverified address gets no session cookie and no channel-link token.
+
+The reason is that `resolve_client` returns the client who already owns an address. Issue either on a merely typed one and knowing somebody's email address is enough to become them — the session signs the browser in as them, and the Telegram deep link attaches an account to their client record permanently, after which §13.3 routes their notifications to it. Neither is a thing to hand out on an unproved claim, and for this practice in particular the person most likely to try is not a stranger.
+
+The unsolicited-mail concern is handled where it belongs: §13.3 addresses nothing to an unverified identity. The single exception is the sign-in link itself, because following it is what verifies the address — and without it a client who books without Telegram has no way back to their own request.
 
 **Merging.** Every notification email includes a Telegram deep link of the form `https://t.me/<bot>?start=link_<token>`. Tapping it hands the token to the bot as the `/start` payload; the bot resolves the token and attaches a `telegram` identity to the client who already exists. This is the identity-merge path, and it costs the client one tap rather than a "please type your email into the bot" flow. The same mechanism works in reverse: a Telegram-first client who supplies an email later gets a verification link.
 
@@ -446,6 +452,49 @@ Roughly in the order they would be worth doing:
 8. Client self-study materials as a content type
 9. Multi-practice operation (§18)
 10. Statistics for the therapist: conversion, no-shows, load by weekday
+
+### 20.1 Known weaknesses, accepted for now
+
+Not features waiting to be built — things we have looked at, understood, and
+decided not to act on yet. Recorded so the next person finds the reasoning
+rather than the surprise.
+
+**Raw tokens live in `outbox_message.payload`.** `issue_token` promises that
+only a hash is persisted, so a database leak hands out no live tokens
+(IMPLEMENTATION.md §6.2). The notification service then puts the raw
+`view_token` into the outbox payload, and the login link carries its raw token
+the same way — so the outbox undoes for its own rows what the token table is
+careful about, and every nightly dump (§21) contains live view and login tokens
+until they expire or are consumed. Closing it properly means minting the token
+in the worker at send time rather than at enqueue time, because a raw value
+cannot be recovered from a hash. That is a real change to who mints tokens, and
+the exposure is bounded: single-use, short-lived, and behind a `0700` backup
+directory. Revisit when the outbox grows a pruning job, or if dumps ever leave
+the host.
+
+**Nothing reserves a slot while the client fills in the form.** `/book/hold`
+records the choice against the flow and takes no database hold, because §6.4
+makes `held_by_request` non-null whenever a slot is held — a real hold needs a
+request row, and creating one there would notify the therapist about a form
+nobody has filled in. So two clients can be on the same slot at once, and the
+loser is told at submit (`booking.slot.taken`); the M2 concurrency test
+guarantees there is exactly one winner. `slot_hold_minutes` therefore names the
+window a client *should* finish in rather than one anything enforces, and the
+wording on the page says so instead of promising a reservation. Closing it
+properly wants a nullable hold owner or a two-phase submit, plus the same
+treatment on Telegram, which has no pre-submit reservation at all. Worth doing
+when contention stops being hypothetical — one therapist and a handful of
+requests a day is not where two clients race for one slot.
+
+**A `view_request` token burns on `GET`.** Opening `/r/{uuid}?token=…` consumes
+the token on first paint, so anything that fetches the URL before the client
+does spends it — and mail scanners on some corporate systems do exactly that,
+leaving the real client at the sign-in form with a magic-link allowance of three
+an hour (§17). Tested against a personal Gmail account and the behaviour did not
+appear; the risk is specific to link-scanning gateways rather than to consumer
+mail. Any fix moves when the token burns, which §6.2 pins as single-use, so it
+is not worth changing on a hypothetical. Revisit if a client reports a dead
+link, and treat "the therapist's clients are on corporate mail" as the trigger.
 
 ---
 

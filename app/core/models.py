@@ -504,7 +504,15 @@ class Translation(Base):
     lang: Mapped[str] = mapped_column(Text, nullable=False)
     key: Mapped[str] = mapped_column(Text, nullable=False)
     value: Mapped[str] = mapped_column(Text, nullable=False)
-    updated_at: Mapped[datetime] = _tstz(nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = _tstz(
+        # `onupdate` and not just `server_default`: the seed inserts every key at
+        # boot, so a therapist's edit is always an UPDATE. Without this the
+        # column never moves after the first boot and `invalidate_if_stale`
+        # (§15) would have nothing to watch.
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
 
 class TimezoneOption(Base):

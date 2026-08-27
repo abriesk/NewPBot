@@ -68,7 +68,7 @@ from app.core.models import (
     SessionType,
     Slot,
 )
-from app.core.policies import now_utc, pending_expiry, reminder_schedule
+from app.core.policies import check_client_text, now_utc, pending_expiry, reminder_schedule
 from app.core.services import slots as slot_service
 from app.core.services.settings import get_practice
 
@@ -437,11 +437,20 @@ async def _last_admin_proposal(session: AsyncSession, request_id: int) -> Negoti
 
 
 async def whose_turn(session: AsyncSession, request_id: int) -> SenderType | None:
-    """Derived from the last message's sender, never stored (§6.6)."""
+    """Derived from the last message's sender, never stored (§6.6).
+
+    Only the two senders who have a turn are considered. Nothing writes a
+    `system` message today, but the flip below is an admin/client either-or:
+    one system row would silently hand the turn to the admin and leave the
+    client unable to answer.
+    """
     last = (
         await session.execute(
             select(NegotiationMessage)
-            .where(NegotiationMessage.request_id == request_id)
+            .where(
+                NegotiationMessage.request_id == request_id,
+                NegotiationMessage.sender.in_((SenderType.admin, SenderType.client)),
+            )
             .order_by(NegotiationMessage.created_at.desc(), NegotiationMessage.id.desc())
             .limit(1)
         )
@@ -471,6 +480,10 @@ async def _submit(
     practice = await get_practice(session)
     if not practice.availability_on:
         raise BookingClosed("the practice is not accepting bookings")
+
+    check_client_text(problem_text, "problem_text")
+    check_client_text(contact_note, "contact_note")
+    check_client_text(desired_time_text, "desired_time_text")
 
     await _enforce_submission_rate(session, client_id)
 
@@ -537,7 +550,10 @@ async def submit_slot_request(
         client_timezone=client_timezone,
     )
 
-    slot = await slot_service.hold_slot(session, slot_id, request.id)
+    # The hold lasts as long as the request can stay undecided, not
+    # `slot_hold_minutes`: this request is submitted, so the window it needs is
+    # the therapist's, not the client's form-filling one (§7.2).
+    slot = await slot_service.hold_slot(session, slot_id, request.id, until=request.expires_at)
 
     if practice.auto_confirm_slots:
         # One line of policy, off by default: keeping the therapist in the loop
@@ -648,10 +664,24 @@ async def admin_propose(
     # Releasing when the proposal names a different time (§7.1): holding a slot
     # the therapist has just proposed moving away from would keep it off the
     # picker for no reason.
+    #
+    # The comparison MUST come before the release, not after. Releasing first
+    # and then discovering the proposal named the very slot being held puts that
+    # slot back on the picker while the request still points at it, and a second
+    # client can take it out from under the negotiation.
     if request.slot_id is not None and proposed_start is not None:
-        slot = await slot_service.release_slot(session, request.slot_id)
-        if slot.starts_at != proposed_start:
+        held = (
+            await session.execute(select(Slot).where(Slot.id == request.slot_id))
+        ).scalar_one_or_none()
+        if held is None or held.starts_at != proposed_start:
+            await slot_service.release_slot(session, request.slot_id)
             request.slot_id = None
+        else:
+            # Keeping the slot means keeping it held, and a negotiation has no
+            # expiry of its own (§7.1 expires only `pending`). Re-stamped from
+            # the proposal, so the hold follows the conversation rather than
+            # lapsing on a clock started at submission.
+            await slot_service.extend_hold(session, request.slot_id, pending_expiry(practice))
 
     session.add(
         NegotiationMessage(
@@ -775,7 +805,16 @@ async def client_accept(session: AsyncSession, request_id: int) -> BookingReques
 
 
 async def _matching_slot(session: AsyncSession, starts_at: datetime) -> int | None:
-    """An available slot at exactly this instant, if the practice offers one."""
+    """An available slot at exactly this instant, if the practice offers one.
+
+    Locked, because the caller books what this returns. Read without the lock,
+    two clients accepting proposals for the same instant could both be handed
+    the same slot id; the second `book_slot` then raised `SlotUnavailable` and
+    the client saw a generic error for a booking that was about to succeed on
+    retry. Postgres re-checks the predicate after taking the lock, so a slot
+    taken in the meantime comes back as None -- and confirming without a slot
+    is a case the negotiation path already allows (§7.1).
+    """
     from app.core.enums import SlotStatus
     from app.core.models import Slot
 
@@ -784,6 +823,7 @@ async def _matching_slot(session: AsyncSession, starts_at: datetime) -> int | No
             select(Slot.id)
             .where(Slot.starts_at == starts_at, Slot.status == SlotStatus.available)
             .limit(1)
+            .with_for_update()
         )
     ).scalar_one_or_none()
 

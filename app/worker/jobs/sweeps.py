@@ -1,6 +1,6 @@
 """The database sweeps (IMPLEMENTATION.md §14).
 
-Seven jobs, all of the same shape: claim due rows with FOR UPDATE SKIP LOCKED,
+Nine jobs. Eight are the same shape: claim due rows with FOR UPDATE SKIP LOCKED,
 act, commit. Every one is idempotent and safe to run beside a second worker,
 even though only one is deployed.
 
@@ -27,7 +27,8 @@ from app.core.models import (
     Slot,
 )
 from app.core.policies import now_utc
-from app.core.services import booking, notifications
+from app.core.services import booking, notifications, translations
+from app.core.services import slots as slot_service
 from app.core.services.content import MAX_REVISIONS
 from app.core.services.notifications import Recipient
 from app.core.services.settings import get_practice
@@ -48,14 +49,20 @@ ERROR_EVENT_RETENTION = timedelta(days=30)
 async def expire_slot_holds() -> int:
     """`slot.status='held' AND hold_expires_at < now()` -> available.
 
-    The hold exists to stop two clients picking the same slot while one is still
-    typing; when it lapses the slot must come back (DESIGN.md §8).
+    A hold lapses when the window it was given runs out: the client's
+    form-filling one for a slot nobody has submitted against, the request's own
+    `expires_at` once they have (§7.2).
+
+    The transition is `slot_service.expire_hold` rather than three assignments
+    here. Written out a second time, this job and the service were free to
+    disagree about what expiring a hold means, and only one of them is the state
+    machine.
     """
     async with unit_of_work() as session:
-        slots = (
+        slot_ids = (
             (
                 await session.execute(
-                    select(Slot)
+                    select(Slot.id)
                     .where(
                         Slot.status == SlotStatus.held,
                         Slot.hold_expires_at < now_utc(),
@@ -67,13 +74,11 @@ async def expire_slot_holds() -> int:
             .scalars()
             .all()
         )
-        for slot in slots:
-            slot.status = SlotStatus.available
-            slot.hold_expires_at = None
-            slot.held_by_request = None
-        if slots:
-            logger.info("released %d lapsed slot hold(s)", len(slots))
-        return len(slots)
+        for slot_id in slot_ids:
+            await slot_service.expire_hold(session, slot_id)
+        if slot_ids:
+            logger.info("released %d lapsed slot hold(s)", len(slot_ids))
+        return len(slot_ids)
 
 
 async def expire_requests() -> int:
@@ -327,3 +332,23 @@ async def prune_error_events() -> int:
         if count:
             logger.info("pruned %d error event(s)", count)
         return count
+
+
+async def refresh_translations() -> int:
+    """Drop this process's UI-string cache when another one has edited it (§15).
+
+    The admin UI clears the cache it shares with the web process the moment the
+    therapist saves. The worker is a separate process and renders every outbox
+    message through the same cache, so without this the wording on the web
+    changes and the wording in Telegram and email does not -- until the
+    container happens to restart.
+
+    Runs before `dispatch_outbox` so an edit is picked up in the same pass that
+    renders the messages waiting behind it. The whole cost is one aggregate over
+    a few hundred short rows.
+    """
+    async with unit_of_work() as session:
+        dropped = await translations.invalidate_if_stale(session)
+    if dropped:
+        logger.info("translation cache refreshed: another process edited a string")
+    return int(dropped)

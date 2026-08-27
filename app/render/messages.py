@@ -214,6 +214,15 @@ def _instant(value: Any) -> datetime | None:
         return None
 
 
+#: Actions whose destination comes from the payload rather than being derived
+#: from the request. Anything not here links to the request page.
+_ACTION_URL_FIELDS = {"open": "url", "telegram": "telegram_url"}
+
+#: ...and those for which that payload field is the only sensible destination,
+#: so a missing one drops the action instead of mislabelling the fallback.
+_ACTION_URL_REQUIRED = frozenset({"telegram"})
+
+
 def _request_url(base_url: str, payload: dict[str, Any]) -> str:
     """§12.1: a link about a request opens the request.
 
@@ -260,7 +269,13 @@ async def _actions(
                 Action(key=key, label=label, callback_data=f"{key}:{request_id}")
             )
         else:
-            url = payload.get("url") if key == "open" else None
+            url = payload.get(_ACTION_URL_FIELDS.get(key, ""))
+            if key in _ACTION_URL_REQUIRED and not url:
+                # Its destination lives in the payload and is not there. The
+                # fallback below points at the request page, which would put a
+                # "connect Telegram" label on a link that does nothing of the
+                # sort.
+                continue
             actions.append(
                 Action(key=key, label=label, url=url or _request_url(base_url, payload))
             )

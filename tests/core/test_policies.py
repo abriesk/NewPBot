@@ -13,7 +13,9 @@ import pytest
 from app.core.enums import BookingMode
 from app.core.models import Practice
 from app.core.policies import (
+    CLIENT_TEXT_MAX_CHARS,
     BookingPath,
+    check_client_text,
     hold_expiry,
     is_within_cancellation_window,
     pending_expiry,
@@ -153,3 +155,29 @@ def test_cancellation_window_compares_against_the_setting() -> None:
     practice = _practice(cancel_window_hours=24)
     assert is_within_cancellation_window(practice, NOW + timedelta(hours=25), at=NOW)
     assert not is_within_cancellation_window(practice, NOW + timedelta(hours=23), at=NOW)
+
+
+# --- Free-text cap (§17) ----------------------------------------------------
+
+
+def test_client_text_within_the_cap_is_returned_unchanged() -> None:
+    assert check_client_text("a" * CLIENT_TEXT_MAX_CHARS, "problem_text")
+    assert check_client_text(None, "problem_text") is None
+
+
+def test_over_long_client_text_is_refused_rather_than_truncated() -> None:
+    """Truncating would drop the end of somebody's description of their problem
+    without telling them or the therapist that half of it went missing.
+
+    The cap is Telegram's message limit: the problem description arrives as one
+    message there, so that ceiling already applied on that channel. This is what
+    makes the web agree rather than accept text the bot could not have carried.
+    """
+    import pytest
+
+    from app.core.errors import TextTooLong
+
+    assert CLIENT_TEXT_MAX_CHARS == 4096
+
+    with pytest.raises(TextTooLong):
+        check_client_text("a" * (CLIENT_TEXT_MAX_CHARS + 1), "problem_text")

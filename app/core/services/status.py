@@ -40,6 +40,11 @@ DEAD_WINDOW = timedelta(days=7)
 FAILING_WINDOW = timedelta(hours=1)
 FAILING_WARN_AT = 3
 OVERDUE_GRACE = timedelta(minutes=15)
+
+#: How long a row may sit in `sending` before it counts as an interrupted send
+#: rather than one in flight. A dispatch pass takes seconds; past this it is a
+#: process that died between the claim and the transport (§14).
+STUCK_GRACE = timedelta(minutes=15)
 ERROR_WINDOW = timedelta(hours=1)
 WEB_ERRORS_FAIL_AT = 10
 WORKER_ERRORS_FAIL_AT = 3
@@ -127,6 +132,7 @@ async def run_checks(session: AsyncSession, *, code_head: str | None = None) -> 
         _outbox_dead,
         _outbox_failing,
         _outbox_stalled,
+        _outbox_stuck,
         _reminders_overdue,
         _web_errors,
         _worker_errors,
@@ -249,6 +255,41 @@ async def _outbox_stalled(session: AsyncSession) -> Check:
         f"waiting on replies the practice thinks it sent.",
         f"outbox: {count} pending past next_attempt_at by more than "
         f"{int(OVERDUE_GRACE.total_seconds() // 60)}m",
+    )
+
+
+async def _outbox_stuck(session: AsyncSession) -> Check:
+    """A send that was claimed and never finished.
+
+    `sending` is committed before the message reaches a transport (§14), so a
+    process that dies mid-send leaves the row here rather than rolling it back
+    to `pending` for the next pass to send twice. Nothing moves it out again on
+    its own, and that is deliberate: whether the message actually went is
+    exactly what nobody knows, and a sweep that guessed would reintroduce the
+    duplicate the `sending` state exists to prevent. So it is surfaced for a
+    person to decide about instead.
+    """
+    cutoff = now_utc() - STUCK_GRACE
+    rows = (
+        await session.execute(
+            select(func.count(), func.min(OutboxMessage.created_at)).where(
+                OutboxMessage.status == OutboxStatus.sending,
+                OutboxMessage.created_at < cutoff,
+            )
+        )
+    ).one()
+    count, oldest = int(rows[0]), rows[1]
+
+    if not count:
+        return ok("outbox_stuck", "no interrupted sends")
+
+    return Check(
+        "outbox_stuck",
+        CheckState.fail,
+        f"{count} message(s) were interrupted while being sent. Nobody knows "
+        f"whether they arrived, so nothing has been retried. Call for help.",
+        f"outbox: {count} in sending for more than "
+        f"{int(STUCK_GRACE.total_seconds() // 60)}m, oldest {oldest:%Y-%m-%dT%H:%MZ}",
     )
 
 

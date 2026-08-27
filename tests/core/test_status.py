@@ -94,6 +94,7 @@ async def test_a_healthy_database_reports_every_check_ok(db: AsyncSession) -> No
         "outbox_dead",
         "outbox_failing",
         "outbox_stalled",
+        "outbox_stuck",
         "reminders_overdue",
         "web_errors",
         "worker_errors",
@@ -160,6 +161,35 @@ async def test_a_pending_message_is_red_only_once_overdue(
         db, practice, status=OutboxStatus.pending, next_delta=-OVERDUE_GRACE - timedelta(minutes=1)
     )
     assert (await _one(db, "outbox_stalled")).state is CheckState.fail
+
+
+async def test_an_interrupted_send_is_red_only_once_it_is_stale(
+    db: AsyncSession, practice: Practice
+) -> None:
+    """§14 commits `sending` before the message reaches a transport, so a row
+    left there is a process that died mid-send. Nothing retries it -- whether it
+    arrived is exactly what nobody knows -- so the dot is what surfaces it.
+
+    A row *currently* being sent is in the same state, which is why the check
+    waits for the row to go stale rather than firing on the state alone.
+    """
+    from app.core.services.status import STUCK_GRACE
+
+    await _outbox(
+        db,
+        practice,
+        status=OutboxStatus.sending,
+        created_delta=-STUCK_GRACE + timedelta(minutes=1),
+    )
+    assert (await _one(db, "outbox_stuck")).state is CheckState.ok
+
+    await _outbox(
+        db,
+        practice,
+        status=OutboxStatus.sending,
+        created_delta=-STUCK_GRACE - timedelta(minutes=1),
+    )
+    assert (await _one(db, "outbox_stuck")).state is CheckState.fail
 
 
 async def test_an_overdue_reminder_is_red(db: AsyncSession, request_id: int) -> None:

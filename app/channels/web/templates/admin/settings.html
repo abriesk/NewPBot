@@ -24,6 +24,9 @@
       <input type="checkbox" name="fallback_to_negotiation" value="1"
              {% if practice.fallback_to_negotiation %}checked{% endif %}>
       Offer a free-text time when no slots are free
+      <small>Clients type a time instead of picking one, so the request arrives
+        with no slot behind it and nothing reserves that hour until you approve
+        it. Off means an empty grid sends them to the waitlist instead.</small>
     </label>
     <label class="choice">
       <input type="checkbox" name="negotiation_enabled" value="1"

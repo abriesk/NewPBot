@@ -55,6 +55,12 @@ class MarkdownNotAllowed(DomainError):
         self.detail = detail
 
 
+#: Built once. Nothing mutates the parser after construction -- every caller
+#: only parses or renders with it -- so rebuilding the rule set on each of the
+#: four call sites bought nothing but allocations on the render path.
+_PARSER = MarkdownIt("commonmark").enable("table")
+
+
 def make_parser() -> MarkdownIt:
     """The one parser configuration.
 
@@ -62,7 +68,7 @@ def make_parser() -> MarkdownIt:
     rule, a pipe table parses as ordinary paragraphs and the validator would
     happily accept something that renders as gibberish.
     """
-    return MarkdownIt("commonmark").enable("table")
+    return _PARSER
 
 
 def validate_markdown(body_md: str) -> None:

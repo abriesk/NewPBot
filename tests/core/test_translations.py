@@ -4,10 +4,18 @@ from __future__ import annotations
 
 import logging
 
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.models import Translation
 from app.core.services import translations
-from app.core.services.translations import get_text, invalidate_cache, missing_keys, set_text
+from app.core.services.translations import (
+    get_text,
+    invalidate_cache,
+    invalidate_if_stale,
+    missing_keys,
+    set_text,
+)
 
 
 def setup_function() -> None:
@@ -15,6 +23,7 @@ def setup_function() -> None:
     cache by design."""
     invalidate_cache()
     translations._warned.clear()
+    translations._watermark = None
 
 
 async def test_a_seeded_key_resolves(db: AsyncSession) -> None:
@@ -94,6 +103,62 @@ async def test_editing_invalidates_the_cache(db: AsyncSession) -> None:
     assert await get_text(db, "en", "common.back") == "Back"
     await set_text(db, "en", "common.back", "Go back")
     assert await get_text(db, "en", "common.back") == "Go back"
+
+
+async def _stamp(session: AsyncSession, lang: str, key: str) -> object:
+    return (
+        await session.execute(
+            select(Translation.updated_at).where(Translation.lang == lang, Translation.key == key)
+        )
+    ).scalar_one()
+
+
+async def test_editing_an_existing_row_moves_its_timestamp(db: AsyncSession) -> None:
+    """The trap in the staleness check below.
+
+    The seed inserts every key at boot, so a therapist's edit is always an
+    UPDATE, never an INSERT. With only `server_default` on `updated_at` the
+    column would be stamped once at first boot and never move again -- and the
+    watermark would sit there watching a number that cannot change.
+    """
+    before = await _stamp(db, "en", "common.skip")
+    await set_text(db, "en", "common.skip", "Skip this")
+
+    assert await _stamp(db, "en", "common.skip") > before
+
+
+async def test_an_edit_in_another_process_drops_this_ones_cache(db: AsyncSession) -> None:
+    """§15: the worker renders every outbound message through this cache and
+    never calls `invalidate_cache` itself, because the admin edit happens in the
+    web process. The edit below is issued as raw SQL for exactly that reason --
+    going through `set_text` would clear the cache here and simulate nothing.
+    """
+    assert await invalidate_if_stale(db) is False, "the first look only records the mark"
+
+    assert await get_text(db, "en", "common.back") == "Back"
+
+    result = await db.execute(
+        update(Translation)
+        .where(Translation.lang == "en", Translation.key == "common.back")
+        .values(value="Go back")
+    )
+    assert result.rowcount == 1, "the seed must have written this row for the test to mean anything"
+
+    # The bug this job exists to fix: the row changed, this process has not
+    # noticed, and every message it renders still says the old thing.
+    assert await get_text(db, "en", "common.back") == "Back"
+
+    assert await invalidate_if_stale(db) is True
+    assert await get_text(db, "en", "common.back") == "Go back"
+
+
+async def test_an_unchanged_catalogue_does_not_drop_the_cache(db: AsyncSession) -> None:
+    """The other half: a check that always invalidated would be a correct-looking
+    way to throw the cache away on every pass."""
+    await invalidate_if_stale(db)
+
+    assert await invalidate_if_stale(db) is False
+    assert await invalidate_if_stale(db) is False
 
 
 async def test_missing_keys_ignores_the_english_only_admin_namespace(

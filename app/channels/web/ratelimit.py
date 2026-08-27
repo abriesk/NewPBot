@@ -28,7 +28,7 @@ limited.
 from __future__ import annotations
 
 import time
-from collections import defaultdict, deque
+from collections import deque
 from dataclasses import dataclass
 
 #: §17, verbatim.
@@ -53,14 +53,31 @@ class Limit:
 ADMIN_LOGIN = Limit("admin_login", ADMIN_LOGIN_PER_IP, ADMIN_LOGIN_WINDOW)
 MAGIC_LINK_IP = Limit("magic_link_ip", MAGIC_LINK_PER_IP, MAGIC_LINK_WINDOW)
 
-#: {(limit name, key): timestamps}. Bounded by pruning on every check, so a
-#: burst of distinct keys cannot grow it without bound for longer than a window.
-_hits: dict[tuple[str, str], deque[float]] = defaultdict(deque)
+#: {(limit name, key): timestamps}.
+_hits: dict[tuple[str, str], deque[float]] = {}
+
+#: The longest window any limit here uses. A bucket whose newest timestamp is
+#: older than this cannot affect any of them, whichever limit it belongs to,
+#: which is what lets the sweep below work without knowing.
+_MAX_WINDOW = max(ADMIN_LOGIN_WINDOW, MAGIC_LINK_WINDOW)
+
+#: Pruning empties a deque but leaves its key behind, so the map grew by one
+#: entry per address that ever called and never shrank -- slowly, but without
+#: any bound. Swept once it passes this, which is amortised rather than walking
+#: every key on every check.
+_SWEEP_AT = 512
 
 
 def _prune(bucket: deque[float], window: int, now: float) -> None:
     while bucket and bucket[0] <= now - window:
         bucket.popleft()
+
+
+def _sweep(now: float) -> None:
+    """Drop keys that can no longer affect any limit."""
+    cutoff = now - _MAX_WINDOW
+    for ident in [i for i, bucket in _hits.items() if not bucket or bucket[-1] <= cutoff]:
+        del _hits[ident]
 
 
 def check(limit: Limit, key: str) -> bool:
@@ -70,7 +87,10 @@ def check(limit: Limit, key: str) -> bool:
     failures is trivially defeated by succeeding at something cheap.
     """
     now = time.monotonic()
-    bucket = _hits[(limit.name, key)]
+    if len(_hits) >= _SWEEP_AT:
+        _sweep(now)
+
+    bucket = _hits.setdefault((limit.name, key), deque())
     _prune(bucket, limit.window_seconds, now)
 
     if len(bucket) >= limit.allowance:
@@ -81,8 +101,14 @@ def check(limit: Limit, key: str) -> bool:
 
 
 def remaining(limit: Limit, key: str) -> int:
-    """How many attempts are left. For tests and diagnostics."""
-    bucket = _hits[(limit.name, key)]
+    """How many attempts are left. For tests and diagnostics.
+
+    Reads without recording: asking must not be what creates the entry, or
+    every diagnostic call would leak one.
+    """
+    bucket = _hits.get((limit.name, key))
+    if bucket is None:
+        return limit.allowance
     _prune(bucket, limit.window_seconds, time.monotonic())
     return max(0, limit.allowance - len(bucket))
 

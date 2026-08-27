@@ -497,3 +497,54 @@ async def test_telegram_is_not_told_about_a_calendar_it_never_got(db: AsyncSessi
     )
 
     assert "calendar" not in message.text.lower()
+
+
+# --- The merge link rides on the sign-in email (DESIGN.md §5.1) -------------
+
+
+async def test_the_sign_in_email_carries_the_telegram_merge_link(db: AsyncSession) -> None:
+    """The deep link attaches a Telegram account to a client permanently, so it
+    belongs in the one message only the address owner can read.
+
+    `telegram_url` sat in the payload for a long time without any renderer
+    reading it, which meant the merge was reachable from the booking
+    confirmation page and nowhere else -- exactly backwards.
+    """
+    message = await render(
+        db,
+        intent_key="auth.login_link.client",
+        payload={
+            "url": "https://example.test/auth/callback?token=abc",
+            "minutes": 30,
+            "telegram_url": "https://t.me/testbot?start=link_xyz",
+        },
+        locale="en",
+        channel=Channel.email,
+        tz="UTC",
+        base_url="https://example.test",
+    )
+
+    assert "https://t.me/testbot?start=link_xyz" in message.text
+    # And the sign-in link is still there beside it.
+    assert "https://example.test/auth/callback?token=abc" in message.text
+
+
+async def test_a_sign_in_email_without_a_merge_link_offers_no_telegram_action(
+    db: AsyncSession,
+) -> None:
+    """The fallback for an action with no payload URL is the request page. On
+    this intent that would put "connect Telegram" on a link to somebody's
+    booking, so the action is dropped instead.
+    """
+    message = await render(
+        db,
+        intent_key="auth.login_link.client",
+        payload={"url": "https://example.test/auth/callback?token=abc", "minutes": 30},
+        locale="en",
+        channel=Channel.email,
+        tz="UTC",
+        base_url="https://example.test",
+    )
+
+    assert "t.me" not in message.text
+    assert [action.key for action in message.actions] == ["open"]

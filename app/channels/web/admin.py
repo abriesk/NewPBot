@@ -16,6 +16,7 @@ into app/core/services/.
 from __future__ import annotations
 
 import logging
+from collections.abc import Sequence
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from uuid import UUID
@@ -266,7 +267,7 @@ def build_router() -> APIRouter:
                     request,
                     admin,
                     view="list",
-                    rows=[await _summary(session, r) for r in rows],
+                    rows=await _summaries(session, rows),
                     statuses=[s.value for s in RequestStatus],
                     active=status,
                 ),
@@ -1346,19 +1347,42 @@ async def _schedule(session: AsyncSession, start: str) -> dict[str, Any]:
     }
 
 
+async def _session_type_codes(session: AsyncSession) -> dict[int, str]:
+    """Every session type's code, by id. There are a handful of them."""
+    rows = (await session.execute(select(SessionType.id, SessionType.code))).all()
+    return {int(row[0]): str(row[1]) for row in rows}
+
+
+async def _summaries(
+    session: AsyncSession, requests: Sequence[BookingRequest]
+) -> list[dict[str, Any]]:
+    """The requests list, in two queries rather than two per row.
+
+    `_summary` looks up the practice and the session type itself, which is right
+    for one request and wrong for two hundred: the list route was issuing four
+    hundred queries to render a table whose lookups are all the same.
+    """
+    practice = await get_practice(session)
+    zone = ZoneInfo(practice.timezone)
+    codes = await _session_type_codes(session)
+    return [_summary_row(request, zone, codes) for request in requests]
+
+
 async def _summary(session: AsyncSession, request: BookingRequest) -> dict[str, Any]:
+    """One row, fetching what it needs. For the pages that render exactly one."""
+    practice = await get_practice(session)
+    return _summary_row(request, ZoneInfo(practice.timezone), await _session_type_codes(session))
+
+
+def _summary_row(
+    request: BookingRequest, zone: ZoneInfo, session_type_codes: dict[int, str]
+) -> dict[str, Any]:
     """One row of the requests list.
 
     `uuid` MUST appear (§6.5). `problem_text` is included on the *detail* page
     only, never in a list, a log, or an email (hard rule 8).
     """
-    practice = await get_practice(session)
-    zone = ZoneInfo(practice.timezone)
-    session_type = (
-        await session.execute(
-            select(SessionType.code).where(SessionType.id == request.session_type_id)
-        )
-    ).scalar_one()
+    session_type = session_type_codes[request.session_type_id]
 
     return {
         "uuid": str(request.uuid),

@@ -117,7 +117,12 @@ CATALOGUE: dict[str, IntentSpec] = {
     "auth.login_link.client": IntentSpec(
         key="auth.login_link.client",
         body_key="intent.auth.login_link.client.body",
-        actions=("open",),
+        # The merge link rides on this intent because this is the message only
+        # the address owner can read (DESIGN.md §5.1). Offering it anywhere the
+        # address has not proved itself hands a Telegram account the ability to
+        # attach itself to somebody else's client record.
+        actions=("open", "telegram"),
+        optional_parts=(("telegram_url", "intent.auth.login_link.client.telegram_hint"),),
         email_subject_key="intent.auth.login_link.client.subject",
     ),
     "auth.link_channel.client": IntentSpec(
@@ -153,6 +158,7 @@ ACTION_LABEL_KEYS: dict[tuple[str, str], str] = {
     ("request.confirmed.client", "open"): "request.open",
     ("reminder.client", "open"): "request.open",
     ("auth.login_link.client", "open"): "intent.auth.login_link.client.action.open",
+    ("auth.login_link.client", "telegram"): "intent.auth.login_link.client.action.telegram",
     ("auth.link_channel.client", "open"): "intent.auth.login_link.client.action.telegram",
     ("system.health.degraded.admin", "open"): "admin.intent.system.health.action.open",
     ("request.submitted.admin", "approve"): "admin.request.approve",

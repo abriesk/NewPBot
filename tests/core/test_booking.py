@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 import pytest
+import time_machine
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -208,6 +209,65 @@ async def test_proposing_a_different_time_releases_the_held_slot(
     assert request.slot_id is None
 
 
+async def test_proposing_the_held_time_keeps_the_slot_held(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The other half of §7.1, and the reason the comparison precedes the
+    release: a therapist who proposes the time the client already picked -- to
+    attach a note to it, say -- must not thereby put that slot back on the
+    picker for someone else to take mid-negotiation.
+    """
+    request = await _submit(db, client, session_type_id, future_slot)
+    assert future_slot.status is SlotStatus.held
+
+    await booking.admin_propose(
+        db, request.id, proposed_start=future_slot.starts_at, body_text="does this still suit?"
+    )
+
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.held
+    assert future_slot.held_by_request == request.id
+    assert request.slot_id == future_slot.id
+
+
+async def test_a_submitted_request_holds_its_slot_for_as_long_as_it_can_live(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot, practice: Practice
+) -> None:
+    """§7.2. `slot_hold_minutes` is the window a client has to finish a form.
+    Once the form is in, the window that matters is the therapist's: the request
+    stays pending for `pending_expiry_hours`, and the slot behind it used to go
+    back on the picker after fifteen minutes while the request went on pointing
+    at it.
+    """
+    request = await _submit(db, client, session_type_id, future_slot)
+
+    assert future_slot.status is SlotStatus.held
+    assert future_slot.hold_expires_at == request.expires_at
+    assert future_slot.hold_expires_at > datetime.now(UTC) + timedelta(
+        minutes=practice.slot_hold_minutes
+    )
+
+
+async def test_a_proposal_re_stamps_the_hold_on_the_slot_it_keeps(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """A negotiation has no expiry of its own -- §7.1 expires only `pending`. So
+    a hold inherited from submission would lapse mid-conversation and put the
+    time under discussion back on the picker. It follows the conversation.
+    """
+    request = await _submit(db, client, session_type_id, future_slot)
+    at_submission = future_slot.hold_expires_at
+
+    with time_machine.travel(datetime.now(UTC) + timedelta(hours=24), tick=False):
+        await booking.admin_propose(
+            db, request.id, proposed_start=future_slot.starts_at, body_text="does this still suit?"
+        )
+
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.held
+    assert future_slot.hold_expires_at > at_submission
+
+
 async def test_admin_reject_releases_the_slot(
     db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
 ) -> None:
@@ -283,6 +343,30 @@ async def test_whose_turn_is_derived_from_the_last_sender(
 
     await booking.client_counter(db, request.id, body_text="or Friday?")
     assert await booking.whose_turn(db, request.id) is SenderType.admin
+
+
+async def test_a_system_message_does_not_take_anybody_s_turn(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """§6.6 is an admin/client either-or. Nothing writes a `system` row today,
+    so this is a guard on the day something does: read as "not admin", one
+    system row would hand the turn to the therapist and leave the client with
+    no way to answer.
+    """
+    request = await _negotiating(db, client, session_type_id, future_slot)
+    assert await booking.whose_turn(db, request.id) is SenderType.client
+
+    db.add(
+        NegotiationMessage(
+            request_id=request.id,
+            sender=SenderType.system,
+            kind=NegotiationKind.note,
+            body_text="reminder sent",
+        )
+    )
+    await db.flush()
+
+    assert await booking.whose_turn(db, request.id) is SenderType.client
 
 
 # --- Client notes (§7.1, status-neutral) ------------------------------------

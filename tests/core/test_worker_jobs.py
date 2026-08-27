@@ -431,8 +431,19 @@ def test_the_worker_registers_every_job_from_section_14() -> None:
         "prune_tokens",
         "prune_revisions",
         "prune_error_events",
+        "refresh_translations",
         "write_status",
     }
+
+
+def test_translations_are_refreshed_before_the_outbox_is_dispatched() -> None:
+    """§15. Ordering is the whole value of the job: refreshed after dispatch, an
+    edit would land one full pass late for the messages already waiting."""
+    from app.worker.main import JOBS
+
+    names = [job.__name__ for job in JOBS]
+
+    assert names.index("refresh_translations") < names.index("dispatch_outbox")
 
 
 def test_no_in_memory_scheduler_is_imported() -> None:

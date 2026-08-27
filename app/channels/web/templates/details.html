@@ -12,13 +12,13 @@
 <form method="post" action="/book" class="card">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <label>{{ t.ask_problem }}
-    <textarea name="problem" rows="4"></textarea>
+    <textarea name="problem" rows="4" maxlength="{{ text_max }}" data-counter></textarea>
   </label>
   <label>{{ t.ask_name }}
     <input type="text" name="name" value="{{ display_name or '' }}">
   </label>
   <label>{{ t.ask_contact }}
-    <input type="text" name="contact">
+    <input type="text" name="contact" maxlength="{{ text_max }}" data-counter>
   </label>
   {% if not signed_in %}
     <label>{{ t.email_label }}

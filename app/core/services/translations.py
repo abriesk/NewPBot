@@ -21,9 +21,10 @@ reason to fail a booking.
 from __future__ import annotations
 
 import logging
+from datetime import datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.models import Translation
@@ -39,6 +40,13 @@ _cache: dict[tuple[str, str], str] = {}
 #: A key missing on a hot path would otherwise fill the log with one line per
 #: request.
 _warned: set[tuple[str, str]] = set()
+
+#: The highest `translation.updated_at` this process has already accounted for.
+#: `invalidate_cache` only clears the process that calls it, and the worker is a
+#: *different* process (§3) rendering every outbox message through this same
+#: cache -- without a watermark it keeps sending the wording it read at its own
+#: boot until it restarts. `None` means "has not looked yet".
+_watermark: datetime | None = None
 
 #: Loaded lazily from locales/*.yaml. This is the fallback that keeps wording
 #: working when the database does not.
@@ -59,6 +67,29 @@ def _repo_catalogue() -> dict[str, dict[str, str]]:
 def invalidate_cache() -> None:
     """Called after an admin edits a translation."""
     _cache.clear()
+
+
+async def invalidate_if_stale(session: AsyncSession) -> bool:
+    """Drop the cache if another process has edited a translation since the last
+    look. Returns whether it did.
+
+    The first call only records where the catalogue stands: a process that has
+    not looked yet has a cold cache anyway, so there is nothing to invalidate.
+
+    Deletion is not watched, because nothing deletes a `translation` row -- both
+    the admin UI and the config import write through `set_text`.
+    """
+    global _watermark
+
+    latest = (await session.execute(select(func.max(Translation.updated_at)))).scalar_one_or_none()
+    if latest is None:
+        return False
+
+    moved = _watermark is not None and latest > _watermark
+    _watermark = latest
+    if moved:
+        invalidate_cache()
+    return moved
 
 
 async def _load(session: AsyncSession, lang: str) -> None:

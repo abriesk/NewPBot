@@ -204,6 +204,40 @@ async def test_the_waitlist_lifecycle(db: AsyncSession) -> None:
         await waitlist.close_entry(db, entry.id)
 
 
+async def test_the_waitlist_is_rate_limited_like_any_other_submission(
+    db: AsyncSession,
+) -> None:
+    """§17: 5 submissions an hour per client. The waitlist was the one path with
+    nothing in front of it, and it is the path offered when bookings are closed
+    -- so it is the one most available to somebody holding down the button.
+    """
+    from app.core.errors import RateLimited
+
+    client = await resolve_client(db, Channel.web, "wl-flood@example.test")
+    for _ in range(waitlist.JOINS_PER_HOUR):
+        await waitlist.join_waitlist(db, client_id=client.id)
+
+    with pytest.raises(RateLimited):
+        await waitlist.join_waitlist(db, client_id=client.id)
+
+
+async def test_the_waitlist_limit_is_per_client(db: AsyncSession) -> None:
+    """The other half: a limit that counted every entry in the practice would
+    close the waitlist to everyone as soon as one person filled it."""
+    from app.core.errors import RateLimited
+
+    noisy = await resolve_client(db, Channel.web, "wl-noisy@example.test")
+    for _ in range(waitlist.JOINS_PER_HOUR):
+        await waitlist.join_waitlist(db, client_id=noisy.id)
+    with pytest.raises(RateLimited):
+        await waitlist.join_waitlist(db, client_id=noisy.id)
+
+    quiet = await resolve_client(db, Channel.web, "wl-quiet@example.test")
+    entry = await waitlist.join_waitlist(db, client_id=quiet.id)
+
+    assert entry.status.value == "new"
+
+
 async def test_a_new_waitlist_entry_cannot_skip_straight_to_converted(
     db: AsyncSession,
 ) -> None:

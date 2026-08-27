@@ -159,9 +159,24 @@ async def dispatch_outbox(transports: dict[Channel, Transport] | None = None) ->
 
     active = transports if transports is not None else build_transports()
 
+    # The claim commits on its own, before anything reaches a transport. This is
+    # what the `sending` state is for: claiming and sending in one transaction
+    # means a crash after a successful send rolls the row back to `pending` and
+    # the next pass sends it a second time. `dedupe_key` cannot help there --
+    # it dedupes what goes *into* the outbox, not what leaves it.
     async with unit_of_work() as session:
-        batch = await claim_batch(session)
-        for message in batch:
+        claimed = [message.id for message in await claim_batch(session)]
+
+    if not claimed:
+        return 0
+
+    # One transaction per message, so an outcome already recorded cannot be
+    # undone by a later message in the same batch failing.
+    for message_id in claimed:
+        async with unit_of_work() as session:
+            message = (
+                await session.execute(select(OutboxMessage).where(OutboxMessage.id == message_id))
+            ).scalar_one()
             result = await deliver_one(session, message, active)
             await record_outcome(session, message, result)
             if not result.ok:
@@ -172,4 +187,4 @@ async def dispatch_outbox(transports: dict[Channel, Transport] | None = None) ->
                     message.attempts,
                     result.error,
                 )
-        return len(batch)
+    return len(claimed)
