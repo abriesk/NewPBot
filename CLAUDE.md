@@ -40,6 +40,10 @@ DESIGN.md §15). One open question is recorded there: a negotiation whose
 proposal named a *different* time has no instant on the request, so it falls
 to the unscheduled list with only a name.
 
+With the milestones done, the queue is `DESIGN.md` §20.2 — six defects and
+refinements found in use, ordered smallest change first. Work down that list.
+The last two need a decision from me before any code is written.
+
 Milestones run M0 → M13 (`IMPLEMENTATION.md` §19). Work them **in order**. Each
 one's acceptance criteria must pass before starting the next. Do not implement
 later milestones early — the ordering exists so the core is fully testable before

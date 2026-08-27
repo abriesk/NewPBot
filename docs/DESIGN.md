@@ -496,6 +496,141 @@ mail. Any fix moves when the token burns, which §6.2 pins as single-use, so it
 is not worth changing on a hypothetical. Revisit if a client reports a dead
 link, and treat "the therapist's clients are on corporate mail" as the trigger.
 
+### 20.2 Reported defects and refinements, smallest first
+
+Found in use, August 2026. Ordered by the size of the change rather than by
+importance, so the small ones can be cleared without waiting on the two that
+need design first. Each entry says what is actually wrong, what closing it
+takes, and whether IMPLEMENTATION.md has to move — where it does, the normative
+wording is written there as the work is done, not in advance.
+
+**A cancel button on a request that cannot be cancelled.** The request page
+renders all four action forms — approve, propose, reject, cancel — whatever the
+request's status. §7.1 allows `admin_cancel` only from `confirmed`, so pressing
+Cancel on a `negotiating` request raises `InvalidTransition` and the page comes
+back with a flash saying the action was refused. Telegram never had this
+problem: §13.2 requires the panel's buttons to be derived from the transition
+table, so it cannot offer what the core would refuse. Either the web page does
+the same, or the button is greyed out in place — which keeps the page's shape
+constant across statuses and says the control exists but is not for this
+request. Reject is the verb that fits a request that was never confirmed; the
+two are not interchangeable, they write different columns and send the client
+different messages, so cancel must not quietly become reject. §12.2 gains the
+sentence §13.2 already carries.
+
+**The requests list cannot say how to reach anybody.** Its columns are UUID,
+status, type, modality, name, requested and scheduled, and the name is empty for
+most web requests. §12.2 puts the client's identities on the request *page* and
+gives the reason: an unverified address receives nothing, and a request with no
+name and no contact note is otherwise unanswerable. That reasoning applies one
+level up, because the list is where the therapist decides what to open. It
+should carry a contact column — the Telegram identity, the email identity, or
+both where both exist. The constraint is query count: the list was brought down
+to two queries deliberately, so identities are fetched for the whole page at
+once, the way client names already are. Contact identities are not
+`problem_text` and hard rule 8 does not reach them, which §12.2 settles; the
+sentence scoping identities to the detail page widens to include the list.
+
+**A note reaches the therapist as an announcement rather than as the note.**
+When a client adds information, `request.note.admin` says "… added information
+to request …. Open the request to read it." — the identifier and nothing else,
+on the ground that negotiation bodies are read in the admin UI. That is right
+for email and wrong for Telegram. §13.4's restriction is about inboxes, and
+Telegram already carries `problem_text` and the client's counter text, which has
+a note line of its own. `EMAIL_FORBIDDEN_FIELDS` already strips `note`, so
+putting the body in the payload gives Telegram the note and leaves email with
+exactly the sentence it sends today: the mechanism is in place and this one
+intent is not using it. Three things ride along.
+
+Nothing may be cut in silence. `client_note` truncates at 2000 characters
+without telling anyone; the cap becomes the 4096 that §17 already applies to
+every other free-text field — Telegram's own limit, which is the reason that
+number was chosen — and over-long text is refused rather than shortened.
+
+The intent renderer joins its lines into a single Telegram part and never
+splits, so a note near the cap would build a message over the limit and the send
+would be refused. The block-boundary splitter in `app/render/markdown.py`
+already exists for exactly this; the renderer has to go through it.
+
+The note box on `/r/{uuid}`, and the counter field beside it, carry neither
+`maxlength` nor the character counter, while the booking and waitlist forms
+carry both. The behaviour wanted — a hard limit, silent until the last tenth of
+it, then a count — is already written and simply is not attached to these two
+boxes.
+
+Separately, `request.note.admin` has no no-name variant and does not fall back
+to the client's own name, so a note from a nameless client opens with a blank
+where the name belongs. §12.2 requires every admin surface that names a client
+to be able to name them, and the submission intent already has both halves.
+
+**"Clients" is the data-protection page wearing the wrong name.** It lists every
+`client` row with its identities and offers export and erasure. That is §16's
+surface — the answer to "send me my data" and "forget me" — and not a view of
+the practice's clients in any sense the therapist means by the word. It leads
+with a UUID, it includes everyone who ever asked for a magic link without
+booking, and one person whose Telegram and email were never linked appears as
+two rows with nothing to say they are the same human. Renaming it Privacy, or
+Data requests, costs a nav label and a heading.
+
+What is missing is the other page: clients grouped by their identities, each
+showing their bookings, so a returning client's history is one click instead of
+a status filter and a squint. Nothing like it exists today. This is the first
+step of §20's item 7, so it is an addition rather than a repair. §12.2 gains a
+route — which it needs regardless, because it lists `/admin/clients/{id}/export`
+and `/erase` and does not list the `/admin/clients` page that exists in the code
+and in the navigation. That disagreement is a documentation bug in its own
+right.
+
+Two things to settle before building: whether the page groups by `client` row —
+what the schema means by a person — or by identity; and whether an unlinked
+Telegram and email that plainly belong to one person should be mergeable from
+here. Merging is a write, and the only merge that is safe today is the one the
+client performs themselves, with a `link_channel` token sent to an address that
+has proved it is theirs (§5.1).
+
+**The client is asked for a time and handed a blank box.** A counter is one
+free-text input with a placeholder. The core prefers a structured time and keeps
+the words either way (§9), so the parser runs over whatever is typed — and a
+client with no reason to guess `2026-08-27 15:00` writes a sentence, no instant
+is recorded, and the therapist turns the words into a time by hand. The form
+should offer the free slots first, since a slot the practice is already holding
+open is the answer that needs no negotiation at all, and keep free text beside
+them, gated on `fallback_to_negotiation` — the setting that already decides
+whether words are an acceptable answer — with a line saying how a time is best
+written. `list_available_slots` is the read. The same question is asked on
+Telegram, where the slot keyboard exists already and the hint has to carry the
+format instead. New keys in all three locale files.
+
+**The therapist has to type an ISO timestamp to propose a time.** The panel's
+propose prompt asks for `YYYY-MM-DD HH:MM`, and the parser accepts three
+formats, every one of which needs a full date. This is the surface that exists
+for answering away from a desk, and typing a full timestamp on a phone is the
+least usable thing in it. What is wanted is a pick: the practice's own free
+slots first, and a date-and-time picker when the answer is not one of them, with
+typing kept as the escape hatch.
+
+Two reasons it is last. §13.2 states that propose and cancel need typing, so the
+panel's table changes and the section is rewritten rather than extended. And the
+Bot API has no date picker, so the shape has to be chosen by trying it:
+
+1. An inline-keyboard calendar — a month of day buttons, then a row of times. A
+   well-worn Telegram pattern, entirely within the existing panel keyboard, at
+   the cost of two or three taps and a keyboard that is large on a small screen.
+2. A list of the next open slots as buttons. One tap, covers the common case,
+   and says nothing about a time the practice has not published.
+3. A Mini App: a `web_app` button opening a real date-time control served from
+   the admin ingress already running under TLS. The best control, and a whole
+   new surface to authenticate and maintain.
+
+Settle it with the therapist on her own phone before any of it is written, the
+way §20's item 6 says to settle the Telegram schedule.
+
+A widened parser helps whichever shape wins and is independently small, but it
+does not belong in the parser clients' answers go through. That one is shared,
+and clients write in Russian and Armenian, so relative wording — "tomorrow
+15:00" — and a bare `15:00` want a separate admin parser: the same question
+asked of a different person, in a known language and a known timezone.
+
 ---
 
 ## 21. Portable configuration and backups
