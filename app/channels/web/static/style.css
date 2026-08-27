@@ -578,6 +578,17 @@ button.secondary:hover { background: var(--bg-tint); color: var(--ink); }
 .counter { display: block; text-align: right; color: var(--muted); font-size: .85rem; margin-top: .2rem; }
 .counter[hidden] { display: none; }
 
+/* A refused action, on the client request page. Not an error page -- the page
+   is fine, the action was not. */
+.flash {
+  margin: 0 0 1rem;
+  padding: .75rem .9rem;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--line-strong);
+  background: var(--surface);
+  color: var(--ink);
+}
+
 .muted { color: var(--muted); font-size: .92rem; }
 .steps .muted { margin: .55rem 0 0; }
 .stack-actions { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin-top: 1.75rem; }

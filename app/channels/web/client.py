@@ -794,6 +794,7 @@ def build_router() -> APIRouter:
                     if booking_request.status.value == "confirmed"
                     else None,
                     "thread": thread,
+                    "refused": request.query_params.get("refused") == "1",
                     "can_respond": turn is SenderType.client,
                     "can_note": booking_request.status in booking.NOTE_STATUSES,
                 },
@@ -845,7 +846,10 @@ def build_router() -> APIRouter:
                     await booking.client_decline(session, booking_request.id)
             except DomainError:
                 logger.info("refused web action %r on request %s", action, uuid)
-                return RedirectResponse(f"/r/{uuid}", status_code=303)
+                # §12.2: a redirect with nothing on it is indistinguishable from
+                # a click that did nothing, which is exactly how a refused
+                # accept looked to the client.
+                return RedirectResponse(f"/r/{uuid}?refused=1", status_code=303)
 
             await notifications.publish(session)
             return RedirectResponse(f"/r/{uuid}", status_code=303)

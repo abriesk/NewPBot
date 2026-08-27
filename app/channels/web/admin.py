@@ -352,6 +352,13 @@ def build_router() -> APIRouter:
 
             practice = await get_practice(session)
             when = _parse_local(scheduled_start, practice.timezone)
+            if scheduled_start.strip() and when is None:
+                # §12.2: a time she typed and this form cannot read is refused,
+                # not dropped. Read as "no time given" it turned a mistyped
+                # proposal into a timeless one -- she had said when, and the
+                # client was told nothing. An empty field still means words
+                # only, which §7.1 allows.
+                return _back(f"/admin/requests/{uuid}", "bad-time")
 
             try:
                 if action == "approve":
