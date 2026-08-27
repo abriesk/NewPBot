@@ -123,7 +123,12 @@ def _format_args(payload: dict[str, Any], tz: str) -> dict[str, Any]:
     referring to one this intent does not carry degrades to the unformatted
     string rather than raising (§15).
     """
-    args = dict(payload)
+    # A field the payload carries as an explicit `None` is a field that has no
+    # value, not one whose value is the word "None". `setdefault` below only
+    # fills keys that are *absent*, so every nullable payload field -- a client
+    # with no name, a proposal with no note, a rejection with no reason --
+    # rendered as "None" in front of the therapist.
+    args = {key: ("" if value is None else value) for key, value in payload.items()}
     args["time"] = format_instant(payload.get("time"), tz)
     args.setdefault("uuid", "")
     args.setdefault("name", "")

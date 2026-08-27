@@ -81,6 +81,9 @@ class RequestCounter(DomainEvent):
     request_id: int
     request_uuid: UUID
     proposed_start: datetime | None
+    #: The client's own words. §10 puts them in the therapist's message, and
+    #: they are the whole content of a counter that named no instant.
+    note: str | None = None
     intent_key: str = field(init=False, default="request.counter")
 
 

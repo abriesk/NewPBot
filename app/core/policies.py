@@ -28,6 +28,31 @@ from app.core.models import Practice
 CLIENT_TEXT_MAX_CHARS = 4096
 
 
+#: What a client's typed time may look like. §9 prefers a structured time and
+#: keeps the words either way, so failing to match is not an error -- it just
+#: means the reply is words.
+CLIENT_TIME_FORMATS = ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%d.%m.%Y %H:%M")
+
+
+def parse_client_time(text: str, tz: str) -> datetime | None:
+    """A client's typed time in `tz` -> an aware UTC instant, or None.
+
+    In the core because both channels take the same free text for the same
+    question, and a rule that lives in one adapter is a rule the other one gets
+    wrong: the web never parsed at all, so the identical sentence recorded a
+    time from Telegram and none from a browser.
+    """
+    from zoneinfo import ZoneInfo
+
+    for fmt in CLIENT_TIME_FORMATS:
+        try:
+            naive = datetime.strptime(text.strip(), fmt)  # noqa: DTZ007 - zone applied next
+        except ValueError:
+            continue
+        return naive.replace(tzinfo=ZoneInfo(tz)).astimezone(UTC)
+    return None
+
+
 def check_client_text(value: str | None, field: str) -> str | None:
     """Refuse over-long client text. Returns the value so callers can inline it."""
     if value is not None and len(value) > CLIENT_TEXT_MAX_CHARS:

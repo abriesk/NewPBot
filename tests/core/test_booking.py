@@ -1038,3 +1038,27 @@ async def test_the_last_contact_note_is_the_one_offered_back(
         desired_time_text="or a morning",
         source_channel=Channel.web,
     )
+    assert await booking.last_contact_note(db, client.id) == "phone after six"
+
+
+# --- A counter reaches the therapist with something in it (§10) -------------
+
+
+async def test_a_countered_time_and_the_words_both_reach_the_therapist(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """§10 puts `proposed_start` and `note` in the counter payload. The note was
+    pinned to None, so a counter arrived carrying neither the client's time nor
+    their words -- the reply she has to answer, with nothing in it.
+    """
+    request = await _negotiating(db, client, session_type_id, future_slot)
+    drain(db)
+
+    when = LATER + timedelta(days=1)
+    await booking.client_counter(
+        db, request.id, proposed_start=when, body_text="2026-08-29 13:30"
+    )
+
+    event = next(e for e in pending(db) if isinstance(e, RequestCounter))
+    assert event.proposed_start == when
+    assert event.note == "2026-08-29 13:30"

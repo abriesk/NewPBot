@@ -926,7 +926,10 @@ async def client_counter(
     collect(
         session,
         RequestCounter(
-            request_id=request.id, request_uuid=request.uuid, proposed_start=proposed_start
+            request_id=request.id,
+            request_uuid=request.uuid,
+            proposed_start=proposed_start,
+            note=body_text,
         ),
     )
     return request

@@ -69,6 +69,10 @@ CATALOGUE: dict[str, IntentSpec] = {
         key="request.counter.admin",
         body_key="admin.intent.request.counter.admin.body",
         actions=("approve", "propose", "reject"),
+        # Its own line rather than inlined in the body: a counter may carry a
+        # time, words, or both, and one template with `{time} {note}` in it
+        # rendered every absent half as a gap in the sentence.
+        optional_parts=(("note", "admin.intent.request.counter.admin.note"),),
         email_subject_key="email.subject.request_update",
     ),
     "request.confirmed.client": IntentSpec(
@@ -200,10 +204,16 @@ def body_key_for(intent_key: str, payload: dict[str, object]) -> str:
         offset = payload.get("offset_min")
         if isinstance(offset, int) and offset in REMINDER_BODY_KEYS:
             return REMINDER_BODY_KEYS[offset]
+    # §7.1: a reply of words only is ordinary on both sides of a negotiation.
+    # Announcing a time and leaving a blank where it should be is not.
     if intent_key == "request.proposal.client" and not payload.get("time"):
-        # §7.1: a proposal of words only is ordinary. Announcing a time and
-        # leaving a blank where it should be is not.
         return "intent.request.proposal.client.body.no_time"
+    if intent_key == "request.counter.admin" and not payload.get("time"):
+        return "admin.intent.request.counter.admin.body.no_time"
+    # A client who gave no name anywhere. "from <nothing>" is worse than not
+    # mentioning it (§12.2 supplies the client's own name where there is one).
+    if intent_key == "request.submitted.admin" and not payload.get("name"):
+        return "admin.intent.request.submitted.admin.body.no_name"
     return spec_for(intent_key).body_key
 
 

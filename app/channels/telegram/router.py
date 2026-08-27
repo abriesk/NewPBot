@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo
@@ -25,7 +25,7 @@ from app.config import get_settings
 from app.core.enums import Channel, Modality, RequestStatus, SenderType, TokenPurpose
 from app.core.errors import DomainError, SlotUnavailable, TokenInvalid
 from app.core.models import BookingRequest, Client, Practice, SessionType, TimezoneOption
-from app.core.policies import BookingPath, now_utc, resolve_booking_mode
+from app.core.policies import BookingPath, now_utc, parse_client_time, resolve_booking_mode
 from app.core.services import booking, content, flow, notifications, waitlist
 from app.core.services.clients import (
     consume_token,
@@ -943,14 +943,11 @@ def _parse_time(text: str, tz: str) -> datetime | None:
 
     None is not a failure: §9 says a structured time is *preferred*, not
     required, and the words are kept either way.
+
+    The formats live in the core, because the web asks the same question of the
+    same people and must read the answer the same way.
     """
-    for fmt in ("%Y-%m-%d %H:%M", "%Y-%m-%dT%H:%M", "%d.%m.%Y %H:%M"):
-        try:
-            naive = datetime.strptime(text.strip(), fmt)  # noqa: DTZ007 - zone applied next
-        except ValueError:
-            continue
-        return naive.replace(tzinfo=ZoneInfo(tz)).astimezone(UTC)
-    return None
+    return parse_client_time(text, tz)
 
 
 # --- Negotiation, client side (§7.1) ----------------------------------------

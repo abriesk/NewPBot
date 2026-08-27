@@ -41,6 +41,7 @@ from app.core.policies import (
     BookingPath,
     hold_expiry,
     now_utc,
+    parse_client_time,
     resolve_booking_mode,
 )
 from app.core.services import booking, content, flow, notifications, waitlist
@@ -836,8 +837,19 @@ def build_router() -> APIRouter:
                 if action == "accept":
                     await booking.client_accept(session, booking_request.id)
                 elif action == "counter":
+                    # §9: a structured time is preferred and the words are kept
+                    # either way. Telegram parsed this and the web did not, so
+                    # the same sentence recorded a time from a phone and none
+                    # from a browser -- and the therapist's message showed a
+                    # counter with nothing in it.
+                    practice = await get_practice(session)
                     await booking.client_counter(
-                        session, booking_request.id, body_text=body or None
+                        session,
+                        booking_request.id,
+                        proposed_start=parse_client_time(
+                            body, client.timezone or practice.timezone
+                        ),
+                        body_text=body or None,
                     )
                 elif action == "note":
                     # §7.1: information, not a transition.
