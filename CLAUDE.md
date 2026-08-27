@@ -98,14 +98,27 @@ Not set, or a command that changes `requirements.txt`, `alembic.ini`,
 compose up -d web worker` first, and check the change is really in the container
 before believing a green suite.
 
-**Looking at a change in the browser needs `docker compose restart web` too.**
-There is no `--reload` on the `uvicorn` command, so the running process keeps
-the Python it imported at start — while Jinja re-reads templates from disk on
-every request. A template change therefore appears immediately against the old
-route code, which is worse than seeing nothing: a new column renders empty, or a
-new context variable is simply missing, and it looks like a bug in the query.
+**Trying a change for real needs `docker compose restart web worker`.** Both,
+every time. Neither process reloads: there is no `--reload` on the `uvicorn`
+command and the worker loop imports once at start, so each keeps the Python it
+had when it booted — while Jinja re-reads templates from disk on every request.
+
+A template change therefore appears immediately against the old route code,
+which is worse than seeing nothing: a new column renders empty, or a new context
+variable is simply missing, and it looks like a bug in the query.
+
+**Restarting only `web` is the trap that has actually cost time.** Nothing a
+client or the therapist *receives* is rendered by `web`. The outbox row is
+written there, but `app/render/` runs in the **worker's** dispatch job — so
+every message body, every Telegram keyboard on a notification, every intent in
+the catalogue is the worker's copy of the code. A message can therefore arrive
+in the old wording from a row whose payload has the new field in it, and the
+row will look perfect in `psql` while the message is wrong. If you have changed
+anything under `app/render/`, the intent catalogue, or `notifications.py`, the
+worker is the process that has to be restarted for it to be real.
+
 `pytest` does not have this problem — each `exec` is a fresh process — so a
-green suite is not evidence that what you are looking at is current.
+green suite is not evidence that either running process is current.
 
 **Editing `locales/*.yaml` needs `docker compose restart web`.** The mount makes
 the files live, but seeding runs once at container start, so until you restart
