@@ -561,14 +561,22 @@ error_event
 | `pending` | `admin_propose` | `negotiating` | Insert `negotiation_message(admin, proposal)`; release slot if the proposal names a different time; emit `request.proposal` |
 | `pending` | `admin_reject` | `rejected` | Release slot; emit `request.rejected` |
 | `pending` | `expire` (worker) | `expired` | Release slot; emit `request.expired` |
-| `negotiating` | `client_accept` | `confirmed` | `scheduled_start` = last admin proposal; book matching slot if one exists; create reminders; emit `request.confirmed` |
+| `negotiating` | `client_accept` (proposal names an instant) | `confirmed` | `scheduled_start` = last admin proposal; book matching slot if one exists; create reminders; emit `request.confirmed` |
+| `negotiating` | `client_accept` (proposal is words only) | `negotiating` | Insert `negotiation_message(client, accept)`; emit `request.accepted` so the therapist can put a time to it |
 | `negotiating` | `client_counter` | `negotiating` | Insert `negotiation_message(client, counter)`; emit `request.counter` |
+| `negotiating` | `admin_approve` | `confirmed` | `scheduled_start` = the time given, else the last instant proposed by *either* side; the held slot is **released** unless it is that instant; book a matching slot if one is free; create reminders; emit `request.confirmed` |
 | `negotiating` | `admin_propose` | `negotiating` | Insert message; emit `request.proposal` |
 | `negotiating` | `client_decline` / `admin_reject` | `rejected` | Release slot; emit `request.rejected` |
 | `confirmed` | `admin_cancel` | `cancelled` | Release slot; cancel scheduled reminders; emit `request.cancelled` |
 | `confirmed` | `complete` (worker) | `completed` | Release slot booking; no notification |
 
 Any transition not in this table **MUST** raise `InvalidTransition` and change nothing. There is no path from `confirmed` back to `negotiating`.
+
+**A slot is the booking only while it is the time.** Approving names an instant — given, or the last one the conversation put forward — and the held slot is kept only if it *is* that instant. Otherwise it is released: a slot at Tuesday marked `booked` for a Thursday session is off the picker for good and attached to a request that is not at it. And once any proposal exists, the slot stops being the fallback for "no time given": it is what the client *asked for*, while the negotiation is what they *settled on*, and confirming the former would tell the client a time they never agreed to. A negotiation that named no instant at all is therefore refused — only the therapist can turn "thursday evening" into one. A `pending` request is the unchanged case: nothing has been discussed, so the slot is both.
+
+**The therapist may approve a negotiation outright.** A client who counters with a time has said what suits them; the therapist agreeing is an approval, and making her propose that same time back so the client can accept it a second time is a round trip that says nothing. §10 has always given `request.counter.admin` an `approve` action and §13.2 requires every button to come from this table — so a table without this row made the notification offer something the core refused, which is what the button did: nothing. When she names no time, the last instant proposed by either side is the one meant; a negotiation that never named one has nothing to approve and is still refused.
+
+**A proposal need not name an instant.** §9 prefers a structured time and does not require one, and the Telegram admin panel takes the therapist's words as both — parsed if they parse, kept as the note either way. A proposal of words only is therefore ordinary, not an error, and everything downstream **MUST** handle it: the client's message says what she wrote rather than announcing a time and leaving a blank where it should be, and the client can still agree to it. Agreeing to words cannot confirm anything — there is no instant to put in `scheduled_start`, no reminder to schedule, and nothing for the schedule to draw — so it stays `negotiating` and tells the therapist, who is the one who turns an agreement into a time. Only the *web* form, which has a dedicated time field with a known format, refuses a value it cannot read rather than silently dropping it (§12.2).
 
 A **client note** is deliberately not in the table, because it is not a transition: it inserts `negotiation_message(client, note)`, emits `request.note`, and leaves the status exactly as it was. It is accepted while a request is `pending`, `negotiating` or `confirmed` — the states where the therapist can still act on what it says — and **MUST** be refused once the request is terminal. The note body stays in the admin UI: the notification says a note arrived and names the request, nothing more.
 
@@ -587,6 +595,8 @@ A **client note** is deliberately not in the table, because it is not a transiti
 | `blocked` | `unblock` | `available` | Admin |
 
 `hold` and `book` **MUST** execute `SELECT … FROM slot WHERE id = :id FOR UPDATE` before checking status. This is the only place where a lost update would double-book.
+
+**A negotiation keeps its slot held for as long as it goes on.** Every move that leaves the slot attached — a proposal naming the same time, a proposal of words only, a client's counter — re-stamps the hold. §7.1 expires only `pending`, so a negotiation has no expiry of its own, and a hold left on the clock started at submission lapses in the middle of one: the time under discussion goes back on the picker while the request still points at it. Only a proposal naming a *different* time releases it, because that is the one case where the therapist has moved away from it.
 
 **A hold lasts as long as whatever it is protecting.** `slot_hold_minutes` is the window a *client* has to finish a form, and it applies only until the request exists. `submit_slot_request` holds until the request's own `expires_at` instead: the request stays `pending` for `pending_expiry_hours`, and a slot released ahead of that goes back on the picker while the request still points at it. A proposal that keeps its slot re-stamps the hold (`extend`), because §7.1 expires only `pending` — a negotiation has no expiry of its own, so a hold inherited from submission would lapse mid-conversation. `hold_expires_at` is never NULL while `held`; §6.4 makes that a biconditional.
 
@@ -688,6 +698,7 @@ Each intent has a key, a recipient, a payload schema, and available actions. Tra
 | `request.submitted.client` | client | uuid, session type, requested time | open |
 | `request.proposal.client` | client | uuid, proposed_start, note | accept, counter, decline |
 | `request.counter.admin` | admin | uuid, proposed_start, note, thread | approve, propose, reject |
+| `request.accepted.admin` | admin | uuid, note | approve, propose, reject |
 | `request.confirmed.client` | client | uuid, scheduled_start, duration_min, session type, modality, join info | open |
 | `request.confirmed.admin` | admin | uuid, scheduled_start, client | — |
 | `request.rejected.client` | client | uuid, reason | — |
@@ -763,6 +774,12 @@ The renderer **MUST** have golden tests including: Russian text containing `.`, 
 
 Timezone is detected client-side and posted with the booking; a visible selector allows override. On-site selection **MUST** show `clinic_onsite_url`.
 
+**Step 3 remembers what the client has already said.** `client.display_name` is filled by the first submission that supplies a name and is **not** overwritten afterwards — a later booking may carry a different name, but a typo on one request must not rename the person everywhere, and correcting a client is the therapist's to do. `contact_note` is prefilled from the client's most recent request that carried one; unlike the name it stays per-request, because "phone after six" is situational rather than a fact about the person.
+
+Both prefills require a **session**, never a typed address: at step 3 an unsigned visitor has not identified themselves — the email arrives at submit — so prefilling from a typed address would confirm to anyone who guessed it that the address is known here and whom it belongs to (DESIGN.md §5.1).
+
+The name field is prefilled rather than hidden, which is the opposite of the email field's treatment on the same form. An email is a credential: the session establishes it and changing it goes through verification. A name is a label, and no client-facing route lets a client edit one anywhere else — hiding it once set would make a client's own name uncorrectable by them for good.
+
 A message *about a request* **MUST** link to `/r/{uuid}` carrying a `view_request` token (§6.2), so following it opens the request rather than a sign-in form. Consuming that token starts a client session, which is what makes the link still work when it is opened a second time — the token itself is single-use, as §6.2 requires of every token.
 
 ### 12.2 Admin routes
@@ -770,6 +787,14 @@ A message *about a request* **MUST** link to `/r/{uuid}` carrying a `view_reques
 All under `/admin`, session-authenticated, CSRF-protected.
 
 `/admin/login`, `/admin/requests` (+ `?view=`, `?start=`), `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`), `/admin/help`, `/admin/status`.
+
+**A time the therapist types and the form cannot read MUST be refused, not dropped.** `/admin/requests/{uuid}/approve` and `/propose` parse `scheduled_start` as `YYYY-MM-DDTHH:MM` in the practice timezone; anything else answers with a flash naming the format and changes nothing. Silently reading it as "no time given" turned a mistyped proposal into a timeless one, which the therapist had no way to notice — she had said when, and the client was told nothing. A proposal of words only is still available by leaving the field empty (§7.1).
+
+**A refused action MUST say so.** Both the admin and the client routes catch `DomainError` and redirect; a redirect with nothing on it is indistinguishable from a click that did nothing. The client's negotiation actions in particular **MUST** report a refusal, because the one that gets refused in practice is accepting a proposal that named no time.
+
+**Every admin surface that names a client MUST be able to name them.** `booking_request.display_name` is what that request was submitted under and may be empty; where it is, the surface falls back to `client.display_name`. This applies to the requests list, the week schedule, the request page, and the Telegram card (§13.2).
+
+`/admin/requests/{uuid}` additionally shows the client's **identities** — every `(channel, external_id)` on the client, with the email annotated by whether it is verified, because §13.3 silently delivers nothing to an unverified address and a therapist waiting on a reply needs to know that. This is the only place the therapist can reach a client who left no name and no contact note; without it a request from a known, verified client is unattributable. Contact identities are not `problem_text` and hard rule 8 does not reach them.
 
 `/admin/requests` serves two views of one query, selected by `?view=` (DESIGN.md §15). `view=list` is the default and is the status-filtered table that already exists; `view=grid` is the **week schedule**. An unrecognised value falls back to `list` rather than erroring — the parameter is navigation, not input.
 
@@ -780,6 +805,8 @@ All under `/admin`, session-authenticated, CSRF-protected.
 | `status` | a `request_status` value; applies to `view=list` only | unset (all) |
 
 `start` is a date rather than a week offset so a week is linkable and means the same thing tomorrow. A value that does not parse, or that is not a Monday, is snapped to the Monday of the week it falls in; a missing value means the current week. The grid **MUST NOT** carry the `status` filter: the view is defined by one rule instead, and the filter chips are replaced by the week navigation.
+
+**`slot_id` records the slot a request *asked for*, not one it necessarily still has.** Nothing clears it: a terminal transition releases the slot without forgetting which one it was, and an abandoned negotiation has its hold lapse the same way. So every reader that treats the slot as the request's time — the grid, the list beside it, `requested_start` — **MUST** check that the slot row still names this request in `held_by_request` or `booked_request`. A reader that skipped the check drew an abandoned request in the week at a slot the practice had since offered to somebody else, so the therapist saw two requests in one cell and one of them was not there.
 
 The grid shows a request whose effective start falls in the week — `scheduled_start` when set, otherwise the `starts_at` of the slot in `slot_id` (§7.1 sets `scheduled_start` only at approval, so a held slot is what a pending request has). Statuses shown are `confirmed`, `completed`, `pending`, and `negotiating`. `completed` is included and rendered muted: the worker sweeps a confirmed session to `completed` once its end passes (§14), so a grid without it renders every past week as empty. `rejected`, `expired`, and `cancelled` do not appear.
 
@@ -862,7 +889,7 @@ The surface is a **panel**: one message with an inline keyboard, which the thera
 |---|---|---|---|
 | Panel | `apanel` | availability, pending and negotiating counts, next confirmed session, waitlist size, admin URL | requests, sessions, waitlist, availability toggle |
 | Requests | `areq:<page>` | pending and negotiating, newest first, 5 a page | one request; panel |
-| Request | `aopen:<id>` | uuid, status, client name, contact note, session type, modality, time, `problem_text`, last 3 thread messages | its permitted actions; requests; panel |
+| Request | `aopen:<id>` | uuid, status, client name, client identities, contact note, session type, modality, time, `problem_text`, last 3 thread messages | its permitted actions; requests; panel |
 | Sessions | `asess:<days>` | confirmed sessions in the next `days` (2 or 7), with join links, at most 10 | one request; the other window; panel |
 | Waitlist | `awl:<page>` | entries, 5 a page, **read-only** | panel |
 
@@ -875,6 +902,7 @@ Requirements:
 - The webhook **MUST** answer the callback query, or the therapist's client spins on every tap. A refused action answers with its reason.
 - `/admin` while a typed answer is pending abandons it, exactly as a main-keyboard label does in §13.1.
 - `problem_text` **MAY** be shown here: this is an admin surface, and DESIGN.md §16 names the therapist's own Telegram account as one of the two places it is visible. It **MUST NOT** be logged (hard rule 8).
+- The client's identities **MAY** be shown here for the same reason, and are: a request with no name and no contact note is otherwise unanswerable from the phone, which is the surface that exists for answering away from a desk. This does put a client's email address on Telegram's servers — a deliberate choice, and a smaller one than it looks, since `problem_text` already goes to the same place.
 
 Content, translations, settings, session types, timezones, slot creation, the delivery log, and client export or erasure are **web-only** and **MUST** answer with a link to the admin UI.
 

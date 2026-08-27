@@ -142,6 +142,7 @@ request:
 
 intent:
   request.proposal.client.body: "A time has been proposed for your request {uuid}: {time}."
+  request.proposal.client.body.no_time: "There is a reply about your request {uuid}."
   request.proposal.client.note: "Note from the therapist: {note}"
   request.proposal.client.action.accept: "Accept"
   request.proposal.client.action.counter: "Suggest another time"
@@ -222,7 +223,11 @@ admin:
   intent.system.health.recovered.admin.body: "The service is working normally again."
   intent.system.health.action.open: "Open status"
   intent.request.submitted.admin.body: "New request {uuid} from {name}: {session_type}, {modality}, requested {time}."
-  intent.request.counter.admin.body: "Client replied on request {uuid}: {time} {note}"
+  intent.request.submitted.admin.body.no_name: "New request {uuid}: {session_type}, {modality}, requested {time}."
+  intent.request.counter.admin.body: "Client replied on request {uuid}: {time}"
+  intent.request.counter.admin.body.no_time: "Client replied on request {uuid}."
+  intent.request.counter.admin.note: "They wrote: {note}"
+  intent.request.accepted.admin.body: "Client agreed on request {uuid}, which named no time. Open it and set one."
   intent.request.confirmed.admin.body: "Request {uuid} confirmed for {time}."
   intent.request.note.admin.body: "{name} added information to request {uuid}. Open the request to read it."
   intent.waitlist.joined.admin.body: "New waitlist entry {uuid} from {name}."

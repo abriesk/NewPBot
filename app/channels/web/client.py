@@ -41,6 +41,7 @@ from app.core.policies import (
     BookingPath,
     hold_expiry,
     now_utc,
+    parse_client_time,
     resolve_booking_mode,
 )
 from app.core.services import booking, content, flow, notifications, waitlist
@@ -530,7 +531,15 @@ def build_router() -> APIRouter:
                     **context,
                     "t": labels,
                     "signed_in": client is not None,
+                    # §12.1: both prefills need a session. At this step an
+                    # unsigned visitor has not identified themselves -- the
+                    # address arrives at submit -- so filling either from a
+                    # typed one would tell whoever guessed it that the address
+                    # is known here, and whose it is.
                     "display_name": client.display_name if client else None,
+                    "contact_note": await booking.last_contact_note(session, client.id)
+                    if client
+                    else None,
                 },
             )
 
@@ -786,6 +795,7 @@ def build_router() -> APIRouter:
                     if booking_request.status.value == "confirmed"
                     else None,
                     "thread": thread,
+                    "refused": request.query_params.get("refused") == "1",
                     "can_respond": turn is SenderType.client,
                     "can_note": booking_request.status in booking.NOTE_STATUSES,
                 },
@@ -827,8 +837,19 @@ def build_router() -> APIRouter:
                 if action == "accept":
                     await booking.client_accept(session, booking_request.id)
                 elif action == "counter":
+                    # §9: a structured time is preferred and the words are kept
+                    # either way. Telegram parsed this and the web did not, so
+                    # the same sentence recorded a time from a phone and none
+                    # from a browser -- and the therapist's message showed a
+                    # counter with nothing in it.
+                    practice = await get_practice(session)
                     await booking.client_counter(
-                        session, booking_request.id, body_text=body or None
+                        session,
+                        booking_request.id,
+                        proposed_start=parse_client_time(
+                            body, client.timezone or practice.timezone
+                        ),
+                        body_text=body or None,
                     )
                 elif action == "note":
                     # §7.1: information, not a transition.
@@ -837,7 +858,10 @@ def build_router() -> APIRouter:
                     await booking.client_decline(session, booking_request.id)
             except DomainError:
                 logger.info("refused web action %r on request %s", action, uuid)
-                return RedirectResponse(f"/r/{uuid}", status_code=303)
+                # §12.2: a redirect with nothing on it is indistinguishable from
+                # a click that did nothing, which is exactly how a refused
+                # accept looked to the client.
+                return RedirectResponse(f"/r/{uuid}?refused=1", status_code=303)
 
             await notifications.publish(session)
             return RedirectResponse(f"/r/{uuid}", status_code=303)

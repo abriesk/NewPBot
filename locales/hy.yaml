@@ -137,6 +137,7 @@ request:
 
 intent:
   request.proposal.client.body: "Ձեր {uuid} հայտի համար առաջարկվել է ժամանակ՝ {time}։"   # TODO: review
+  request.proposal.client.body.no_time: "Ձեր {uuid} հայտի վերաբերյալ կա պատասխան։"   # TODO: review
   request.proposal.client.note: "Թերապևտի նշումը՝ {note}"   # TODO: review
   request.proposal.client.action.accept: "Համաձայնվել"
   request.proposal.client.action.counter: "Առաջարկել այլ ժամանակ"

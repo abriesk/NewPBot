@@ -591,3 +591,65 @@ def test_the_scenario_covers_both_channels() -> None:
     assert "test_the_full_scenario_on_the_web_channel" in source
     assert "test_the_full_scenario_on_the_telegram_channel" in source
     assert datetime.now(UTC).tzinfo is not None  # naive datetimes are banned
+
+
+async def test_agreeing_to_a_proposal_of_words_reaches_the_therapist(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """§7.1's other accept branch, end to end.
+
+    The therapist typed a time Telegram could not parse, so it went out as
+    words. The client agreed. Before, `client_accept` refused: the tap did
+    nothing the client could see, the request sat in `negotiating`, and the one
+    person who could move it forward heard nothing at all.
+    """
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+
+    # Exactly what the Telegram admin panel does with an unparseable answer:
+    # it keeps the words and proposes them (§9).
+    await booking.admin_propose(db, request.id, proposed_start=None, body_text="2026-08-29-14:30")
+    await notifications.publish(db)
+
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=f"accept:{request.id}"))
+    assert reply is not None
+
+    await db.refresh(request)
+    assert request.status is RequestStatus.negotiating, "words cannot confirm a session"
+    assert request.scheduled_start is None
+
+    await notifications.publish(db)
+    assert await _rows(db, request.id, "request.accepted.admin"), "the therapist must hear it"
+
+    # And it is her turn: she is the one who turns an agreement into a time.
+    assert await booking.whose_turn(db, request.id) is SenderType.admin
+
+
+async def test_the_approve_button_on_a_counter_actually_approves(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """Request, therapist counters, client counters back, therapist taps
+    Approve on the notification.
+
+    §10 gives `request.counter.admin` an approve action and §13.2 requires every
+    button to come from §7.1's table -- which did not allow approving a
+    negotiation. So the notification offered a button the core refused, and
+    tapping it did nothing whatsoever.
+    """
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+
+    await booking.admin_propose(db, request.id, proposed_start=now_utc() + timedelta(days=9))
+    countered = now_utc() + timedelta(days=10)
+    await booking.client_counter(db, request.id, proposed_start=countered, body_text="later?")
+    await notifications.publish(db)
+
+    assert await _rows(db, request.id, "request.counter.admin")
+
+    # chat_id=1 is the admin chat, as TELEGRAM_ADMIN_IDS configures it.
+    reply = await handle(db, Update(chat_id=1, callback_data=f"{kb.APPROVE}:{request.id}"))
+    assert reply is not None
+
+    await db.refresh(request)
+    assert request.status is RequestStatus.confirmed
+    assert request.scheduled_start == countered

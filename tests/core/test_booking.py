@@ -26,7 +26,14 @@ from app.core.enums import (
     SlotStatus,
 )
 from app.core.errors import BookingClosed, InvalidTransition, NegotiationDisabled
-from app.core.events import RequestConfirmed, RequestSubmitted, drain, pending
+from app.core.events import (
+    RequestAccepted,
+    RequestConfirmed,
+    RequestCounter,
+    RequestSubmitted,
+    drain,
+    pending,
+)
 from app.core.models import (
     AuditLog,
     BookingRequest,
@@ -316,13 +323,54 @@ async def test_client_accept_uses_the_most_recent_proposal(
     assert confirmed.scheduled_start == newer
 
 
-async def test_accepting_a_free_text_proposal_is_refused(
+async def test_accepting_a_free_text_proposal_tells_the_therapist(
     db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
 ) -> None:
-    """ "some evening next week" has no instant to confirm against."""
+    """§7.1: "some evening next week" has no instant to confirm against, so
+    accepting it cannot confirm anything -- no `scheduled_start`, no reminder,
+    nothing for the schedule to draw.
+
+    It used to be refused outright, which was worse than useless: the client's
+    tap did nothing visible and the one person who could move it forward was
+    told nothing. The agreement is recorded and she is asked for a time.
+    """
     request = await _negotiating(db, client, session_type_id, future_slot, proposed=None)
-    with pytest.raises(InvalidTransition):
-        await booking.client_accept(db, request.id)
+    drain(db)
+
+    same = await booking.client_accept(db, request.id)
+
+    assert same.status is RequestStatus.negotiating
+    assert same.scheduled_start is None
+    assert same.confirmed_at is None
+
+    accept = (
+        await db.execute(
+            select(NegotiationMessage).where(
+                NegotiationMessage.request_id == request.id,
+                NegotiationMessage.kind == NegotiationKind.accept,
+            )
+        )
+    ).scalar_one()
+    assert accept.sender is SenderType.client
+
+    assert any(isinstance(e, RequestAccepted) for e in pending(db))
+    # Not a confirmation: nothing may be scheduled from words.
+    assert not any(isinstance(e, RequestConfirmed) for e in pending(db))
+
+    # And the turn goes back to the therapist, who is the one who sets a time.
+    assert await booking.whose_turn(db, request.id) is SenderType.admin
+
+
+async def test_accepting_a_proposal_that_names_a_time_still_confirms(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The other branch, unchanged."""
+    request = await _negotiating(db, client, session_type_id, future_slot, proposed=LATER)
+
+    confirmed = await booking.client_accept(db, request.id)
+
+    assert confirmed.status is RequestStatus.confirmed
+    assert confirmed.scheduled_start == LATER
 
 
 async def test_client_counter_stays_negotiating(
@@ -552,6 +600,7 @@ LEGAL: dict[RequestStatus, set[str]] = {
     RequestStatus.negotiating: {
         "client_accept",
         "client_counter",
+        "admin_approve",
         "admin_propose",
         "client_decline",
         "admin_reject",
@@ -707,6 +756,19 @@ async def _at(
     )
     db.add(request)
     await db.flush()
+
+    if slot is not None:
+        # The slot side of the relationship, which §7.1 always establishes and
+        # a row built by hand does not. Without it the slot is not this
+        # request's, and the schedule is right to say so (§12.2).
+        slot.status = SlotStatus.booked if scheduled is not None else SlotStatus.held
+        if scheduled is None:
+            slot.held_by_request = request.id
+            slot.hold_expires_at = request.expires_at or datetime.now(UTC) + timedelta(hours=48)
+        else:
+            slot.booked_request = request.id
+        await db.flush()
+
     return request
 
 
@@ -790,7 +852,7 @@ async def test_schedule_window_includes_its_start_and_excludes_its_end(
     opening = await _at(
         db, practice, client, session_type_id, RequestStatus.confirmed, scheduled=LATER
     )
-    await _at(
+    closing = await _at(
         db,
         practice,
         client,
@@ -803,7 +865,12 @@ async def test_schedule_window_includes_its_start_and_excludes_its_end(
         db, window_from=LATER, window_to=LATER + timedelta(days=7)
     )
 
-    assert [e.uuid for e in entries] == [opening.uuid]
+    # Asserted about this test's own two requests rather than as an exact list:
+    # the query is unfiltered and the suite shares its database with a running
+    # install, so any real booking landing in the window would fail it.
+    found = {e.uuid for e in entries}
+    assert opening.uuid in found, "the instant the window opens on belongs to it"
+    assert closing.uuid not in found, "the instant it closes on belongs to the next window"
 
 
 async def test_schedule_orders_a_day_the_way_it_is_lived(
@@ -842,8 +909,12 @@ async def test_unscheduled_carries_the_wording_and_no_instant(
 
     entries = await booking.unscheduled_for_admin(db)
 
-    assert [(e.uuid, e.desired_time_text, e.starts_at) for e in entries] == [
-        (request.uuid, "some evening next week?", None)
+    # This test's own row, not an exact list: the query is unfiltered and the
+    # suite shares its database with a running install, so any real request
+    # waiting on a time would fail it.
+    mine = [e for e in entries if e.uuid == request.uuid]
+    assert [(e.desired_time_text, e.starts_at) for e in mine] == [
+        ("some evening next week?", None)
     ]
 
 
@@ -884,3 +955,336 @@ async def test_a_request_with_a_time_is_never_in_both_places(
     # Disjoint everywhere, not just here: one query wants an instant and the
     # other wants none, so no request can be counted twice.
     assert placed & beside == set()
+
+
+# --- The practice learns who a client is (§12.1) ----------------------------
+
+
+async def test_a_submitted_name_is_remembered_on_the_client(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """`client.display_name` was only ever written when the row was created,
+    which Telegram does from the profile and the web cannot do at all -- the
+    address arrives before the name. So the web asked "what should I call you?"
+    on every booking and threw the answer onto the request.
+    """
+    assert not client.display_name
+
+    await booking.submit_slot_request(
+        db,
+        client_id=client.id,
+        slot_id=future_slot.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        source_channel=Channel.web,
+        display_name="  Anna  ",
+    )
+
+    await db.refresh(client)
+    assert client.display_name == "Anna"
+
+
+async def test_a_later_name_does_not_rename_the_client(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot, practice: Practice
+) -> None:
+    """§12.1: filled once, never overwritten. A typo on one booking must not
+    rename the person on every other, and correcting a client is the
+    therapist's to do."""
+    client.display_name = "Anna"
+    await db.flush()
+
+    await booking.submit_slot_request(
+        db,
+        client_id=client.id,
+        slot_id=future_slot.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        source_channel=Channel.web,
+        display_name="Annna",
+    )
+
+    await db.refresh(client)
+    assert client.display_name == "Anna"
+
+
+async def test_a_blank_name_leaves_the_client_alone(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The name is optional on both channels, and whitespace is not a name."""
+    await booking.submit_slot_request(
+        db,
+        client_id=client.id,
+        slot_id=future_slot.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        source_channel=Channel.web,
+        display_name="   ",
+    )
+
+    await db.refresh(client)
+    assert not client.display_name
+
+
+async def test_the_last_contact_note_is_the_one_offered_back(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot, practice: Practice
+) -> None:
+    """§12.1 prefills step 3 with it. Unlike the name it stays per-request, so
+    the prefill reads the newest one rather than a field on the client."""
+    assert await booking.last_contact_note(db, client.id) is None
+
+    await booking.submit_free_time_request(
+        db,
+        client_id=client.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        desired_time_text="any evening",
+        source_channel=Channel.web,
+        contact_note="phone after six",
+    )
+    assert await booking.last_contact_note(db, client.id) == "phone after six"
+
+    # A later request without one must not erase the answer they did give.
+    await booking.submit_free_time_request(
+        db,
+        client_id=client.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        desired_time_text="or a morning",
+        source_channel=Channel.web,
+    )
+    assert await booking.last_contact_note(db, client.id) == "phone after six"
+
+
+# --- A counter reaches the therapist with something in it (§10) -------------
+
+
+async def test_a_countered_time_and_the_words_both_reach_the_therapist(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """§10 puts `proposed_start` and `note` in the counter payload. The note was
+    pinned to None, so a counter arrived carrying neither the client's time nor
+    their words -- the reply she has to answer, with nothing in it.
+    """
+    request = await _negotiating(db, client, session_type_id, future_slot)
+    drain(db)
+
+    when = LATER + timedelta(days=1)
+    await booking.client_counter(
+        db, request.id, proposed_start=when, body_text="2026-08-29 13:30"
+    )
+
+    event = next(e for e in pending(db) if isinstance(e, RequestCounter))
+    assert event.proposed_start == when
+    assert event.note == "2026-08-29 13:30"
+
+
+# --- Approving a negotiation (§7.1) -----------------------------------------
+
+
+async def test_approving_a_negotiation_takes_the_time_last_put_forward(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """Client requests, therapist counters, client counters back, therapist
+    approves. Her agreeing to the client's time is an approval; making her
+    propose that same time back and be accepted again says nothing.
+
+    Both surfaces offered the Approve button already -- §10 gives
+    `request.counter.admin` the action -- and §7.1 did not allow it, so the
+    button did nothing at all.
+    """
+    request = await _negotiating(db, client, session_type_id, future_slot)
+    countered = LATER + timedelta(hours=2)
+    await booking.client_counter(db, request.id, proposed_start=countered, body_text="later?")
+    drain(db)
+
+    confirmed = await booking.admin_approve(db, request.id)
+
+    assert confirmed.status is RequestStatus.confirmed
+    assert confirmed.scheduled_start == countered, "the client's time, not the therapist's"
+    assert confirmed.confirmed_at is not None
+    assert any(isinstance(e, RequestConfirmed) for e in pending(db))
+
+
+async def test_approving_a_negotiation_with_an_explicit_time_still_wins(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The fallback is for the button, which carries no time. A time she names
+    is the one she meant."""
+    request = await _negotiating(db, client, session_type_id, future_slot)
+    await booking.client_counter(db, request.id, proposed_start=LATER + timedelta(hours=2))
+
+    named = LATER + timedelta(hours=5)
+    confirmed = await booking.admin_approve(db, request.id, scheduled_start=named)
+
+    assert confirmed.scheduled_start == named
+
+
+async def test_approving_a_negotiation_with_no_time_and_no_slot_is_refused(
+    db: AsyncSession, client: Client, session_type_id: int
+) -> None:
+    """Nothing to confirm at all: free text throughout, and a session needs an
+    instant (§7.1)."""
+    request = await booking.submit_free_time_request(
+        db,
+        client_id=client.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        desired_time_text="some evening next week?",
+        source_channel=Channel.web,
+    )
+    await booking.admin_propose(db, request.id, body_text="which evening suits?")
+    await booking.client_counter(db, request.id, body_text="thursday maybe")
+
+    with pytest.raises(InvalidTransition):
+        await booking.admin_approve(db, request.id)
+
+
+async def test_a_words_only_proposal_also_re_stamps_the_hold(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """§7.1: a proposal that names no instant keeps the slot -- it has not moved
+    away from it -- so it has to keep the hold alive too.
+
+    Only the "proposed the very same time" branch re-stamped, which is the
+    rarest case. A words-only proposal, the one a mistyped time produces, left
+    the hold running on the clock started at submission: the slot went back on
+    the picker mid-negotiation with the request still pointing at it.
+    """
+    request = await _submit(db, client, session_type_id, future_slot)
+    at_submission = future_slot.hold_expires_at
+
+    with time_machine.travel(datetime.now(UTC) + timedelta(hours=24), tick=False):
+        await booking.admin_propose(db, request.id, body_text="which evening suits you?")
+
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.held
+    assert request.slot_id == future_slot.id
+    assert future_slot.hold_expires_at > at_submission
+
+
+async def test_a_client_counter_re_stamps_the_hold_too(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The other half of the conversation. A client still talking is a client
+    still interested in the slot they picked."""
+    request = await _submit(db, client, session_type_id, future_slot)
+    await booking.admin_propose(db, request.id, body_text="which evening suits you?")
+    before = future_slot.hold_expires_at
+
+    with time_machine.travel(datetime.now(UTC) + timedelta(hours=24), tick=False):
+        await booking.client_counter(db, request.id, body_text="thursday would be better")
+
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.held
+    assert future_slot.hold_expires_at > before
+
+
+async def test_confirming_another_time_frees_the_slot_the_client_picked(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """A slot is the booking only while it is the time.
+
+    Approving at a time the negotiation settled on used to book the held slot
+    anyway: a slot at Tuesday marked `booked` for a Thursday session, off the
+    picker for good and attached to a request that is not at it.
+    """
+    request = await _submit(db, client, session_type_id, future_slot)
+    await booking.admin_propose(db, request.id, body_text="thursday instead?")
+
+    elsewhere = LATER + timedelta(days=3)
+    confirmed = await booking.admin_approve(db, request.id, scheduled_start=elsewhere)
+
+    await db.refresh(future_slot)
+    assert confirmed.scheduled_start == elsewhere
+    assert future_slot.status is SlotStatus.available, "somebody else may have it"
+    assert confirmed.slot_id is None
+
+
+async def test_approving_a_words_only_negotiation_does_not_fall_back_to_the_slot(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The client agreed to "thursday evening". Confirming their original pick
+    would tell them a time they never agreed to -- so she is asked for one.
+
+    The slot is not a fallback once a proposal exists: it is what the client
+    asked for, and the negotiation is what they settled on.
+    """
+    request = await _submit(db, client, session_type_id, future_slot)
+    await booking.admin_propose(db, request.id, body_text="how about thursday evening?")
+    await booking.client_accept(db, request.id)
+
+    with pytest.raises(InvalidTransition):
+        await booking.admin_approve(db, request.id)
+
+    # Still hers to settle, and the slot is still held while she does.
+    await db.refresh(future_slot)
+    assert request.status is RequestStatus.negotiating
+    assert future_slot.status is SlotStatus.held
+
+
+async def test_a_pending_request_still_confirms_at_the_slot_it_holds(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The ordinary path, unchanged: nothing has been discussed, so the slot is
+    both what was asked for and what is agreed."""
+    request = await _submit(db, client, session_type_id, future_slot)
+
+    confirmed = await booking.admin_approve(db, request.id)
+
+    await db.refresh(future_slot)
+    assert confirmed.scheduled_start == future_slot.starts_at
+    assert future_slot.status is SlotStatus.booked
+
+
+# --- A slot the request no longer holds is not its time (§12.2) -------------
+
+
+async def test_a_lapsed_slot_stops_standing_for_the_time_of_a_request(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """A negotiation goes quiet long enough for the worker to release its hold.
+    The slot goes back on the picker and somebody else may take it -- but
+    `slot_id` still names it, because that is the record of what this client
+    asked for and nothing clears it.
+
+    The grid used to draw the abandoned request at that instant anyway, so the
+    therapist saw two requests at one time and one of them was a ghost.
+    """
+    request = await _submit(db, client, session_type_id, future_slot)
+    await booking.admin_propose(db, request.id, body_text="thursday instead?")
+
+    future_slot.hold_expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    await db.flush()
+    await slot_service.expire_hold(db, future_slot.id)
+
+    assert request.slot_id == future_slot.id, "the record of what they asked for stays"
+    assert await booking.requested_start(db, request) is None
+
+    drawn = await booking.scheduled_in_window(
+        db,
+        window_from=future_slot.starts_at - timedelta(days=1),
+        window_to=future_slot.starts_at + timedelta(days=1),
+    )
+    assert request.uuid not in {e.uuid for e in drawn}
+
+    # And it appears beside the grid instead, where it can still be answered.
+    beside = await booking.unscheduled_for_admin(db)
+    assert request.uuid in {e.uuid for e in beside}
+
+
+async def test_a_slot_the_request_still_holds_is_its_time(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The ordinary case, and the reason the check is on the slot row rather
+    than on `slot_id` being set."""
+    request = await _submit(db, client, session_type_id, future_slot)
+
+    assert await booking.requested_start(db, request) == future_slot.starts_at
+
+    drawn = await booking.scheduled_in_window(
+        db,
+        window_from=future_slot.starts_at - timedelta(days=1),
+        window_to=future_slot.starts_at + timedelta(days=1),
+    )
+    assert request.uuid in {e.uuid for e in drawn}
+    assert request.uuid not in {e.uuid for e in await booking.unscheduled_for_admin(db)}

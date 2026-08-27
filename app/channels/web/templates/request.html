@@ -5,6 +5,9 @@
   <span class="eyebrow">{{ practice.name }}</span>
   <h1>{{ t.your_request }}</h1>
 </div>
+{# §12.2: the refusal has to be visible. Without it a rejected action looked
+   exactly like a button that did nothing at all. #}
+{% if refused %}<p class="flash">{{ t.error }}</p>{% endif %}
 <div class="card">
   <p><span class="status">{{ status_label }}</span></p>
   <div class="meta">

@@ -32,6 +32,7 @@ from app.config import get_settings
 from app.core.enums import Channel, Modality, OutboxStatus, TokenPurpose
 from app.core.events import (
     DomainEvent,
+    RequestAccepted,
     RequestCancelled,
     RequestConfirmed,
     RequestCounter,
@@ -96,6 +97,12 @@ def _iso(value: datetime | None) -> str | None:
     return value.isoformat() if value is not None else None
 
 
+async def _client_name(session: AsyncSession, client_id: UUID) -> str | None:
+    return (
+        await session.execute(select(Client.display_name).where(Client.id == client_id))
+    ).scalar_one_or_none()
+
+
 async def _session_type_code(session: AsyncSession, session_type_id: int) -> str:
     return str(
         (
@@ -136,7 +143,10 @@ async def envelopes_for(session: AsyncSession, event: DomainEvent) -> list[Envel
                 Recipient.admin,
                 {
                     "uuid": str(request.uuid),
-                    "name": request.display_name,
+                    # §12.2's fallback, in the message too: the request carries
+                    # a name only if the client typed one this time, and "from
+                    # <nothing>" is not a useful thing to wake her phone with.
+                    "name": request.display_name or await _client_name(session, request.client_id),
                     "session_type": await _session_type_code(session, request.session_type_id),
                     "modality": request.modality.value,
                     "time": _iso(requested) or request.desired_time_text,
@@ -198,8 +208,22 @@ async def envelopes_for(session: AsyncSession, event: DomainEvent) -> list[Envel
                 {
                     "uuid": str(request.uuid),
                     "time": _iso(event.proposed_start),
-                    "note": None,  # negotiation bodies stay in the admin UI
+                    # §10 puts the note in this payload, and it had been pinned
+                    # to None: the therapist wrote to the client and the client
+                    # never saw it. A proposal of words only is nothing else.
+                    "note": event.note,
                 },
+                request_id=request.id,
+            )
+        ]
+
+    if isinstance(event, RequestAccepted):
+        request = await _request(session, event.request_id)
+        return [
+            Envelope(
+                "request.accepted.admin",
+                Recipient.admin,
+                {"uuid": str(request.uuid), "note": event.note},
                 request_id=request.id,
             )
         ]
@@ -213,7 +237,11 @@ async def envelopes_for(session: AsyncSession, event: DomainEvent) -> list[Envel
                 {
                     "uuid": str(request.uuid),
                     "time": _iso(event.proposed_start),
-                    "note": None,
+                    # §10 puts the client's words here. Pinned to None, a
+                    # counter that named no instant reached the therapist with
+                    # nothing in it at all -- the reply she has to answer.
+                    # §13.4 still keeps it out of email.
+                    "note": event.note,
                 },
                 request_id=request.id,
             )

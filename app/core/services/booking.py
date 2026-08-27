@@ -50,6 +50,7 @@ from app.core.errors import (
     RateLimited,
 )
 from app.core.events import (
+    RequestAccepted,
     RequestCancelled,
     RequestConfirmed,
     RequestCounter,
@@ -63,6 +64,7 @@ from app.core.events import (
 from app.core.models import (
     AuditLog,
     BookingRequest,
+    Client,
     NegotiationMessage,
     Reminder,
     SessionType,
@@ -128,7 +130,18 @@ NOTE_MAX_CHARS = 2000
 ALLOWED: dict[RequestStatus, frozenset[str]] = {
     RequestStatus.pending: frozenset({"admin_approve", "admin_propose", "admin_reject", "expire"}),
     RequestStatus.negotiating: frozenset(
-        {"client_accept", "client_counter", "admin_propose", "client_decline", "admin_reject"}
+        {
+            "client_accept",
+            "client_counter",
+            # §7.1: a client who counters with a time has said what suits them,
+            # and the therapist agreeing is an approval. Without this she had to
+            # propose that same time back and wait to be accepted again -- and
+            # both surfaces offered an Approve button that the core refused.
+            "admin_approve",
+            "admin_propose",
+            "client_decline",
+            "admin_reject",
+        }
     ),
     RequestStatus.confirmed: frozenset({"admin_cancel", "complete"}),
     RequestStatus.rejected: frozenset(),
@@ -161,6 +174,32 @@ async def _enforce_submission_rate(session: AsyncSession, client_id: UUID) -> No
         raise RateLimited(f"{SUBMISSIONS_PER_HOUR} booking requests an hour is the limit")
 
 
+async def _learn_display_name(
+    session: AsyncSession, client_id: UUID, display_name: str | None
+) -> None:
+    """Fill `client.display_name` from the first submission that supplies one.
+
+    It was only ever written when the client row was created (§6.2), which
+    Telegram does from the profile and the web cannot do at all -- the address
+    arrives before the name. So the web asked "what should I call you?" on every
+    booking, threw the answer onto the request, and asked again next time.
+
+    Never overwritten (§12.1). A later booking may carry a different name, but a
+    typo on one request must not rename the person on every other.
+    """
+    if not display_name or not display_name.strip():
+        return
+
+    client = (
+        await session.execute(select(Client).where(Client.id == client_id))
+    ).scalar_one_or_none()
+    if client is None or (client.display_name or "").strip():
+        return
+
+    client.display_name = display_name.strip()
+    await session.flush()
+
+
 def _guard(request: BookingRequest, event: str) -> None:
     """Refuse anything outside §7.1 before a single field is touched."""
     if event not in ALLOWED[request.status]:
@@ -174,6 +213,27 @@ async def _get(session: AsyncSession, request_id: int) -> BookingRequest:
     if request is None:
         raise NotFound(f"booking request {request_id}")
     return request
+
+
+async def last_contact_note(session: AsyncSession, client_id: UUID) -> str | None:
+    """The most recent contact note this client gave, if they ever gave one.
+
+    §12.1 prefills step 3 with it. Unlike the name it stays on the request
+    rather than moving to the client: "phone after six" is situational, and the
+    prefill is a convenience rather than a fact about the person.
+    """
+    return (
+        await session.execute(
+            select(BookingRequest.contact_note)
+            .where(
+                BookingRequest.client_id == client_id,
+                BookingRequest.contact_note.isnot(None),
+                BookingRequest.contact_note != "",
+            )
+            .order_by(BookingRequest.created_at.desc(), BookingRequest.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
 
 
 async def active_for_client(
@@ -256,6 +316,22 @@ async def upcoming_sessions(
     return list(rows.all())
 
 
+def _slot_still_belongs(request_id: Any) -> Any:
+    """Whether the joined slot is actually this request's, as SQL.
+
+    `booking_request.slot_id` records the slot the client *asked for*, and
+    nothing clears it: a terminal transition releases the slot without
+    forgetting which one it was, and a hold that lapses in an abandoned
+    negotiation releases it too. So the column can name a slot that has since
+    gone back on the picker and been taken by somebody else.
+
+    Kept as one expression because three readers ask the same question, and a
+    reader that forgot to ask drew a request in the week schedule at a time
+    belonging to another client (§12.2).
+    """
+    return (Slot.held_by_request == request_id) | (Slot.booked_request == request_id)
+
+
 async def scheduled_in_window(
     session: AsyncSession, *, window_from: datetime, window_to: datetime
 ) -> list[ScheduleEntry]:
@@ -278,7 +354,10 @@ async def scheduled_in_window(
             BookingRequest.display_name,
             effective.label("starts_at"),
         )
-        .outerjoin(Slot, Slot.id == BookingRequest.slot_id)
+        .outerjoin(
+            Slot,
+            (Slot.id == BookingRequest.slot_id) & _slot_still_belongs(BookingRequest.id),
+        )
         .where(
             BookingRequest.status.in_(SCHEDULE_STATUSES),
             effective >= window_from,
@@ -299,6 +378,10 @@ async def unscheduled_for_admin(session: AsyncSession, *, limit: int = 20) -> li
     next week?" -- so it has neither `scheduled_start` nor a slot, and belongs
     beside the grid rather than nowhere. These are the ones most in need of an
     answer; dropping them would hide exactly the wrong thing.
+
+    A request whose slot lapsed out from under it lands here too, and must: the
+    grid has no honest cell for it either, and this is the exact complement of
+    what the grid draws. Between the two, every live request appears once.
     """
     rows = await session.execute(
         select(
@@ -307,12 +390,16 @@ async def unscheduled_for_admin(session: AsyncSession, *, limit: int = 20) -> li
             BookingRequest.display_name,
             BookingRequest.desired_time_text,
         )
+        .outerjoin(
+            Slot,
+            (Slot.id == BookingRequest.slot_id) & _slot_still_belongs(BookingRequest.id),
+        )
         .where(
             BookingRequest.status.in_(
                 (RequestStatus.pending, RequestStatus.negotiating),
             ),
             BookingRequest.scheduled_start.is_(None),
-            BookingRequest.slot_id.is_(None),
+            Slot.id.is_(None),
         )
         .order_by(BookingRequest.created_at.desc(), BookingRequest.id.desc())
         .limit(limit)
@@ -334,8 +421,15 @@ async def requested_start(session: AsyncSession, request: BookingRequest) -> dat
         return request.scheduled_start
     if request.slot_id is None:
         return None
+    # Only while the slot is still this request's: a hold that lapsed in an
+    # abandoned negotiation leaves the column pointing at a slot the practice
+    # has since offered to somebody else.
     return (
-        await session.execute(select(Slot.starts_at).where(Slot.id == request.slot_id))
+        await session.execute(
+            select(Slot.starts_at).where(
+                Slot.id == request.slot_id, _slot_still_belongs(request.id)
+            )
+        )
     ).scalar_one_or_none()
 
 
@@ -436,6 +530,50 @@ async def _last_admin_proposal(session: AsyncSession, request_id: int) -> Negoti
     ).scalar_one_or_none()
 
 
+async def _slot(session: AsyncSession, slot_id: int | None) -> Slot | None:
+    if slot_id is None:
+        return None
+    return (await session.execute(select(Slot).where(Slot.id == slot_id))).scalar_one_or_none()
+
+
+async def _keep_hold_alive(session: AsyncSession, request: BookingRequest) -> None:
+    """Push the held slot's expiry out while the conversation is still going.
+
+    §7.1 expires only `pending`, so a negotiation has no expiry of its own and
+    the hold inherited from submission would lapse in the middle of one --
+    putting the time under discussion back on the picker with the request still
+    pointing at it (§7.2).
+
+    Every negotiation move that *keeps* the slot calls this, not just the rare
+    one that proposes the very time being held. A words-only proposal -- what a
+    mistyped time produces -- keeps the slot precisely because it has not moved
+    away from it, and so has the most need of this.
+    """
+    if request.slot_id is None:
+        return
+    practice = await get_practice(session)
+    await slot_service.extend_hold(session, request.slot_id, pending_expiry(practice))
+
+
+async def _last_proposed_instant(session: AsyncSession, request_id: int) -> datetime | None:
+    """The most recent time either side put forward, if either did (§7.1).
+
+    Deliberately not restricted to the therapist's own proposals: the case this
+    exists for is her approving the time the *client* countered with.
+    """
+    return (
+        await session.execute(
+            select(NegotiationMessage.proposed_start)
+            .where(
+                NegotiationMessage.request_id == request_id,
+                NegotiationMessage.proposed_start.isnot(None),
+            )
+            .order_by(NegotiationMessage.created_at.desc(), NegotiationMessage.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
 async def whose_turn(session: AsyncSession, request_id: int) -> SenderType | None:
     """Derived from the last message's sender, never stored (§6.6).
 
@@ -492,6 +630,8 @@ async def _submit(
     ).scalar_one_or_none()
     if session_type is None or not session_type.is_active:
         raise NotFound(f"session type {session_type_id}")
+
+    await _learn_display_name(session, client_id, display_name)
 
     request = BookingRequest(
         practice_id=practice.id,
@@ -614,16 +754,41 @@ async def admin_approve(
     request = await _get(session, request_id)
     _guard(request, "admin_approve")
 
-    if scheduled_start is None and request.slot_id is None:
-        # A free-text request has no instant to derive; the admin must name one.
+    # What is being confirmed, in the order of how sure we are of it. The slot
+    # is the answer only while nobody has discussed anything else: once a
+    # proposal exists, the slot is what the client asked for and the
+    # negotiation is what they settled on (§7.1).
+    start = scheduled_start
+    if start is None:
+        start = await _last_proposed_instant(session, request.id)
+    if start is None and request.status is RequestStatus.pending:
+        held = await _slot(session, request.slot_id)
+        start = held.starts_at if held is not None else None
+    if start is None:
+        # A negotiation that never named an instant has nothing to confirm. The
+        # slot is *not* a fallback here: the conversation moved to words, and
+        # confirming the client's original pick would tell them a time they
+        # never agreed to. Only she can turn "thursday evening" into one.
         raise InvalidTransition("booking_request", request.status.value, "admin_approve")
 
-    start = scheduled_start
+    # A slot is the booking only while it is the time. A negotiation that
+    # settled on another one leaves it for somebody else, rather than marking it
+    # booked for a session that is not at it.
     if request.slot_id is not None:
-        booked = await slot_service.book_slot(session, request.slot_id, request.id)
-        if start is None:
-            start = booked.starts_at
-    assert start is not None  # both branches above establish it
+        held = await _slot(session, request.slot_id)
+        if held is not None and held.starts_at == start:
+            await slot_service.book_slot(session, request.slot_id, request.id)
+        else:
+            await slot_service.release_slot(session, request.slot_id)
+            request.slot_id = None
+
+    if request.slot_id is None:
+        # The agreed time may happen to be a slot the practice offers; if it is,
+        # take it off the picker rather than leave it double-bookable.
+        matching = await _matching_slot(session, start)
+        if matching is not None:
+            await slot_service.book_slot(session, matching, request.id)
+            request.slot_id = matching
 
     session_type = (
         await session.execute(select(SessionType).where(SessionType.id == request.session_type_id))
@@ -676,12 +841,9 @@ async def admin_propose(
         if held is None or held.starts_at != proposed_start:
             await slot_service.release_slot(session, request.slot_id)
             request.slot_id = None
-        else:
-            # Keeping the slot means keeping it held, and a negotiation has no
-            # expiry of its own (§7.1 expires only `pending`). Re-stamped from
-            # the proposal, so the hold follows the conversation rather than
-            # lapsing on a clock started at submission.
-            await slot_service.extend_hold(session, request.slot_id, pending_expiry(practice))
+
+    # Whatever slot is still held after that, the conversation keeps alive.
+    await _keep_hold_alive(session, request)
 
     session.add(
         NegotiationMessage(
@@ -699,7 +861,10 @@ async def admin_propose(
     collect(
         session,
         RequestProposal(
-            request_id=request.id, request_uuid=request.uuid, proposed_start=proposed_start
+            request_id=request.id,
+            request_uuid=request.uuid,
+            proposed_start=proposed_start,
+            note=body_text,
         ),
     )
     return request
@@ -760,14 +925,21 @@ async def admin_cancel(
 
 
 async def client_accept(session: AsyncSession, request_id: int) -> BookingRequest:
-    """negotiating -> confirmed, at the last time the admin proposed."""
+    """negotiating -> confirmed, at the last time the admin proposed.
+
+    Or, when that proposal named no instant, negotiating -> negotiating: §7.1
+    lets a proposal be words only, and agreeing to words confirms nothing --
+    there is no `scheduled_start` to set, no reminder to schedule and nothing
+    for the schedule to draw. Refusing the client outright was worse: the one
+    person who could move it forward was told nothing, and the client's tap did
+    nothing visible. So the agreement is recorded and the therapist is asked to
+    put a time to it.
+    """
     request = await _get(session, request_id)
     _guard(request, "client_accept")
 
     proposal = await _last_admin_proposal(session, request.id)
-    if proposal is None or proposal.proposed_start is None:
-        # Accepting free text has no instant to confirm against; the therapist
-        # must propose a real datetime first.
+    if proposal is None:
         raise InvalidTransition("booking_request", request.status.value, "client_accept")
 
     session.add(
@@ -775,6 +947,17 @@ async def client_accept(session: AsyncSession, request_id: int) -> BookingReques
             request_id=request.id, sender=SenderType.client, kind=NegotiationKind.accept
         )
     )
+
+    if proposal.proposed_start is None:
+        await session.flush()
+        await _audit(session, request, ActorType.client, "request.accept")
+        collect(
+            session,
+            RequestAccepted(
+                request_id=request.id, request_uuid=request.uuid, note=proposal.body_text
+            ),
+        )
+        return request
 
     matching = await _matching_slot(session, proposal.proposed_start)
     if matching is not None:
@@ -835,7 +1018,13 @@ async def client_counter(
     proposed_start: datetime | None = None,
     body_text: str | None = None,
 ) -> BookingRequest:
-    """negotiating -> negotiating."""
+    """negotiating -> negotiating.
+
+    The slot is deliberately *not* released: a client suggesting an alternative
+    has not given up on the one they picked, and the therapist may still approve
+    it. The hold is kept alive instead -- a client still talking is a client
+    still interested.
+    """
     request = await _get(session, request_id)
     _guard(request, "client_counter")
 
@@ -848,13 +1037,17 @@ async def client_counter(
             body_text=body_text,
         )
     )
+    await _keep_hold_alive(session, request)
     await session.flush()
 
     await _audit(session, request, ActorType.client, "request.counter")
     collect(
         session,
         RequestCounter(
-            request_id=request.id, request_uuid=request.uuid, proposed_start=proposed_start
+            request_id=request.id,
+            request_uuid=request.uuid,
+            proposed_start=proposed_start,
+            note=body_text,
         ),
     )
     return request
