@@ -12,7 +12,7 @@ from __future__ import annotations
 
 import logging
 from collections import defaultdict
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -33,9 +33,16 @@ from app.channels.web.security import (
     issue_csrf,
 )
 from app.config import get_settings
-from app.core.enums import Channel, Modality, SenderType, TokenPurpose
+from app.core.enums import Channel, Modality, SenderType, SlotStatus, TokenPurpose
 from app.core.errors import DomainError, NotFound, SlotUnavailable, TokenInvalid
-from app.core.models import Client, NegotiationMessage, SessionType, TimezoneOption
+from app.core.models import (
+    BookingRequest,
+    Client,
+    NegotiationMessage,
+    SessionType,
+    Slot,
+    TimezoneOption,
+)
 from app.core.policies import (
     CLIENT_TEXT_MAX_CHARS,
     BookingPath,
@@ -164,6 +171,11 @@ async def _labels(session: AsyncSession, lang: str) -> dict[str, str]:
         "counter": "intent.request.proposal.client.action.counter",
         "decline": "intent.request.proposal.client.action.decline",
         "counter_ask": "intent.request.counter.client.ask",
+        "counter_other_time": "request.counter.other_time",
+        "counter_time_label": "request.counter.time_label",
+        "counter_note_label": "request.counter.note_label",
+        "counter_join_waitlist": "request.counter.join_waitlist",
+        "counter_time_hint": "request.counter.time_hint",
         "connect_telegram": "intent.auth.login_link.client.action.telegram",
         "telegram_hint": "intent.auth.login_link.client.telegram_hint",
         "error": "common.error.generic",
@@ -776,7 +788,13 @@ def build_router() -> APIRouter:
             # so before that the time to show is the slot being held -- and in
             # the zone the client picked, which the request remembers.
             when = await booking.requested_start(session, booking_request)
-            zone = booking_request.client_timezone or client.timezone
+            # A client who never told us their zone still has to be shown times
+            # in *some* clock, and the practice's is the one they were quoted in.
+            zone = (
+                booking_request.client_timezone
+                or client.timezone
+                or (await get_practice(session)).timezone
+            )
 
             response = _render(
                 "request.html",
@@ -798,6 +816,11 @@ def build_router() -> APIRouter:
                     "refused": request.query_params.get("refused") == "1",
                     "can_respond": turn is SenderType.client,
                     "can_note": booking_request.status in booking.NOTE_STATUSES,
+                    **(
+                        await _counter_options(session, booking_request, zone)
+                        if turn is SenderType.client
+                        else {"slot_days": [], "free_text": False, "offer_waitlist": False}
+                    ),
                 },
             )
             if arrived_by_token:
@@ -813,12 +836,14 @@ def build_router() -> APIRouter:
         uuid: str,
         action: str,
         body: str = Form(""),
+        slot_id: str = Form(""),
+        proposed_start: str = Form(""),
         csrf_token: str = Form("", alias=CSRF_FIELD),
     ) -> Response:
-        """§12.1: accept | counter | decline | note."""
+        """§12.1: accept | counter | decline | note | waitlist."""
         if not csrf_ok(request, csrf_token):
             return Response(status_code=403)
-        if action not in ("accept", "counter", "decline", "note"):
+        if action not in ("accept", "counter", "decline", "note", "waitlist"):
             return Response(status_code=404)
 
         async with unit_of_work() as session:
@@ -838,22 +863,30 @@ def build_router() -> APIRouter:
                     await booking.client_accept(session, booking_request.id)
                 elif action == "counter":
                     # §9: a structured time is preferred and the words are kept
-                    # either way. Telegram parsed this and the web did not, so
-                    # the same sentence recorded a time from a phone and none
-                    # from a browser -- and the therapist's message showed a
-                    # counter with nothing in it.
+                    # either way. §12.1 now offers the practice's own slots and
+                    # a picker, so most counters name an instant instead of
+                    # relying on a client guessing an ISO timestamp -- but the
+                    # words are still parsed, because Telegram has no picker.
                     practice = await get_practice(session)
+                    zone = booking_request.client_timezone or client.timezone or practice.timezone
+                    when = await _countered_instant(session, slot_id, proposed_start, zone)
+                    if when is _SLOT_GONE:
+                        # §12.1: a proposal for a time that is no longer an
+                        # opening is worse than no proposal.
+                        return RedirectResponse(f"/r/{uuid}?refused=1", status_code=303)
                     await booking.client_counter(
                         session,
                         booking_request.id,
-                        proposed_start=parse_client_time(
-                            body, client.timezone or practice.timezone
-                        ),
+                        proposed_start=when or parse_client_time(body, zone),
                         body_text=body or None,
                     )
                 elif action == "note":
                     # §7.1: information, not a transition.
                     await booking.client_note(session, booking_request.id, body_text=body)
+                elif action == "waitlist":
+                    # §12.1's way out where a counter may not be words. One core
+                    # use-case: the transition and the entry succeed together.
+                    await booking.client_decline_to_waitlist(session, booking_request.id)
                 else:
                     await booking.client_decline(session, booking_request.id)
             except DomainError:
@@ -1018,6 +1051,98 @@ async def _reservation(
         if decoded and decoded.get("slot_id"):
             return decoded
     return None
+
+
+#: Returned by `_countered_instant` when the slot the client picked has been
+#: taken since the page was drawn. Distinct from None, which means "they did not
+#: pick one" -- a sentinel because the two want opposite answers.
+_SLOT_GONE = datetime.min.replace(tzinfo=UTC)
+
+
+async def _countered_instant(
+    session: AsyncSession, slot_id: str, proposed_start: str, tz: str
+) -> datetime | None:
+    """The instant a counter names, from a slot button or the picker.
+
+    §12.1: the slot is re-read here rather than trusted from the form. The page
+    may have been open for an hour, and recording a counter for a time the
+    practice no longer offers hands the therapist something she cannot honour.
+    Nothing is held either way -- §7.1 keeps the request's *original* slot, and
+    one request holding two is not a state worth inventing.
+    """
+    if slot_id:
+        try:
+            wanted = int(slot_id)
+        except ValueError:
+            return _SLOT_GONE
+        found = (
+            await session.execute(
+                select(Slot.starts_at).where(
+                    Slot.id == wanted, Slot.status == SlotStatus.available
+                )
+            )
+        ).scalar_one_or_none()
+        return found if found is not None else _SLOT_GONE
+
+    return _parse_local_naive(proposed_start, tz)
+
+
+def _parse_local_naive(value: str, tz: str) -> datetime | None:
+    """`YYYY-MM-DDTHH:MM` from a `datetime-local` field, in the client's zone.
+
+    Their own clock, not the practice's: the picker sits under times already
+    rendered in it (DESIGN.md §8).
+    """
+    if not value:
+        return None
+    try:
+        naive = datetime.fromisoformat(value)
+    except ValueError:
+        return None
+    return naive.replace(tzinfo=ZoneInfo(tz)).astimezone(UTC)
+
+
+async def _counter_options(
+    session: AsyncSession, booking_request: BookingRequest, tz: str
+) -> dict[str, Any]:
+    """§12.1: what a client may answer a proposal with.
+
+    The slots first, because one the practice is already holding open needs no
+    negotiation at all. Then either a time of their own or the waitlist,
+    depending on `fallback_to_negotiation` -- and never neither, or a client who
+    simply cannot make the proposed time would have to reject their own request
+    to say so.
+    """
+    practice = await get_practice(session)
+    slots = await list_available_slots(
+        session,
+        window_from=now_utc(),
+        window_to=now_utc() + SLOT_WINDOW,
+        session_type_id=booking_request.session_type_id,
+        modality=booking_request.modality,
+        tz=tz,
+    )
+
+    zone = ZoneInfo(tz)
+    grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+    starts: dict[str, datetime] = {}
+    for slot in slots:
+        local = slot.starts_at_utc.astimezone(zone)
+        day = local.date().isoformat()
+        starts.setdefault(day, slot.starts_at_utc)
+        grouped[day].append({"id": slot.id, "label": local.strftime("%H:%M")})
+
+    lang = (
+        await session.execute(select(Client.language).where(Client.id == booking_request.client_id))
+    ).scalar_one()
+    return {
+        "slot_days": [
+            (await day_label(session, lang, starts[day], tz), times)
+            for day, times in grouped.items()
+        ],
+        "free_text": practice.fallback_to_negotiation,
+        "offer_waitlist": not practice.fallback_to_negotiation,
+    }
 
 
 async def _thread(session: AsyncSession, request_id: int, lang: str) -> list[dict[str, Any]]:

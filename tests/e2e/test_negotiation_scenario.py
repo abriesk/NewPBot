@@ -653,3 +653,167 @@ async def test_the_approve_button_on_a_counter_actually_approves(
     await db.refresh(request)
     assert request.status is RequestStatus.confirmed
     assert request.scheduled_start == countered
+
+
+# --- Answering a proposal with a slot (§12.1, §13.1) ------------------------
+
+
+def _callbacks(reply: object) -> list[str]:
+    keyboard = getattr(reply, "keyboard", None)
+    if keyboard is None:
+        return []
+    return [
+        button.callback_data
+        for row in keyboard.inline_keyboard
+        for button in row
+        if button.callback_data
+    ]
+
+
+async def test_counter_offers_the_free_slots_rather_than_a_blank_box(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """§12.1: a client has no reason to guess an ISO timestamp, so a slot the
+    practice is already holding open is the answer that needs no guessing --
+    and none of it is the booking picker, because a tap here means "I suggest
+    this", not "hold this for me"."""
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+    # Proposing another time releases the held slot (§7.1), which puts it back
+    # on the picker -- so it is one of the times offered back.
+    await booking.admin_propose(db, request.id, proposed_start=now_utc() + timedelta(days=9))
+
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=f"counter:{request.id}"))
+    assert reply is not None
+
+    offered = _callbacks(reply)
+    assert f"{kb.COUNTER_SLOT}:{request.id}:{future_slot.id}" in offered
+    assert not any(c.startswith(f"{kb.SLOT}:") for c in offered), "not the booking picker"
+    # Words are still legal while the practice accepts them (§9).
+    assert await flow.current_step(db, tg.id, Channel.telegram) is Step.entering_counter
+
+
+async def test_countering_with_a_slot_records_its_instant(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """The point of the whole change: what reaches the therapist is a time she
+    can approve, not a sentence she has to turn into one."""
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+    await booking.admin_propose(db, request.id, proposed_start=now_utc() + timedelta(days=9))
+    await db.refresh(future_slot)
+
+    await handle(db, Update(chat_id=CHAT, callback_data=f"counter:{request.id}"))
+    await handle(
+        db,
+        Update(
+            chat_id=CHAT,
+            callback_data=f"{kb.COUNTER_SLOT}:{request.id}:{future_slot.id}",
+        ),
+    )
+
+    last = (
+        await db.execute(
+            select(NegotiationMessage)
+            .where(NegotiationMessage.request_id == request.id)
+            .order_by(NegotiationMessage.id.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+    assert last.kind is NegotiationKind.counter
+    assert last.proposed_start == future_slot.starts_at
+
+    # §12.1: nothing is held. §7.1 keeps the request's original slot, and one
+    # request holding two is not a state worth inventing.
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.available
+    assert await booking.whose_turn(db, request.id) is SenderType.admin
+
+
+async def test_a_slot_taken_since_the_keyboard_was_drawn_is_refused(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """The keyboard may have sat in the chat for an hour. Recording a counter
+    for a time the practice no longer offers hands her something she cannot
+    honour."""
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+    await booking.admin_propose(db, request.id, proposed_start=now_utc() + timedelta(days=9))
+
+    await handle(db, Update(chat_id=CHAT, callback_data=f"counter:{request.id}"))
+
+    await db.refresh(future_slot)
+    future_slot.status = SlotStatus.blocked
+    await db.flush()
+
+    before = (
+        await db.execute(
+            select(func.count())
+            .select_from(NegotiationMessage)
+            .where(NegotiationMessage.request_id == request.id)
+        )
+    ).scalar_one()
+    reply = await handle(
+        db,
+        Update(
+            chat_id=CHAT,
+            callback_data=f"{kb.COUNTER_SLOT}:{request.id}:{future_slot.id}",
+        ),
+    )
+    assert reply is not None
+    after = (
+        await db.execute(
+            select(func.count())
+            .select_from(NegotiationMessage)
+            .where(NegotiationMessage.request_id == request.id)
+        )
+    ).scalar_one()
+    assert after == before, "nothing recorded for a time that is no longer offered"
+
+
+async def test_with_free_text_off_the_counter_offers_the_waitlist_instead(
+    db: AsyncSession, session_type_id: int, future_slot: Slot, practice: Practice
+) -> None:
+    """§12.1: with the gate closed and nothing to pick, accept and decline would
+    be the only replies -- so a client who simply cannot make the proposed time
+    would have to reject their own request to say so."""
+    practice.fallback_to_negotiation = False
+    await db.flush()
+
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+    await booking.admin_propose(db, request.id, proposed_start=now_utc() + timedelta(days=9))
+
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=f"counter:{request.id}"))
+    assert reply is not None
+    assert f"{kb.COUNTER_WAITLIST}:{request.id}" in _callbacks(reply)
+    # Nothing is parked, because typing is not an answer here.
+    assert await flow.current_step(db, tg.id, Channel.telegram) is not Step.entering_counter
+
+
+async def test_the_waitlist_button_closes_the_request_and_leaves_an_entry(
+    db: AsyncSession, session_type_id: int, future_slot: Slot, practice: Practice
+) -> None:
+    from app.core.models import WaitlistEntry
+
+    practice.fallback_to_negotiation = False
+    await db.flush()
+
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+    await booking.admin_propose(db, request.id, proposed_start=now_utc() + timedelta(days=9))
+
+    await handle(db, Update(chat_id=CHAT, callback_data=f"counter:{request.id}"))
+    reply = await handle(
+        db, Update(chat_id=CHAT, callback_data=f"{kb.COUNTER_WAITLIST}:{request.id}")
+    )
+    assert reply is not None
+
+    await db.refresh(request)
+    assert request.status is RequestStatus.rejected
+    entries = (
+        (await db.execute(select(WaitlistEntry).where(WaitlistEntry.client_id == tg.id)))
+        .scalars()
+        .all()
+    )
+    assert entries

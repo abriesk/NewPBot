@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import Channel, Modality, OutboxStatus
 from app.core.models import Client, OutboxMessage, Practice, Slot
+from app.core.policies import now_utc
 from app.core.services import booking, notifications, waitlist
 from app.core.services.clients import link_identity, resolve_client
 from app.core.services.notifications import (
@@ -554,3 +555,84 @@ async def test_a_confirmed_email_is_delivered_with_its_calendar_file(
     assert len(parts) == 1
     assert parts[0].get_filename() == "session.ics"
     assert "BEGIN:VCALENDAR" in parts[0].get_content()
+
+
+# --- A negotiation ending reaches the right person (§12.1) ------------------
+
+
+async def test_a_client_declining_reaches_the_therapist(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The reported fault. She had no notification at all for this, so a client
+    walking away from a negotiation was something she would have found out by
+    noticing the request had stopped moving."""
+    request = await _submit(db, client, session_type_id, future_slot)
+    await booking.admin_propose(db, request.id, proposed_start=now_utc() + timedelta(days=9))
+    await notifications.publish(db)
+
+    await booking.client_decline(db, request.id)
+    await notifications.publish(db)
+
+    rows = await _rows(db, "request.declined.admin")
+    assert rows, "she is told a client walked away"
+    assert all(row.payload["uuid"] == str(request.uuid) for row in rows)
+    # And the client still hears that their request is closed.
+    assert await _rows(db, "request.rejected.client")
+
+
+async def test_her_own_rejection_does_not_come_back_to_her(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """Both sides emitted the same event, so an unconditional admin envelope
+    would report her own action to her. That is why the event carries who."""
+    request = await _submit(db, client, session_type_id, future_slot)
+    await notifications.publish(db)
+
+    await booking.admin_reject(db, request.id, reason="not taking new clients")
+    await notifications.publish(db)
+
+    assert not await _rows(db, "request.declined.admin")
+    assert await _rows(db, "request.rejected.client"), "the client is still told"
+
+
+async def test_the_waitlist_way_out_is_not_reported_as_a_rejection(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """§12.1: the client asked to be told when something opens and is told they
+    are on the list. "Your request was rejected", for an action they chose
+    themselves, is the wrong sentence -- and `waitlist.joined.admin` already
+    reaches her with the more useful half."""
+    request = await _submit(db, client, session_type_id, future_slot)
+    await booking.admin_propose(db, request.id, proposed_start=now_utc() + timedelta(days=9))
+    await notifications.publish(db)
+
+    await booking.client_decline_to_waitlist(db, request.id)
+    await notifications.publish(db)
+
+    assert not await _rows(db, "request.rejected.client")
+    assert not await _rows(db, "request.declined.admin")
+    assert await _rows(db, "waitlist.joined.client")
+    assert await _rows(db, "waitlist.joined.admin")
+
+
+async def test_a_decline_by_a_client_with_no_name_does_not_open_on_a_blank(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """§12.2, through the same no-name table the note intent uses."""
+    from app.render.intents import body_key_for
+
+    request = await _submit(db, client, session_type_id, future_slot)
+    # Nameless everywhere: the request carries what it was submitted under, and
+    # the fallback only reaches the client when that is empty.
+    request.display_name = None
+    client.display_name = None
+    await db.flush()
+
+    await booking.admin_propose(db, request.id, proposed_start=now_utc() + timedelta(days=9))
+    await notifications.publish(db)
+    await booking.client_decline(db, request.id)
+    await notifications.publish(db)
+
+    row = (await _rows(db, "request.declined.admin"))[0]
+    assert not row.payload["name"]
+    assert body_key_for("request.declined.admin", row.payload).endswith(".no_name")

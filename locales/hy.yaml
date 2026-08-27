@@ -133,6 +133,11 @@ request:
   open: "Բացել ձեր ամրագրումը"                   # TODO: review
   add_note: "Ավելացնել տեղեկություն"             # TODO: review
   note_ask: "Կա՞ որևէ բան, որ կցանկանայիք ինձ հայտնել հանդիպումից առաջ։"   # TODO: review
+  counter.other_time: "Կամ առաջարկեք այլ ժամանակ"          # TODO: review
+  counter.time_label: "Ժամանակ"                            # TODO: review
+  counter.note_label: "Ցանկանո՞ւմ եք որևէ բան ավելացնել։"  # TODO: review
+  counter.join_waitlist: "Տեղեկացրեք ինձ, երբ տեղ ազատվի"  # TODO: review
+  counter.time_hint: "Ամենահարմարը 02.09.2026 18:00 ձևաչափով ժամանակն է։"   # TODO: review
   when: "Երբ"                                    # TODO: review
 
 intent:

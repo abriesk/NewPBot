@@ -20,6 +20,8 @@ from datetime import datetime
 from typing import TYPE_CHECKING
 from uuid import UUID
 
+from app.core.enums import ActorType
+
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -107,8 +109,24 @@ class RequestNote(DomainEvent):
 
 @dataclass(frozen=True, slots=True)
 class RequestRejected(DomainEvent):
+    """A request closed without a session, by either side.
+
+    `by` is the whole difference between "she turned somebody down" and "a
+    client walked away from a negotiation", and the two want opposite
+    notifications: the second has to reach her, the first is her own action
+    read back to her. Nothing else could tell them apart -- both sides emitted
+    this identically, and there is no `rejected_by` column (§12.1: the audit log
+    already records which, and a column would be a third copy).
+
+    `to_waitlist` marks the decline that §12.1 offers as a way out when a
+    counter may not be words. It is still a decline; it just already has a
+    better message to send about itself.
+    """
+
     request_id: int
     request_uuid: UUID
+    by: ActorType = ActorType.admin
+    to_waitlist: bool = False
     intent_key: str = field(init=False, default="request.rejected")
 
 

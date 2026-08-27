@@ -702,6 +702,7 @@ Each intent has a key, a recipient, a payload schema, and available actions. Tra
 | `request.confirmed.client` | client | uuid, scheduled_start, duration_min, session type, modality, join info | open |
 | `request.confirmed.admin` | admin | uuid, scheduled_start, client | — |
 | `request.rejected.client` | client | uuid, reason | — |
+| `request.declined.admin` | admin | uuid, name | — |
 | `request.expired.client` | client | uuid | — |
 | `request.cancelled.client` | client | uuid, scheduled_start, reason | — |
 | `reminder.client` | client | uuid, scheduled_start, offset_min, modality, join info | open |
@@ -773,6 +774,7 @@ The renderer **MUST** have golden tests including: Russian text containing `.`, 
 | GET | `/r/{uuid}` | Request status and negotiation thread (auth required) |
 | POST | `/r/{uuid}/accept` \| `/counter` \| `/decline` | Negotiation actions |
 | POST | `/r/{uuid}/note` | Add information to a request (§7.1); status unchanged |
+| POST | `/r/{uuid}/waitlist` | Close the negotiation and join the waitlist (§7.1's `client_decline`) |
 | GET | `/auth/email` | Request a magic link |
 | GET | `/auth/callback?token=` | Consume a login token |
 
@@ -785,6 +787,24 @@ Both prefills require a **session**, never a typed address: at step 3 an unsigne
 The name field is prefilled rather than hidden, which is the opposite of the email field's treatment on the same form. An email is a credential: the session establishes it and changing it goes through verification. A name is a label, and no client-facing route lets a client edit one anywhere else — hiding it once set would make a client's own name uncorrectable by them for good.
 
 A message *about a request* **MUST** link to `/r/{uuid}` carrying a `view_request` token (§6.2), so following it opens the request rather than a sign-in form. Consuming that token starts a client session, which is what makes the link still work when it is opened a second time — the token itself is single-use, as §6.2 requires of every token.
+
+**A client answering a proposal MUST be offered the practice's free slots, not a blank box.** `/r/{uuid}` asked "when would suit you?" with one text input and no hint, then parsed whatever came back (§9 prefers a structured time and keeps the words either way). A client has no reason to guess `2026-09-02 18:00`, so they wrote a sentence, no instant was recorded, and the therapist had to turn the words into a time by hand before she could approve anything.
+
+The counter form therefore offers, in this order:
+
+1. **The free slots**, same window and same session-type and modality filters as `/book/slots`, in the client's own timezone. One click submits: a slot the practice is already holding open is the answer that needs no negotiation at all, and `admin_approve` books it on approval because §7.1's `_matching_slot` already looks for a slot at the instant being confirmed.
+2. **Another time** — a `datetime-local` field and a free-text note beside it — *or* the waitlist, depending on the gate below. At least one of the two fields **MUST** be given.
+
+**A counter naming a slot takes no hold.** §7.1 deliberately keeps the request's *original* slot held while a negotiation runs, and one request holding two slots is not a state the schema should be asked to represent. The countered slot is re-read at submit and a counter naming one that has since gone is **refused** with `booking.slot.taken` rather than recorded — a proposal for a time that is no longer an opening is worse than no proposal.
+
+**`fallback_to_negotiation` gates the free-text half of a counter.** The setting reads "offer a free-text time when no slots are free", and §6's matrix applies it to the booking path; it governs replies within a negotiation for the same reason. With it **off**, a counter **MUST** name a time — a slot or the picker — and the note is not offered on its own.
+
+**Where a counter cannot be words, the client MUST still have a way out.** With the gate off and no slots free, accept and decline would be the only replies, and a client who simply cannot make the proposed time would have to reject their own request to say so. So the form offers the **waitlist** in that case: `POST /r/{uuid}/waitlist` closes the negotiation through §7.1's existing `client_decline` — no new transition — and creates a `waitlist_entry` carrying the request's `problem_text` and `contact_note`, so the entry is not anonymous. The client is told they are on the list; they **MUST NOT** also be told their request was rejected, which is what they would otherwise receive for an action they took themselves.
+
+**A client declining MUST notify the therapist.** `client_decline` and `admin_reject` emitted the same bare `RequestRejected`, which carried no admin envelope at all — so a client walking away from a negotiation reached her as silence, and she would have found out by noticing the request had stopped moving. The event now carries **who** rejected it, and an admin notification is sent only for the client's own decline: telling her about her own rejection would be noise, and the two cases are indistinguishable without it. There is no `rejected_by` column and none is added — the fact is already durable in the audit log (`request.decline` against `request.reject`) and in the thread's decline message, and a column would persist a third copy.
+
+The waitlist path is a decline and would fire that notification too. It **MUST** be suppressed there: `waitlist.joined.admin` already tells her the negotiation is over and carries the more useful half.
+
 
 ### 12.2 Admin routes
 
@@ -908,6 +928,8 @@ Uploads **MUST** be capped (5 MB) and rejected above it before parsing.
 A message whose text exactly matches a main-keyboard label is **navigation, not an answer**: any half-finished flow is abandoned and the button's action runs. Without this rule a client who taps a topic while being asked to describe their problem has the button's label stored as the problem, which is what the flow-step check would otherwise do with it.
 
 Multi-step input state is stored in the database against the client, **not** in aiogram FSM memory, so a restart does not lose a half-finished booking.
+
+**Counter offers the free slots here too**, under §12.1's rules — the same slots, the same gate, the same waitlist exit. A client answering a proposal on a phone and one answering it in a browser are being asked the same question, and a rule that lives in one adapter is one the other gets wrong. The slot buttons **MUST** carry their own callback action rather than the booking picker's `slot:<id>`: a tap in a negotiation means "I suggest this", not "hold this for me", and one action doing both would depend on parked flow state to tell them apart. There is no date picker in a chat, so where §12.1 shows one Telegram keeps the typed format and its hint.
 
 ### 13.2 Admin
 

@@ -53,16 +53,62 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button type="submit">{{ t.accept }}</button>
   </form>
-  <form method="post" action="/r/{{ req.uuid }}/counter">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="text" name="body" placeholder="{{ t.counter_ask }}" required
-           maxlength="{{ text_max }}" data-counter>
-    <button type="submit" class="secondary">{{ t.counter }}</button>
-  </form>
   <form method="post" action="/r/{{ req.uuid }}/decline">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button type="submit" class="secondary">{{ t.decline }}</button>
   </form>
+</div>
+
+{# §12.1: the slots first. One the practice is already holding open is the
+   answer that needs no negotiation at all, and it saves a client guessing at a
+   date format nobody told them about. #}
+<div class="card counter">
+  <h2>{{ t.counter }}</h2>
+  {% if slot_days %}
+    <p class="muted">{{ t.choose_slot }}</p>
+    {% for day, slots in slot_days %}
+      <div class="day">
+        <h3>{{ day }}</h3>
+        <div class="times">
+          {% for slot in slots %}
+            <form method="post" action="/r/{{ req.uuid }}/counter">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <input type="hidden" name="slot_id" value="{{ slot.id }}">
+              <button type="submit">{{ slot.label }}</button>
+            </form>
+          {% endfor %}
+        </div>
+      </div>
+    {% endfor %}
+  {% else %}
+    <p class="muted">{{ t.no_slots }}</p>
+  {% endif %}
+
+  {% if free_text %}
+    {# `fallback_to_negotiation`: the practice accepts a time of the client's
+       own. A picker rather than a blank box, so what reaches the therapist is
+       something she can approve rather than a sentence to decipher -- but the
+       words are still kept beside it (§9). #}
+    <form method="post" action="/r/{{ req.uuid }}/counter" class="other-time">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <h3>{{ t.counter_other_time }}</h3>
+      <label>{{ t.counter_time_label }}
+        <input type="datetime-local" name="proposed_start">
+      </label>
+      <label>{{ t.counter_note_label }}
+        <input type="text" name="body" maxlength="{{ text_max }}" data-counter>
+      </label>
+      <button type="submit" class="secondary">{{ t.counter }}</button>
+    </form>
+  {% elif offer_waitlist %}
+    {# §12.1: with free text off and no slots free, accept and decline would be
+       the only replies -- so a client who cannot make the proposed time would
+       have to reject their own request to say so. #}
+    <form method="post" action="/r/{{ req.uuid }}/waitlist" class="other-time">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <button type="submit" class="secondary">{{ t.counter_join_waitlist }}</button>
+    </form>
+  {% endif %}
 </div>
 {% endif %}
 {% endblock %}

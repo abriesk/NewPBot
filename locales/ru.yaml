@@ -127,6 +127,11 @@ request:
   open: "Открыть вашу заявку"
   add_note: "Добавить информацию"
   note_ask: "Хотите что-то сообщить перед консультацией?"
+  counter.other_time: "Или предложите другое время"
+  counter.time_label: "Время"
+  counter.note_label: "Хотите что-то добавить?"
+  counter.join_waitlist: "Сообщите мне, когда появится место"
+  counter.time_hint: "Удобнее всего время в виде 02.09.2026 18:00."
   when: "Когда"
 
 intent:

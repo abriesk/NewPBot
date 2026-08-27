@@ -33,6 +33,7 @@ def test_every_intent_in_section_10_has_a_spec() -> None:
         "request.confirmed.client",
         "request.confirmed.admin",
         "request.rejected.client",
+        "request.declined.admin",
         "request.expired.client",
         "request.cancelled.client",
         "reminder.client",

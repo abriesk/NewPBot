@@ -22,9 +22,16 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels.telegram import keyboards as kb
 from app.config import get_settings
-from app.core.enums import Channel, Modality, RequestStatus, SenderType, TokenPurpose
+from app.core.enums import Channel, Modality, RequestStatus, SenderType, SlotStatus, TokenPurpose
 from app.core.errors import DomainError, SlotUnavailable, TokenInvalid
-from app.core.models import BookingRequest, Client, Practice, SessionType, TimezoneOption
+from app.core.models import (
+    BookingRequest,
+    Client,
+    Practice,
+    SessionType,
+    Slot,
+    TimezoneOption,
+)
 from app.core.policies import BookingPath, now_utc, parse_client_time, resolve_booking_mode
 from app.core.services import booking, content, flow, notifications, waitlist
 from app.core.services.clients import (
@@ -953,6 +960,105 @@ def _parse_time(text: str, tz: str) -> datetime | None:
 # --- Negotiation, client side (§7.1) ----------------------------------------
 
 
+async def _counter_options(
+    session: AsyncSession, client: Client, request: BookingRequest
+) -> Reply:
+    """§12.1's counter form, as a keyboard.
+
+    The same question the web asks and the same gate on it, because a client
+    answering a proposal on a phone and one answering it in a browser are being
+    asked the same thing. There is no date picker in a chat, so where the web
+    shows one this keeps the typed format and says what it looks like.
+    """
+    practice = await get_practice(session)
+    tz = request.client_timezone or client.timezone or practice.timezone
+
+    slots = await list_available_slots(
+        session,
+        window_from=now_utc(),
+        window_to=now_utc() + SLOT_WINDOW,
+        session_type_id=request.session_type_id,
+        modality=request.modality,
+        tz=tz,
+    )
+
+    zone = ZoneInfo(tz)
+    labels: dict[str, str] = {}
+    for slot in slots:
+        day = slot.starts_at_utc.astimezone(zone).strftime("%Y-%m-%d")
+        if day not in labels:
+            labels[day] = await day_label(session, client.language, slot.starts_at_utc, tz)
+
+    lines = [await get_text(session, client.language, "booking.choose_slot", timezone=tz)]
+    if not slots:
+        lines = [await get_text(session, client.language, "booking.slot.none_available")]
+
+    extra: list[list[tuple[str, str]]] = []
+    if practice.fallback_to_negotiation:
+        # §9: words remain a legal answer, so park the step and say how a time
+        # is best written -- the hint the web replaces with a picker.
+        await flow.set_step(
+            session,
+            client.id,
+            Channel.telegram,
+            Step.entering_counter,
+            replace={"request_id": request.id},
+        )
+        lines.append(await get_text(session, client.language, "intent.request.counter.client.ask"))
+        lines.append(await get_text(session, client.language, "request.counter.time_hint"))
+    else:
+        await flow.clear(session, client.id, Channel.telegram)
+        extra.append(
+            [
+                (
+                    await get_text(session, client.language, "request.counter.join_waitlist"),
+                    f"{kb.COUNTER_WAITLIST}:{request.id}",
+                )
+            ]
+        )
+
+    return Reply(
+        "\n\n".join(lines),
+        keyboard=kb.slot_keyboard(
+            slots,
+            tz,
+            labels,
+            action=kb.COUNTER_SLOT,
+            prefix=f"{request.id}:",
+            extra=extra,
+        ),
+    )
+
+
+async def _counter_with_slot(
+    session: AsyncSession, client: Client, request: BookingRequest, slot_id: int
+) -> Reply:
+    """A slot tapped in answer to a proposal (§12.1).
+
+    Re-read rather than trusted: the keyboard may have been sitting in the chat
+    for an hour, and a counter naming a time the practice no longer offers hands
+    the therapist something she cannot honour. Nothing is held -- §7.1 keeps the
+    request's original slot, and one request holding two is not a state worth
+    inventing.
+    """
+    starts_at = (
+        await session.execute(
+            select(Slot.starts_at).where(Slot.id == slot_id, Slot.status == SlotStatus.available)
+        )
+    ).scalar_one_or_none()
+    if starts_at is None:
+        return Reply(await get_text(session, client.language, "booking.slot.taken"))
+
+    await flow.clear(session, client.id, Channel.telegram)
+    try:
+        await booking.client_counter(session, request.id, proposed_start=starts_at)
+    except DomainError:
+        return Reply(await get_text(session, client.language, "common.error.generic"))
+
+    await notifications.publish(session)
+    return Reply(await get_text(session, client.language, "intent.request.counter.client.sent"))
+
+
 async def _negotiation_action(
     session: AsyncSession, client: Client, action: str, argument: str
 ) -> Reply | None:
@@ -962,6 +1068,17 @@ async def _negotiation_action(
     A refusal is answered with an explanation rather than silence -- the client
     pressed a button and deserves to know it did nothing.
     """
+    # §13.1: a slot tapped in answer to a proposal carries both ids, so the
+    # button still works when the parked flow has since been cleared.
+    slot_id: int | None = None
+    if action == kb.COUNTER_SLOT:
+        head, _, tail = argument.partition(":")
+        argument = head
+        try:
+            slot_id = int(tail)
+        except ValueError:
+            return None
+
     try:
         request_id = int(argument)
     except ValueError:
@@ -972,16 +1089,20 @@ async def _negotiation_action(
         return Reply(await get_text(session, client.language, "common.error.not_found"))
 
     if action == kb.COUNTER:
-        # §9: a counter needs words, and a callback carries none. Park the
-        # request id and ask.
-        await flow.set_step(
-            session,
-            client.id,
-            Channel.telegram,
-            Step.entering_counter,
-            replace={"request_id": request.id},
-        )
-        return Reply(await get_text(session, client.language, "intent.request.counter.client.ask"))
+        return await _counter_options(session, client, request)
+
+    if action == kb.COUNTER_SLOT and slot_id is not None:
+        return await _counter_with_slot(session, client, request, slot_id)
+
+    if action == kb.COUNTER_WAITLIST:
+        # §12.1: the way out where a counter may not be words.
+        await flow.clear(session, client.id, Channel.telegram)
+        try:
+            await booking.client_decline_to_waitlist(session, request.id)
+        except DomainError:
+            return Reply(await get_text(session, client.language, "common.error.generic"))
+        await notifications.publish(session)
+        return Reply(await get_text(session, client.language, "waitlist.submitted"))
 
     try:
         if action == kb.ACCEPT:

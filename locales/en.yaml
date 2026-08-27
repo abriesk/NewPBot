@@ -138,6 +138,11 @@ request:
   open: "Open your booking"
   add_note: "Add information"
   note_ask: "Anything you would like me to know before the session?"
+  counter.other_time: "Or suggest another time"
+  counter.time_label: "Time"
+  counter.note_label: "Anything you would like to add?"
+  counter.join_waitlist: "Tell me when something opens up"
+  counter.time_hint: "A time written as 2026-09-02 18:00 is the easiest to act on."
   when: "When"
 
 intent:
@@ -231,6 +236,8 @@ admin:
   intent.request.counter.admin.note: "They wrote: {note}"
   intent.request.accepted.admin.body: "Client agreed on request {uuid}, which named no time. Open it and set one."
   intent.request.confirmed.admin.body: "Request {uuid} confirmed for {time}."
+  intent.request.declined.admin.body: "{name} declined the proposal on request {uuid}. The request is closed."
+  intent.request.declined.admin.body.no_name: "The proposal on request {uuid} was declined. The request is closed."
   intent.request.note.admin.body: "{name} added information to request {uuid}."
   intent.request.note.admin.body.no_name: "New information on request {uuid}."
   intent.request.note.admin.note: "They wrote: {note}"

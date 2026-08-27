@@ -885,7 +885,10 @@ async def admin_reject(
     await session.flush()
 
     await _audit(session, request, ActorType.admin, "request.reject")
-    collect(session, RequestRejected(request_id=request.id, request_uuid=request.uuid))
+    collect(
+        session,
+        RequestRejected(request_id=request.id, request_uuid=request.uuid, by=ActorType.admin),
+    )
     return request
 
 
@@ -1096,8 +1099,16 @@ async def client_note(
     return request
 
 
-async def client_decline(session: AsyncSession, request_id: int) -> BookingRequest:
-    """negotiating -> rejected."""
+async def client_decline(
+    session: AsyncSession, request_id: int, *, to_waitlist: bool = False
+) -> BookingRequest:
+    """negotiating -> rejected.
+
+    The event says the client did it, which is the difference between something
+    she should hear about and her own rejection read back to her (§12.1). Both
+    sides emitted this identically, so a client walking away from a negotiation
+    reached her as silence.
+    """
     request = await _get(session, request_id)
     _guard(request, "client_decline")
 
@@ -1111,8 +1122,47 @@ async def client_decline(session: AsyncSession, request_id: int) -> BookingReque
     await session.flush()
 
     await _audit(session, request, ActorType.client, "request.decline")
-    collect(session, RequestRejected(request_id=request.id, request_uuid=request.uuid))
+    collect(
+        session,
+        RequestRejected(
+            request_id=request.id,
+            request_uuid=request.uuid,
+            by=ActorType.client,
+            to_waitlist=to_waitlist,
+        ),
+    )
     return request
+
+
+async def client_decline_to_waitlist(
+    session: AsyncSession, request_id: int
+) -> tuple[BookingRequest, Any]:
+    """§12.1's way out: close the negotiation and ask to be told when something
+    opens.
+
+    One use-case rather than two calls from a route, because §7.1's transition
+    and the waitlist entry have to succeed or fail together -- a route that did
+    both would be a scheduling rule living in a channel, which is the drift the
+    whole architecture exists to prevent.
+
+    Not a new transition. It *is* `client_decline`; the entry is what the
+    client gets in exchange for it, and the request's own words go with them so
+    the therapist is not handed an anonymous line on the waitlist page.
+    """
+    from app.core.services import waitlist as waitlist_service
+
+    request = await _get(session, request_id)
+    _guard(request, "client_decline")
+
+    problem_text, contact_note = request.problem_text, request.contact_note
+    declined = await client_decline(session, request_id, to_waitlist=True)
+    entry = await waitlist_service.join_waitlist(
+        session,
+        client_id=request.client_id,
+        problem_text=problem_text,
+        contact_note=contact_note,
+    )
+    return declined, entry
 
 
 # --- Worker transitions -----------------------------------------------------
