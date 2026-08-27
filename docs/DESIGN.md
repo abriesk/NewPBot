@@ -147,7 +147,13 @@ The fix separates the person from the credential:
 - `client` — the person, with a stable internal ID.
 - `identity` — `(client_id, channel, external_id, verified_at)`.
 
-A Telegram identity is created on first `/start` and is verified by construction: Telegram vouches for the user ID. An email identity is created on the web and is verified by a magic link — an unverified email must not be able to book, or the system becomes a way to send unsolicited mail in the therapist's name.
+A Telegram identity is created on first `/start` and is verified by construction: Telegram vouches for the user ID. An email identity is created on the web and is verified by a magic link.
+
+**Verification gates identity, not booking.** The request is submitted either way — IMPLEMENTATION.md §12.1 is normative on this, and a client who typed their address has done everything the form asked of them. What waits for the magic link is anything that says *who this browser is*: an unverified address gets no session cookie and no channel-link token.
+
+The reason is that `resolve_client` returns the client who already owns an address. Issue either on a merely typed one and knowing somebody's email address is enough to become them — the session signs the browser in as them, and the Telegram deep link attaches an account to their client record permanently, after which §13.3 routes their notifications to it. Neither is a thing to hand out on an unproved claim, and for this practice in particular the person most likely to try is not a stranger.
+
+The unsolicited-mail concern is handled where it belongs: §13.3 addresses nothing to an unverified identity. The single exception is the sign-in link itself, because following it is what verifies the address — and without it a client who books without Telegram has no way back to their own request.
 
 **Merging.** Every notification email includes a Telegram deep link of the form `https://t.me/<bot>?start=link_<token>`. Tapping it hands the token to the bot as the `/start` payload; the bot resolves the token and attaches a `telegram` identity to the client who already exists. This is the identity-merge path, and it costs the client one tap rather than a "please type your email into the bot" flow. The same mechanism works in reverse: a Telegram-first client who supplies an email later gets a verification link.
 

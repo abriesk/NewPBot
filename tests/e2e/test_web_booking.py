@@ -231,8 +231,16 @@ async def test_a_client_with_no_telegram_can_book_end_to_end(
 async def test_the_confirmation_offers_the_telegram_merge_link(
     web: TestClient, web_slot: int, committed: AsyncSession
 ) -> None:
-    """DESIGN.md §5.1: one tap to attach Telegram, rather than asking the client
-    to type their email into the bot."""
+    """DESIGN.md §5.1: one tap to attach Telegram -- but only once the address
+    has proved itself.
+
+    The deep link attaches a Telegram account to this client permanently, and
+    §13.3 then routes every notification to it. Offered on the confirmation page
+    of an unverified submission, typing a stranger's address would have handed
+    over their account: `resolve_client` returns the *existing* client when the
+    address is already known. It goes in the sign-in email instead, which only
+    the address owner can read.
+    """
     session_type_id = (
         await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
     ).scalar_one()
@@ -251,8 +259,62 @@ async def test_the_confirmation_offers_the_telegram_merge_link(
         "/book",
         data={"csrf_token": _csrf(web), "problem": "", "name": "", "contact": "", "email": EMAIL},
     )
-    assert "t.me/" in done.text
-    assert "start=link_" in done.text
+    assert "t.me/" not in done.text
+    assert "start=link_" not in done.text
+
+    # It is in the sign-in email the submission queues instead.
+    await committed.rollback()
+    identity = (
+        await committed.execute(select(Identity).where(Identity.external_id == EMAIL))
+    ).scalar_one()
+    link = (
+        await committed.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.client_id == identity.client_id,
+                OutboxMessage.intent_key == "auth.login_link.client",
+            )
+        )
+    ).scalar_one()
+
+    assert "start=link_" in link.payload["telegram_url"]
+    assert link.address == EMAIL
+
+
+async def test_submitting_does_not_sign_the_browser_in(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """The address is typed, not proved. `resolve_client` hands back the client
+    that already owns it, so a session issued here would sign the browser in as
+    whoever that is -- no link followed, no code entered.
+    """
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+    web.get("/book")
+    web.post(
+        "/book/hold",
+        data={
+            "csrf_token": _csrf(web),
+            "slot_id": web_slot,
+            "session_type_id": session_type_id,
+            "modality": "online",
+            "tz": "Europe/Moscow",
+        },
+    )
+    web.post(
+        "/book",
+        data={"csrf_token": _csrf(web), "problem": "", "name": "", "contact": "", "email": EMAIL},
+    )
+
+    await committed.rollback()
+    request = (
+        await committed.execute(select(BookingRequest).order_by(BookingRequest.id.desc()).limit(1))
+    ).scalar_one()
+
+    # The booking still happened -- §12.1 is explicit that verification is never
+    # a precondition for it. Only the sign-in is withheld.
+    assert request.status is RequestStatus.pending
+    assert web.get(f"/r/{request.uuid}", follow_redirects=False).status_code == 303
 
 
 async def test_submitting_writes_outbox_rows_rather_than_sending(
@@ -291,8 +353,15 @@ async def test_submitting_writes_outbox_rows_rather_than_sending(
         .all()
     )
     # The email identity is unverified until the magic link is followed, so
-    # nothing is addressed to it yet (DESIGN.md §5.1). The admin still hears.
-    assert all(row.channel is not Channel.email for row in rows)
+    # nothing about the *booking* is addressed to it (DESIGN.md §5.1). The admin
+    # still hears. The one exception is the sign-in link itself, which §13.3
+    # allows precisely because following it is what verifies the address -- and
+    # without it an unverified client has no way back to their own request.
+    assert all(
+        row.channel is not Channel.email or row.intent_key == "auth.login_link.client"
+        for row in rows
+    )
+    assert any(row.intent_key == "auth.login_link.client" for row in rows)
 
 
 # --- Magic-link auth --------------------------------------------------------

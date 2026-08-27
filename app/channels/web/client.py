@@ -82,6 +82,41 @@ LANGUAGES = ("ru", "hy", "en")
 # --- Page context -----------------------------------------------------------
 
 
+async def _queue_login_link(session: AsyncSession, *, client_id: UUID, email: str) -> None:
+    """Queue `auth.login_link.client` to an address that has not proved itself.
+
+    §13.3 makes this the one intent allowed to reach an unverified address,
+    because following the link is what verifies it. It carries the Telegram
+    deep link too: the merge has to be behind the same proof, or attaching a
+    Telegram account to somebody else's client record costs nothing but knowing
+    their email (DESIGN.md §5.1).
+    """
+    settings = get_settings()
+    raw = await issue_token(
+        session, TokenPurpose.login, client_id=client_id, payload={"email": email}
+    )
+    link_raw = await issue_token(session, TokenPurpose.link_channel, client_id=client_id)
+    await notifications.enqueue(
+        session,
+        Envelope(
+            "auth.login_link.client",
+            Recipient.client,
+            {
+                "url": f"{settings.base_url}/auth/callback?token={raw}",
+                "minutes": 30,
+                "telegram_url": (
+                    f"https://t.me/{settings.telegram_bot_username}?start=link_{link_raw}"
+                ),
+            },
+            # §13.3: this intent addresses itself. Left to the general policy the
+            # row is never written at all, since the address it is about is
+            # unverified by definition.
+            client_id=client_id,
+            to=(Channel.email, email),
+        ),
+    )
+
+
 async def _labels(session: AsyncSession, lang: str) -> dict[str, str]:
     """The strings every page needs.
 
@@ -515,6 +550,10 @@ def build_router() -> APIRouter:
         async with unit_of_work() as session:
             context = await _context(session, request)
             client = await _session_client(session, request)
+            # Whether this browser had already proved who it belongs to. A
+            # session now comes only from consuming a token, so it is proof;
+            # a typed address is not, however well-formed.
+            proven = client is not None
             reservation = await _reservation(session, request, client)
 
             if reservation is None:
@@ -523,9 +562,13 @@ def build_router() -> APIRouter:
             if client is None:
                 if not email:
                     return RedirectResponse("/book/details", status_code=303)
-                # Unverified until the magic link is followed: an unverified
-                # address must not be able to book (DESIGN.md §5.1), so the
-                # confirmation goes out only after verification.
+                # §12.1 (IMPLEMENTATION.md): verification is never a
+                # precondition for booking -- the request is submitted either
+                # way. What it *is* a precondition for is anything that signs
+                # this browser in as the client, because `resolve_client`
+                # returns the existing client when the address is already
+                # known: typing a stranger's address must not hand over their
+                # identity (DESIGN.md §5.1).
                 client = await resolve_client(
                     session, Channel.email, email, language=context["lang"]
                 )
@@ -565,12 +608,32 @@ def build_router() -> APIRouter:
                     status_code=409,
                 )
 
-            await notifications.publish(session)
             await flow.clear(session, client.id, Channel.web)
 
             settings = get_settings()
-            link_raw = await issue_token(session, TokenPurpose.link_channel, client_id=client.id)
-            telegram_link = f"https://t.me/{settings.telegram_bot_username}?start=link_{link_raw}"
+            telegram_link = None
+            verify_notice = None
+
+            if proven:
+                # Already signed in, so the merge link is safe to show: the deep
+                # link attaches a Telegram account to this client permanently,
+                # and §13.3 then routes every notification to it.
+                link_raw = await issue_token(
+                    session, TokenPurpose.link_channel, client_id=client.id
+                )
+                telegram_link = (
+                    f"https://t.me/{settings.telegram_bot_username}?start=link_{link_raw}"
+                )
+            else:
+                # The address is unproved, so the way back to this request goes
+                # through it rather than around it. Nothing else here reaches an
+                # unverified address (§13.3), which is why the booking otherwise
+                # leaves the client with no route back at all.
+                if settings.email_enabled and await magic_link_allowance_left(session, email) > 0:
+                    await _queue_login_link(session, client_id=client.id, email=email)
+                verify_notice = await get_text(session, context["lang"], "booking.check_email")
+
+            await notifications.publish(session)
 
             response = _render(
                 "done.html",
@@ -585,9 +648,11 @@ def build_router() -> APIRouter:
                     ),
                     "request_uuid": str(booking_request.uuid),
                     "telegram_link": telegram_link,
+                    "verify_notice": verify_notice,
                 },
             )
-            issue_client_session(response, client.id)
+            if proven:
+                issue_client_session(response, client.id)
             _clear_stash(response)
             return response
 
@@ -810,32 +875,7 @@ def build_router() -> APIRouter:
                 client = await resolve_client(
                     session, Channel.email, email, language=context["lang"]
                 )
-                raw = await issue_token(
-                    session, TokenPurpose.login, client_id=client.id, payload={"email": email}
-                )
-                link_raw = await issue_token(
-                    session, TokenPurpose.link_channel, client_id=client.id
-                )
-                await notifications.enqueue(
-                    session,
-                    Envelope(
-                        "auth.login_link.client",
-                        Recipient.client,
-                        {
-                            "url": f"{settings.base_url}/auth/callback?token={raw}",
-                            "minutes": 30,
-                            "telegram_url": (
-                                f"https://t.me/{settings.telegram_bot_username}"
-                                f"?start=link_{link_raw}"
-                            ),
-                        },
-                        # §13.3: this intent addresses itself. Left to the
-                        # general policy the row is never written at all, since
-                        # the address it is about is unverified by definition.
-                        client_id=client.id,
-                        to=(Channel.email, email),
-                    ),
-                )
+                await _queue_login_link(session, client_id=client.id, email=email)
 
             # The same page either way: whether an address is known is not
             # something an unauthenticated caller should learn.

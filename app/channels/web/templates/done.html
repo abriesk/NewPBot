@@ -4,6 +4,7 @@
   <h1>{{ heading }}</h1>
   <p>{{ message }}</p>
   {% if request_uuid %}<p class="uuid"><code>{{ request_uuid }}</code></p>{% endif %}
+  {% if verify_notice %}<p class="muted">{{ verify_notice }}</p>{% endif %}
   {% if telegram_link %}
     <div class="stack-actions"><a class="cta" href="{{ telegram_link }}">{{ t.connect_telegram }}</a></div>
     <p class="muted">{{ t.telegram_hint }}</p>
