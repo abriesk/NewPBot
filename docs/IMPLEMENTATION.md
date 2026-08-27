@@ -561,7 +561,8 @@ error_event
 | `pending` | `admin_propose` | `negotiating` | Insert `negotiation_message(admin, proposal)`; release slot if the proposal names a different time; emit `request.proposal` |
 | `pending` | `admin_reject` | `rejected` | Release slot; emit `request.rejected` |
 | `pending` | `expire` (worker) | `expired` | Release slot; emit `request.expired` |
-| `negotiating` | `client_accept` | `confirmed` | `scheduled_start` = last admin proposal; book matching slot if one exists; create reminders; emit `request.confirmed` |
+| `negotiating` | `client_accept` (proposal names an instant) | `confirmed` | `scheduled_start` = last admin proposal; book matching slot if one exists; create reminders; emit `request.confirmed` |
+| `negotiating` | `client_accept` (proposal is words only) | `negotiating` | Insert `negotiation_message(client, accept)`; emit `request.accepted` so the therapist can put a time to it |
 | `negotiating` | `client_counter` | `negotiating` | Insert `negotiation_message(client, counter)`; emit `request.counter` |
 | `negotiating` | `admin_propose` | `negotiating` | Insert message; emit `request.proposal` |
 | `negotiating` | `client_decline` / `admin_reject` | `rejected` | Release slot; emit `request.rejected` |
@@ -569,6 +570,8 @@ error_event
 | `confirmed` | `complete` (worker) | `completed` | Release slot booking; no notification |
 
 Any transition not in this table **MUST** raise `InvalidTransition` and change nothing. There is no path from `confirmed` back to `negotiating`.
+
+**A proposal need not name an instant.** §9 prefers a structured time and does not require one, and the Telegram admin panel takes the therapist's words as both — parsed if they parse, kept as the note either way. A proposal of words only is therefore ordinary, not an error, and everything downstream **MUST** handle it: the client's message says what she wrote rather than announcing a time and leaving a blank where it should be, and the client can still agree to it. Agreeing to words cannot confirm anything — there is no instant to put in `scheduled_start`, no reminder to schedule, and nothing for the schedule to draw — so it stays `negotiating` and tells the therapist, who is the one who turns an agreement into a time. Only the *web* form, which has a dedicated time field with a known format, refuses a value it cannot read rather than silently dropping it (§12.2).
 
 A **client note** is deliberately not in the table, because it is not a transition: it inserts `negotiation_message(client, note)`, emits `request.note`, and leaves the status exactly as it was. It is accepted while a request is `pending`, `negotiating` or `confirmed` — the states where the therapist can still act on what it says — and **MUST** be refused once the request is terminal. The note body stays in the admin UI: the notification says a note arrived and names the request, nothing more.
 
@@ -688,6 +691,7 @@ Each intent has a key, a recipient, a payload schema, and available actions. Tra
 | `request.submitted.client` | client | uuid, session type, requested time | open |
 | `request.proposal.client` | client | uuid, proposed_start, note | accept, counter, decline |
 | `request.counter.admin` | admin | uuid, proposed_start, note, thread | approve, propose, reject |
+| `request.accepted.admin` | admin | uuid, note | approve, propose, reject |
 | `request.confirmed.client` | client | uuid, scheduled_start, duration_min, session type, modality, join info | open |
 | `request.confirmed.admin` | admin | uuid, scheduled_start, client | — |
 | `request.rejected.client` | client | uuid, reason | — |
@@ -776,6 +780,10 @@ A message *about a request* **MUST** link to `/r/{uuid}` carrying a `view_reques
 All under `/admin`, session-authenticated, CSRF-protected.
 
 `/admin/login`, `/admin/requests` (+ `?view=`, `?start=`), `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`), `/admin/help`, `/admin/status`.
+
+**A time the therapist types and the form cannot read MUST be refused, not dropped.** `/admin/requests/{uuid}/approve` and `/propose` parse `scheduled_start` as `YYYY-MM-DDTHH:MM` in the practice timezone; anything else answers with a flash naming the format and changes nothing. Silently reading it as "no time given" turned a mistyped proposal into a timeless one, which the therapist had no way to notice — she had said when, and the client was told nothing. A proposal of words only is still available by leaving the field empty (§7.1).
+
+**A refused action MUST say so.** Both the admin and the client routes catch `DomainError` and redirect; a redirect with nothing on it is indistinguishable from a click that did nothing. The client's negotiation actions in particular **MUST** report a refusal, because the one that gets refused in practice is accepting a proposal that named no time.
 
 **Every admin surface that names a client MUST be able to name them.** `booking_request.display_name` is what that request was submitted under and may be empty; where it is, the surface falls back to `client.display_name`. This applies to the requests list, the week schedule, the request page, and the Telegram card (§13.2).
 
