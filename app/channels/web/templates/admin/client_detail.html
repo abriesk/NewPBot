@@ -1,0 +1,79 @@
+{% extends "admin/base.html" %}
+{% from "admin/partials/contact.html" import contact_link %}
+{% block title %}{{ client.display_name or 'Client' }}{% endblock %}
+{% block content %}
+<h1>{{ client.display_name or 'Unnamed client' }}</h1>
+
+<div class="card">
+  {% if client.erased_at %}
+    {# §16: the bookings stay so the practice keeps its statistics, but there is
+       nothing left to identify or reach this person by. #}
+    <p><span class="badge cancelled">erased</span>
+       {{ client.erased_at.strftime("%Y-%m-%d") }}</p>
+  {% endif %}
+  <p class="uuid"><code>{{ client.id }}</code></p>
+  {% if identities %}
+    <p>Reachable at:<br>
+      {% for c in identities %}{{ contact_link(c) }}<br>{% endfor %}
+    </p>
+  {% else %}
+    <p class="muted">No way of reaching this person is on record.</p>
+  {% endif %}
+  <p class="muted">
+    Language: {{ client.language }}{% if client.timezone %} · Timezone:
+    {{ client.timezone }}{% endif %} · Since
+    {{ client.created_at.strftime("%Y-%m-%d") }}
+  </p>
+</div>
+
+<h2 id="requests">Requests</h2>
+{# The same summary row the requests list draws. No `problem_text` -- hard rule
+   8 keeps it off every list, and it is one click away on each request. #}
+<div class="scroll">
+<table>
+  <thead><tr>
+    <th>UUID</th><th>Status</th><th>Type</th><th>Modality</th>
+    <th>Requested</th><th>Scheduled</th>
+  </tr></thead>
+  <tbody>
+  {% for r in rows %}
+    <tr>
+      <td><a href="/admin/requests/{{ r.uuid }}"><code>{{ r.uuid[:8] }}</code></a></td>
+      <td><span class="badge {{ r.status }}">{{ r.status }}</span></td>
+      <td>{{ r.session_type }}</td>
+      <td>{{ r.modality }}</td>
+      <td>{{ r.created }}</td>
+      <td>{{ r.scheduled or r.desired }}</td>
+    </tr>
+  {% else %}
+    <tr><td colspan="6" class="muted">Nothing booked.</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+
+{% if waitlist_entries %}
+<h2>Waitlist</h2>
+<div class="scroll">
+<table>
+  <thead><tr><th>UUID</th><th>Status</th><th>Joined</th></tr></thead>
+  <tbody>
+  {% for entry in waitlist_entries %}
+    <tr>
+      <td><code>{{ entry.uuid|string|truncate(8, true, "") }}</code></td>
+      <td><span class="badge {{ entry.status.value }}">{{ entry.status.value }}</span></td>
+      <td>{{ entry.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% endif %}
+
+{# §12.2: erasure is irreversible and lives on one page, away from the one
+   opened for ordinary work. #}
+<p class="muted">
+  <a href="/admin/privacy#c-{{ client.id }}">Data and erasure for this person</a>
+  · <a href="/admin/clients">Back to clients</a>
+</p>
+{% endblock %}

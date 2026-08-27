@@ -706,7 +706,7 @@ Each intent has a key, a recipient, a payload schema, and available actions. Tra
 | `request.cancelled.client` | client | uuid, scheduled_start, reason | — |
 | `reminder.client` | client | uuid, scheduled_start, offset_min, modality, join info | open |
 | `waitlist.joined.client` | client | — | — |
-| `request.note.admin` | admin | uuid | — |
+| `request.note.admin` | admin | uuid, name, note | — |
 | `waitlist.joined.admin` | admin | uuid, problem, contact note | — |
 | `auth.login_link.client` | client (email) | login url, telegram deep link | open |
 | `auth.link_channel.client` | client | telegram deep link | open |
@@ -715,6 +715,10 @@ Each intent has a key, a recipient, a payload schema, and available actions. Tra
 | `system.health.recovered.admin` | admin | overall state | — |
 
 Payloads **MUST** be JSON-serialisable and **MUST NOT** embed rendered text.
+
+**A notification that says only that a client wrote something is not a notification.** `request.note.admin` carried the identifier alone, on the reasoning that negotiation bodies are read in the admin UI. That reasoning is §13.4's and it is about **inboxes**: Telegram is an admin surface that already carries `problem_text` in the panel and the client's words in `request.counter.admin`, so a note is the one thing there that made her open a browser to read one sentence. The body therefore travels in `note`, which `EMAIL_FORBIDDEN_FIELDS` strips, so email keeps exactly the announcement it sends today and §13.4 needs no exception.
+
+**An intent carrying client free text MUST be split into parts, not concatenated into one.** `note`, and any other field a client can fill to §17's cap, can exceed one Telegram message on its own — escaping expands it, and §11.2's part limit is below Telegram's. The renderer therefore builds parts at block boundaries under the same limit §11.2 gives the markdown emitter. It **MUST NOT** reuse the markdown path to do it: intent bodies are translated text with client text interpolated, escaped rather than parsed, and rendering that as markdown would let a client put formatting into the therapist's chat. A short note and its announcement stay **one** message; splitting happens only when the text would not otherwise fit.
 
 **Join info** resolves as: `booking_request.meeting_url` if set, else `practice.online_meeting_url`, else omitted. It is included only when `modality='online'`, only in `request.confirmed.client` and `reminder.client`, and only for non-email channels — for `channel='email'` the message links to `/r/{uuid}` instead, where the client sees it after authenticating. For `modality='onsite'`, `practice.clinic_onsite_url` takes its place and **MAY** be sent by email. The admin sets a per-request `meeting_url` at approval time; leaving it blank uses the practice default.
 
@@ -786,15 +790,21 @@ A message *about a request* **MUST** link to `/r/{uuid}` carrying a `view_reques
 
 All under `/admin`, session-authenticated, CSRF-protected.
 
-`/admin/login`, `/admin/requests` (+ `?view=`, `?start=`), `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`), `/admin/help`, `/admin/status`.
+`/admin/login`, `/admin/requests` (+ `?view=`, `?start=`), `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients`, `/admin/clients/{id}`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/privacy`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`), `/admin/help`, `/admin/status`.
 
 **A time the therapist types and the form cannot read MUST be refused, not dropped.** `/admin/requests/{uuid}/approve` and `/propose` parse `scheduled_start` as `YYYY-MM-DDTHH:MM` in the practice timezone; anything else answers with a flash naming the format and changes nothing. Silently reading it as "no time given" turned a mistyped proposal into a timeless one, which the therapist had no way to notice — she had said when, and the client was told nothing. A proposal of words only is still available by leaving the field empty (§7.1).
 
 **A refused action MUST say so.** Both the admin and the client routes catch `DomainError` and redirect; a redirect with nothing on it is indistinguishable from a click that did nothing. The client's negotiation actions in particular **MUST** report a refusal, because the one that gets refused in practice is accepting a proposal that named no time.
 
-**Every admin surface that names a client MUST be able to name them.** `booking_request.display_name` is what that request was submitted under and may be empty; where it is, the surface falls back to `client.display_name`. This applies to the requests list, the week schedule, the request page, and the Telegram card (§13.2).
+**Every admin surface that names a client MUST be able to name them.** `booking_request.display_name` is what that request was submitted under and may be empty; where it is, the surface falls back to `client.display_name`. This applies to the requests list, the week schedule, the request page, the Telegram card (§13.2), and every admin **notification** whose body names somebody. Where neither name exists the body **MUST** have a variant that does not mention one: a sentence opening with a blank, or with the word `None`, is worse than a sentence that never promised a name.
 
-`/admin/requests/{uuid}` additionally shows the client's **identities** — every `(channel, external_id)` on the client, with the email annotated by whether it is verified, because §13.3 silently delivers nothing to an unverified address and a therapist waiting on a reply needs to know that. This is the only place the therapist can reach a client who left no name and no contact note; without it a request from a known, verified client is unattributable. Contact identities are not `problem_text` and hard rule 8 does not reach them.
+**An admin surface MUST NOT offer an action §7.1 would refuse.** §13.2 requires this of the Telegram panel and the requirement is not the panel's: it belongs to every surface that renders the transitions. `/admin/requests/{uuid}` rendered approve, propose, reject and cancel whatever the status, so Cancel on a `negotiating` request was a control whose only possible outcome was `InvalidTransition` — and the refusal reported by the rule above says only that something was refused, which explains nothing to a therapist who has just been told that the obvious way to call a session off does not work. Reject is the transition that closes a request which was never confirmed; cancel **MUST NOT** be quietly rerouted to it, because they write different columns and send the client different messages.
+
+The disallowed control is **greyed in place with the reason**, not removed: the page then holds one shape across every status, and a therapist looking for cancel learns why it is not for this request instead of concluding it does not exist. The route keeps its `DomainError` handling regardless — a page open in another tab can still post against a status that has since moved.
+
+`/admin/requests/{uuid}` **and `/admin/requests`** show the client's **identities** — every `(channel, external_id)` on the client, with the email annotated by whether it is verified, because §13.3 silently delivers nothing to an unverified address and a therapist waiting on a reply needs to know that. These are the only places the therapist can reach a client who left no name and no contact note; without them a request from a known, verified client is unattributable. The list carries them as well as the request page because the list is where she decides what to open, and a row she cannot answer from is otherwise one she must open to discover that she still cannot. Contact identities are not `problem_text` and hard rule 8 does not reach them.
+
+Identities on the list **MUST** be fetched for the whole page at once. The list's query count does not depend on how many rows it renders, and a per-row `identities_for` would put it back to where the name lookup already was.
 
 `/admin/requests` serves two views of one query, selected by `?view=` (DESIGN.md §15). `view=list` is the default and is the status-filtered table that already exists; `view=grid` is the **week schedule**. An unrecognised value falls back to `list` rather than erroring — the parameter is navigation, not input.
 
@@ -820,6 +830,26 @@ Requirements:
 - The grid is **read-only**. There is no route that writes from it: no drag to reschedule, no click to create a slot, no inline approve.
 - Both views are English like the rest of the admin surface (§15, DESIGN.md §11) and add **no** translation keys.
 - No schema change. The read is served by `booking.scheduled_in_window` and `booking.unscheduled_for_admin` in `app/core/services/` — the channel does no scheduling logic of its own, and does not query per row.
+
+**`/admin/clients` is the practice's people; `/admin/privacy` is §16's paperwork.** One page tried to be both and was named after the wrong one. It listed every `client` row — leading with a UUID, including everyone who ever asked for a magic link and never booked, including people who had been erased — because that is the correct population for answering "send me my data" and "forget me". As a view of the therapist's clients it was misleading, and it was the only such view there was: a returning client's history was a status filter and a squint.
+
+`/admin/privacy` is that page under its own name, unchanged: every `client` row, its identities, when it was created, whether it has been erased, and the export and erase controls. It **MUST** stay complete — a data-subject request is answerable only against the whole population, and a filtered privacy page is a privacy page with a hole in it.
+
+`/admin/clients` is the new one, and it is a different population:
+
+- One row per **`client`**, never per identity. A `client` row *is* the grouping of a person's Telegram and email identities — that is what `resolve_client` and `link_identity` maintain (§8) — so grouping by identity would split a linked person back into two.
+- A client with **no booking request MUST NOT** appear. Somebody who asked for a magic link and stopped is not a client of the practice, and they were most of what made the old page misleading. They remain on `/admin/privacy`, which is where a request about them is answered. Waitlist-only entries do not appear either; `/admin/waitlist` is their page.
+- An **erased** client **MUST NOT** appear. They asked to be forgotten, their bookings stay for the practice's statistics (§16), and listing the person by name in the day-to-day view is against the point of having honoured it. `/admin/clients/{id}` still resolves for them, so a booking elsewhere never links to a dead page.
+- Rows are ordered by **most recent activity** — the newest request — rather than by when the row was created. A practice cares who it is currently seeing.
+- Each row carries the client's name, their identities as §12.2's contact labels, how many requests they have made, their last and next session, and when they first appeared.
+
+**A person whose Telegram and email were never linked is two rows, and MUST be left as two.** The service does not know they are one human; only the client can say so, by following the `link_channel` token that the login email already offers (§5.1). An admin-side merge would move identities, requests, waitlist entries and tokens between people irreversibly — `link_identity` already refuses to reassign an identity for that reason, and a page that quietly did it anyway would be worse than the duplicate.
+
+`/admin/clients/{id}` is one person: their identities, language, timezone, when they first appeared, every request they have made rendered as §12.2's summary row, and their waitlist entries. It carries **no** `problem_text` (hard rule 8 — never in a list), which stays one click away on each request page.
+
+Export and erase are reachable from `/admin/privacy` only, and `/admin/clients/{id}` links to that person's row there. Erasure is irreversible, and the reasoning that already makes it require the word "erase" typed rather than one click also keeps it off the page opened for ordinary work. The routes themselves stay at `/admin/clients/{id}/export` and `/erase`: they are actions on a client, whichever page renders the button.
+
+**The list MUST NOT query per row.** Two queries serve it however many clients there are: one grouped over `booking_request` — the count, and the last and next session as conditional aggregates — and one for the identities of the clients it returned. The read lives in `app/core/services/`, like the week schedule's (§12.2 above); the channel draws the table and computes nothing.
 
 The maintenance page carries both halves of §16.7 and §16.6 and nothing else:
 
@@ -1316,6 +1346,8 @@ The dot is only useful to somebody looking at it. A transition **into** `fail` w
 - CSRF token on every mutating admin and client form.
 - Rate limits: admin login 5 per 15 min per IP; magic-link issuance 3 per hour per email and 10 per hour per IP; booking submission 5 per hour per client.
 - Telegram webhook secret header checked before body parsing.
+- Client free text is capped at **4096 characters** — `problem_text`, `contact_note`, negotiation bodies, notes. The number is Telegram's message limit rather than a taste of ours: a lower cap would accept text one channel could not carry, and a higher one would take an essay on the web and refuse it on the bot. One cap, every field, both channels.
+- **An over-long field MUST be refused, never truncated.** Silently storing the first *n* characters loses what somebody wrote and tells neither them nor the therapist that anything is missing — and the half that goes missing is the end, which is where people put the thing they were working up to. The web form carries `maxlength` so the typing stops at the limit, and a counter appears for the last tenth of it so a field going quiet is explained rather than mysterious. The cap is enforced in the core regardless: a form is a courtesy, not a guarantee.
 - All web-rendered content passes the sanitiser.
 - SQL exclusively through SQLAlchemy; no string-built queries.
 - `.env` git-ignored; `.env.example` committed with placeholders.

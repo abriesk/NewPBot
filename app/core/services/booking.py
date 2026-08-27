@@ -121,9 +121,11 @@ class ScheduleEntry:
 #: there would invite treating it like one.
 NOTE_STATUSES = ACTIVE_STATUSES
 
-#: Long enough for anything worth reading before a session, short enough that
-#: the column is not an essay box.
-NOTE_MAX_CHARS = 2000
+#: A note is measured by §17's one cap for client free text, like every field
+#: beside it. It had a cap of its own at 2000 and truncated to it in silence,
+#: which is the wrong answer twice over: the client lost the end of what they
+#: wrote, and one field disagreeing with the rest about how much a person may
+#: say is a rule nobody could have predicted from the form.
 
 #: §7.1, as data. Keeping it declarative means a rejected transition is a
 #: lookup miss rather than a forgotten `elif`.
@@ -1060,14 +1062,19 @@ async def client_note(
 
     Allowed while the therapist can still act on what it says, and refused once
     the request is terminal -- a note on a rejected request would be read by
-    nobody. The body stays here and in the admin UI: §13.4 keeps negotiation
-    bodies out of email, and the notification only says a note arrived.
+    nobody.
+
+    Over-long text is refused, not shortened. This cut at 2000 characters and
+    told nobody: not the client, whose last paragraph vanished, and not the
+    therapist, who had no way to know she was reading part of a sentence. §17
+    caps every client free-text field at the same 4096, so a note is now
+    measured the way `problem_text` beside it always was.
     """
     request = await _get(session, request_id)
     if request.status not in NOTE_STATUSES:
         raise InvalidTransition("booking_request", request.status.value, "client_note")
 
-    body = body_text.strip()
+    body = check_client_text(body_text.strip(), "note")
     if not body:
         raise InvalidTransition("booking_request", request.status.value, "client_note")
 
@@ -1076,14 +1083,16 @@ async def client_note(
             request_id=request.id,
             sender=SenderType.client,
             kind=NegotiationKind.note,
-            body_text=body[:NOTE_MAX_CHARS],
+            body_text=body,
         )
     )
     await session.flush()
 
-    # Hard rule 8: the identifier, never the content.
+    # Hard rule 8: the identifier, never the content -- the audit log is not a
+    # place for what somebody wrote. The event carries it, because a
+    # notification is where it is meant to be read (§10).
     await _audit(session, request, ActorType.client, "request.note")
-    collect(session, RequestNote(request_id=request.id, request_uuid=request.uuid))
+    collect(session, RequestNote(request_id=request.id, request_uuid=request.uuid, note=body))
     return request
 
 

@@ -37,8 +37,11 @@
    act on what it says. #}
 <form method="post" action="/r/{{ req.uuid }}/note" class="card">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+  {# §17's cap, shown rather than sprung -- the same treatment the booking and
+     waitlist forms have always had. Nothing is truncated behind anybody's
+     back, so the field has to say where the limit is. #}
   <label>{{ t.note_ask }}
-    <textarea name="body" rows="3" required></textarea>
+    <textarea name="body" rows="3" required maxlength="{{ text_max }}" data-counter></textarea>
   </label>
   <button type="submit" class="secondary">{{ t.add_note }}</button>
 </form>
@@ -52,7 +55,8 @@
   </form>
   <form method="post" action="/r/{{ req.uuid }}/counter">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <input type="text" name="body" placeholder="{{ t.counter_ask }}" required>
+    <input type="text" name="body" placeholder="{{ t.counter_ask }}" required
+           maxlength="{{ text_max }}" data-counter>
     <button type="submit" class="secondary">{{ t.counter }}</button>
   </form>
   <form method="post" action="/r/{{ req.uuid }}/decline">

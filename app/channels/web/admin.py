@@ -17,6 +17,7 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
 from uuid import UUID
@@ -59,6 +60,7 @@ from app.core.models import (
     Client,
     ContentBlock,
     ContentTopic,
+    Identity,
     NegotiationMessage,
     OutboxMessage,
     SessionType,
@@ -70,7 +72,13 @@ from app.core.models import (
 from app.core.policies import now_utc
 from app.core.services import booking, content, notifications, waitlist
 from app.core.services import slots as slot_service
-from app.core.services.clients import erase_client, export_client, identities_for
+from app.core.services.clients import (
+    erase_client,
+    export_client,
+    identities_for,
+    identities_for_many,
+    list_clients_for_admin,
+)
 from app.core.services.config_io import (
     ConfigInvalid,
     ImportReport,
@@ -98,6 +106,29 @@ LANGUAGES = ("ru", "hy", "en")
 #: §17. The one upload this service accepts, capped before it is parsed.
 MAX_CONFIG_UPLOAD = 5 * 1024 * 1024
 
+#: Why an action on the request page is not available, keyed by its §7.1 event.
+#:
+#: §13.2 has always required the Telegram panel to derive its buttons from the
+#: transition table, so it cannot offer what the core would refuse. This page
+#: rendered all four forms whatever the status, so Cancel on a `negotiating`
+#: request was a control whose only possible outcome was a refusal -- and the
+#: refusal said "refused", which explains nothing to somebody who has just been
+#: told that the obvious way to call a session off is not available.
+#:
+#: The control stays on the page, greyed, rather than disappearing: the page
+#: keeps one shape across every status, and a therapist looking for cancel finds
+#: it and finds out why, instead of concluding it does not exist. Plain English
+#: in the channel because the admin surface is never translated (DESIGN.md §11).
+UNAVAILABLE_BECAUSE = {
+    "admin_approve": "Only a request that is still open can be approved.",
+    "admin_propose": "A time can be proposed only while the request is open.",
+    "admin_reject": "Only a request that is still open can be rejected.",
+    "admin_cancel": (
+        "Only a confirmed session can be cancelled. A request that was never "
+        "confirmed is rejected instead."
+    ),
+}
+
 
 async def _labels(session: AsyncSession) -> dict[str, str]:
     """Only the labels the catalogue actually covers."""
@@ -113,6 +144,8 @@ async def _labels(session: AsyncSession) -> dict[str, str]:
         "nav_session_types": "admin.nav.session_types",
         "nav_timezones": "admin.nav.timezones",
         "nav_delivery": "admin.nav.delivery",
+        "nav_clients": "admin.nav.clients",
+        "nav_privacy": "admin.nav.privacy",
         "nav_maintenance": "admin.nav.maintenance",
         "nav_help": "admin.nav.help",
         "nav_status": "admin.nav.status",
@@ -319,7 +352,14 @@ def build_router() -> APIRouter:
                     # §12.2: how to reach this person. Often the only thing
                     # identifying a web request, which carries no name unless
                     # the client typed one.
-                    identities=_identity_labels(await identities_for(session, client.id)),
+                    identities=_identity_contacts(await identities_for(session, client.id)),
+                    # §7.1 decides what may be offered, so no admin surface
+                    # offers what the core would refuse (§13.2 for the panel).
+                    unavailable={
+                        event: why
+                        for event, why in UNAVAILABLE_BECAUSE.items()
+                        if event not in booking.ALLOWED[booking_request.status]
+                    },
                     thread=thread,
                     turn=await booking.whose_turn(session, booking_request.id),
                 ),
@@ -1029,17 +1069,25 @@ def build_router() -> APIRouter:
                 return _back("/admin/login")
 
             if confirm.strip().lower() != "erase":
-                return _back("/admin/clients", "type erase to confirm")
+                return _back("/admin/privacy", "type erase to confirm")
 
             try:
                 await erase_client(session, UUID(client_id))
             except (NotFound, ValueError):
                 return Response(status_code=404)
 
-            return _back("/admin/clients", "erased")
+            return _back("/admin/privacy", "erased")
 
-    @router.get("/clients", response_class=HTMLResponse, include_in_schema=False)
-    async def clients_page(request: Request) -> Response:
+    @router.get("/privacy", response_class=HTMLResponse, include_in_schema=False)
+    async def privacy_page(request: Request) -> Response:
+        """§16's surface, under its own name.
+
+        Every `client` row, deliberately: erased people, and people who asked
+        for a magic link and never booked. A data-subject request is answerable
+        only against the whole population, so this is the one list that must
+        not be filtered -- which is exactly what made it misleading while it
+        was also the page called Clients.
+        """
         async with unit_of_work() as session:
             admin = await current_admin(session, request)
             if admin is None:
@@ -1054,16 +1102,107 @@ def build_router() -> APIRouter:
                 .scalars()
                 .all()
             )
-            identities: dict[str, list[str]] = {}
-            for client in rows:
-                identities[str(client.id)] = [
-                    f"{i.channel.value}: {i.external_id}"
-                    for i in await identities_for(session, client.id)
-                ]
+            found = await identities_for_many(session, [row.id for row in rows])
+            identities = {
+                str(row.id): _identity_contacts(found.get(row.id, [])) for row in rows
+            }
+
+            return _render(
+                "admin/privacy.html",
+                await _context(session, request, admin, rows=rows, identities=identities),
+            )
+
+    @router.get("/clients", response_class=HTMLResponse, include_in_schema=False)
+    async def clients_page(request: Request) -> Response:
+        """§12.2's clients list: the practice's people, busiest first.
+
+        A different population from `/admin/privacy` and for a different
+        question -- who is the practice seeing, and what has this person booked
+        before.
+        """
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+
+            practice = await get_practice(session)
+            zone = ZoneInfo(practice.timezone)
+            rows = [
+                {
+                    "id": str(summary.client_id),
+                    "name": summary.display_name,
+                    "contact": _identity_contacts(summary.identities),
+                    "requests": summary.requests,
+                    "last_session": _in_zone(summary.last_session, zone),
+                    "next_session": _in_zone(summary.next_session, zone),
+                    "since": summary.created_at.astimezone(zone).strftime("%Y-%m-%d"),
+                }
+                for summary in await list_clients_for_admin(session)
+            ]
 
             return _render(
                 "admin/clients.html",
-                await _context(session, request, admin, rows=rows, identities=identities),
+                await _context(session, request, admin, rows=rows),
+            )
+
+    @router.get("/clients/{client_id}", response_class=HTMLResponse, include_in_schema=False)
+    async def client_detail(request: Request, client_id: str) -> Response:
+        """One person: how to reach them, and everything they have booked.
+
+        Resolves for an erased client too, though the list does not show them:
+        a booking elsewhere in the admin UI must never link to a dead page.
+        """
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+
+            try:
+                client = (
+                    await session.execute(select(Client).where(Client.id == UUID(client_id)))
+                ).scalar_one_or_none()
+            except ValueError:
+                return Response(status_code=404)
+            if client is None:
+                return Response(status_code=404)
+
+            requests = (
+                (
+                    await session.execute(
+                        select(BookingRequest)
+                        .where(BookingRequest.client_id == client.id)
+                        .order_by(BookingRequest.created_at.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            waitlist_entries = (
+                (
+                    await session.execute(
+                        select(WaitlistEntry)
+                        .where(WaitlistEntry.client_id == client.id)
+                        .order_by(WaitlistEntry.created_at.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+            return _render(
+                "admin/client_detail.html",
+                await _context(
+                    session,
+                    request,
+                    admin,
+                    client=client,
+                    identities=_identity_contacts(await identities_for(session, client.id)),
+                    # The same summary row the requests list draws, so a
+                    # client's history reads exactly like the queue it came from
+                    # -- and carries no `problem_text` (hard rule 8).
+                    rows=await _summaries(session, requests),
+                    waitlist_entries=waitlist_entries,
+                ),
             )
 
     # --- Health (§12.2, §16.8) ---------------------------------------------
@@ -1371,41 +1510,122 @@ async def _session_type_codes(session: AsyncSession) -> dict[int, str]:
     return {int(row[0]): str(row[1]) for row in rows}
 
 
-def _identity_labels(identities: Sequence[Any]) -> list[str]:
-    """How to reach a client, one line per channel (§12.2).
+@dataclass(frozen=True, slots=True)
+class _Contact:
+    """One way to reach a client: what it says, and what clicking it does."""
+
+    label: str
+    #: None where the channel has no way of being opened from a browser.
+    href: str | None
+
+
+def _identity_contact(channel: Channel, external_id: str, verified_at: Any) -> _Contact:
+    """One way to reach a client, as one line.
 
     The email says whether it is verified, because §13.3 delivers nothing to an
     unverified address -- a therapist waiting on a reply that was never sent
-    should not have to work that out from the delivery log.
+    should not have to work that out from the delivery log. Telegram vouches for
+    its own ids, so verification is not a question there.
+
+    Both are links, so answering somebody does not begin with selecting an
+    address and copying it. `mailto:` always resolves. `tg://user?id=` resolves
+    only where the therapist's own Telegram client already knows that person --
+    the *bot* has spoken to them, her account may never have -- so it is a
+    shortcut when it works and an ordinary-looking id when it does not. An
+    interim affordance: a proper "reply from here" belongs to the UI pass, not
+    to a column (DESIGN.md §20.2).
     """
-    labels = []
-    for identity in identities:
-        line = f"{identity.channel.value}: {identity.external_id}"
-        if identity.channel is Channel.email:
-            line += " (verified)" if identity.verified_at else " (unverified)"
-        labels.append(line)
-    return labels
+    label = f"{channel.value}: {external_id}"
+    if channel is Channel.email:
+        label += " (verified)" if verified_at else " (unverified)"
+        return _Contact(label=label, href=f"mailto:{external_id}")
+    if channel is Channel.telegram and external_id.isdigit():
+        return _Contact(label=label, href=f"tg://user?id={external_id}")
+    return _Contact(label=label, href=None)
 
 
-async def _client_names(
+def _in_zone(value: datetime | None, zone: ZoneInfo) -> str:
+    """An instant in the practice's clock, or nothing at all. DESIGN.md §8."""
+    return value.astimezone(zone).strftime("%Y-%m-%d %H:%M") if value else ""
+
+
+def _identity_contacts(identities: Sequence[Any]) -> list[_Contact]:
+    """How to reach a client, one line per channel (§12.2)."""
+    return [
+        _identity_contact(identity.channel, identity.external_id, identity.verified_at)
+        for identity in identities
+    ]
+
+
+@dataclass(frozen=True, slots=True)
+class _ClientFacts:
+    """What a request row needs to know about the person behind it (§12.2)."""
+
+    name: str
+    contact: tuple[_Contact, ...]
+
+
+_NO_FACTS = _ClientFacts(name="", contact=())
+
+
+async def _client_facts(
     session: AsyncSession, requests: Sequence[BookingRequest]
-) -> dict[Any, str]:
-    """The display name of every client behind these requests, by client id.
+) -> dict[Any, _ClientFacts]:
+    """The name and the contact identities of every client behind these
+    requests, by client id, in one query.
 
     §12.2: a request carries the name it was submitted under, which is often
-    nothing. The client behind it may still have one.
+    nothing, and the client behind it may still have one. It carries no way of
+    reaching anybody at all, so the identities come from here too -- joined
+    rather than fetched per client, because the list renders two hundred rows
+    and its query count must not depend on how many.
     """
     ids = {request.client_id for request in requests}
     if not ids:
         return {}
+
     rows = (
         await session.execute(
-            select(Client.id, Client.display_name).where(
-                Client.id.in_(ids), Client.display_name.isnot(None)
+            select(
+                Client.id,
+                Client.display_name,
+                Identity.channel,
+                Identity.external_id,
+                Identity.verified_at,
             )
+            .outerjoin(Identity, Identity.client_id == Client.id)
+            .where(Client.id.in_(ids))
         )
     ).all()
-    return {row[0]: str(row[1]) for row in rows if row[1]}
+
+    names: dict[Any, str] = {}
+    contacts: dict[Any, list[tuple[bool, str, _Contact]]] = {}
+    for client_id, display_name, channel, external_id, verified_at in rows:
+        names[client_id] = str(display_name) if display_name else ""
+        found = contacts.setdefault(client_id, [])
+        if channel is None:
+            # The outer join's empty half: an erased client keeps their row and
+            # their bookings, and loses every identity (§16).
+            continue
+        # Sorted with Telegram first, because §13.3 tries Telegram first.
+        found.append(
+            (
+                channel is not Channel.telegram,
+                str(external_id),
+                _identity_contact(channel, str(external_id), verified_at),
+            )
+        )
+
+    return {
+        client_id: _ClientFacts(
+            name=name,
+            # Keyed on the first two, so `_Contact` never has to be orderable.
+            contact=tuple(
+                contact for _, _, contact in sorted(contacts[client_id], key=lambda row: row[:2])
+            ),
+        )
+        for client_id, name in names.items()
+    }
 
 
 async def _summaries(
@@ -1420,8 +1640,8 @@ async def _summaries(
     practice = await get_practice(session)
     zone = ZoneInfo(practice.timezone)
     codes = await _session_type_codes(session)
-    names = await _client_names(session, requests)
-    return [_summary_row(request, zone, codes, names) for request in requests]
+    facts = await _client_facts(session, requests)
+    return [_summary_row(request, zone, codes, facts) for request in requests]
 
 
 async def _summary(session: AsyncSession, request: BookingRequest) -> dict[str, Any]:
@@ -1431,7 +1651,7 @@ async def _summary(session: AsyncSession, request: BookingRequest) -> dict[str, 
         request,
         ZoneInfo(practice.timezone),
         await _session_type_codes(session),
-        await _client_names(session, [request]),
+        await _client_facts(session, [request]),
     )
 
 
@@ -1439,7 +1659,7 @@ def _summary_row(
     request: BookingRequest,
     zone: ZoneInfo,
     session_type_codes: dict[int, str],
-    client_names: dict[Any, str],
+    client_facts: dict[Any, _ClientFacts],
 ) -> dict[str, Any]:
     """One row of the requests list.
 
@@ -1449,15 +1669,23 @@ def _summary_row(
     The name falls back to the client's (§12.2): a request carries whatever it
     was submitted under, which for the web is usually nothing at all, and a row
     the therapist cannot attribute to anybody is not much of a row.
+
+    `contact` is there for the rows where even that fails. §12.2 argued the case
+    for identities on the request page; the list is where she decides what to
+    open, so a row she cannot answer from is one she has to open to find out she
+    still cannot. Identities are not `problem_text` and hard rule 8 does not
+    reach them.
     """
     session_type = session_type_codes[request.session_type_id]
+    facts = client_facts.get(request.client_id, _NO_FACTS)
 
     return {
         "uuid": str(request.uuid),
         "status": request.status.value,
         "session_type": session_type,
         "modality": request.modality.value,
-        "name": request.display_name or client_names.get(request.client_id, ""),
+        "name": request.display_name or facts.name,
+        "contact": facts.contact,
         "created": request.created_at.astimezone(zone).strftime("%Y-%m-%d %H:%M"),
         "scheduled": request.scheduled_start.astimezone(zone).strftime("%Y-%m-%d %H:%M")
         if request.scheduled_start

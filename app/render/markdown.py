@@ -16,6 +16,7 @@ Depends on app.core for the parser configuration, never the other way round.
 from __future__ import annotations
 
 import re
+from collections.abc import Sequence
 
 import nh3
 from markdown_it.token import Token
@@ -217,8 +218,14 @@ def _split_oversized(block: str) -> list[str]:
         if cut <= 0:
             cut = max(window.rfind("\n"), window.rfind(" "))
         if cut <= 0:
-            # No whitespace at all: a hard cut is the only option left.
+            # No whitespace at all: a hard cut is the only option left. Back it
+            # off an entity it would otherwise land inside -- `&amp;` cut into
+            # `&am` and `p;` is not markup Telegram will accept, and text
+            # escaped by `escape_telegram` is full of them.
             cut = limit
+            unterminated = window.rfind("&")
+            if unterminated > 0 and ";" not in window[unterminated:]:
+                cut = unterminated
 
         chunks.append(remaining[:cut].rstrip())
         remaining = remaining[cut:].lstrip()
@@ -229,17 +236,23 @@ def _split_oversized(block: str) -> list[str]:
     return [f"<pre>{chunk}</pre>" for chunk in chunks] if is_pre else chunks
 
 
-def to_telegram(body_md: str) -> list[str]:
-    """Render to a list of message parts, each within Telegram's limit.
+def pack_telegram_parts(blocks: Sequence[str]) -> list[str]:
+    """Pack already-rendered blocks into messages within Telegram's limit.
 
     Parts break at block boundaries. A block that is itself too long is split by
     `_split_oversized`; nothing else is ever cut mid-block, so a link never
-    straddles two messages.
+    straddles two messages. As many blocks as fit share a message, so a short
+    notification stays one message and only a long one becomes several.
+
+    Separate from `to_telegram` because §10's intent bodies need the packing and
+    must not have the parsing: they are translated sentences with client text
+    interpolated into them and escaped, not markdown. Running them through the
+    parser would let a client put formatting in the therapist's chat.
     """
     parts: list[str] = []
     current = ""
 
-    for block in to_telegram_blocks(body_md):
+    for block in blocks:
         pieces = _split_oversized(block) if len(block) > TELEGRAM_PART_LIMIT else [block]
 
         for piece in pieces:
@@ -254,6 +267,11 @@ def to_telegram(body_md: str) -> list[str]:
     if current:
         parts.append(current)
     return parts
+
+
+def to_telegram(body_md: str) -> list[str]:
+    """Render markdown to a list of message parts, each within Telegram's limit."""
+    return pack_telegram_parts(to_telegram_blocks(body_md))
 
 
 # --- Web --------------------------------------------------------------------
@@ -365,6 +383,7 @@ __all__ = [
     "TELEGRAM_RULE",
     "TELEGRAM_TAGS",
     "escape_telegram",
+    "pack_telegram_parts",
     "to_email",
     "to_email_html",
     "to_email_text",

@@ -119,6 +119,14 @@ CATALOGUE: dict[str, IntentSpec] = {
     "request.note.admin": IntentSpec(
         key="request.note.admin",
         body_key="admin.intent.request.note.admin.body",
+        # §10: the note itself, on its own line. Telling her that a note exists
+        # and making her open a browser to read one sentence is not a
+        # notification -- and Telegram is an admin surface that already carries
+        # `problem_text` in the panel and a counter's words in
+        # `request.counter.admin`. §13.4 keeps it out of email, which
+        # `EMAIL_FORBIDDEN_FIELDS` does by stripping this very field, so email
+        # falls back to the announcement without needing an exception here.
+        optional_parts=(("note", "admin.intent.request.note.admin.note"),),
         email_subject_key="email.subject.request_update",
     ),
     "waitlist.joined.admin": IntentSpec(
@@ -198,6 +206,16 @@ def spec_for(intent_key: str) -> IntentSpec:
         raise KeyError(f"no intent spec for {intent_key!r}") from exc
 
 
+#: §12.2: bodies that name a client, and so need a variant for the client who
+#: has no name anywhere. Value is the body key the `.no_name` suffix attaches
+#: to, which is the spec's own -- kept as data so adding such a body is one
+#: entry and one pair of translations rather than an `if` nobody remembers.
+_NAMED_BODIES = {
+    "request.submitted.admin": "admin.intent.request.submitted.admin.body",
+    "request.note.admin": "admin.intent.request.note.admin.body",
+}
+
+
 def body_key_for(intent_key: str, payload: dict[str, object]) -> str:
     """The body key, allowing for the reminder offsets that have their own."""
     if intent_key == "reminder.client":
@@ -211,9 +229,11 @@ def body_key_for(intent_key: str, payload: dict[str, object]) -> str:
     if intent_key == "request.counter.admin" and not payload.get("time"):
         return "admin.intent.request.counter.admin.body.no_time"
     # A client who gave no name anywhere. "from <nothing>" is worse than not
-    # mentioning it (§12.2 supplies the client's own name where there is one).
-    if intent_key == "request.submitted.admin" and not payload.get("name"):
-        return "admin.intent.request.submitted.admin.body.no_name"
+    # mentioning it (§12.2 supplies the client's own name where there is one),
+    # and a sentence that *opens* on the name is worse still: it began with a
+    # blank space and read as though the message had lost its first word.
+    if intent_key in _NAMED_BODIES and not payload.get("name"):
+        return f"{_NAMED_BODIES[intent_key]}.no_name"
     return spec_for(intent_key).body_key
 
 

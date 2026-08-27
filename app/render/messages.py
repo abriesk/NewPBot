@@ -22,7 +22,7 @@ from app.core.enums import Channel
 from app.core.services.translations import get_text
 from app.render.calendar import ICS_FILENAME, ICS_SUBTYPE, session_ics
 from app.render.intents import action_label_key, body_key_for, spec_for
-from app.render.markdown import escape_telegram
+from app.render.markdown import escape_telegram, pack_telegram_parts
 
 #: Telegram HTML. Never the MarkdownV2 parse mode (hard rule 6).
 TELEGRAM_PARSE_MODE = "HTML"
@@ -90,9 +90,15 @@ async def render(
     )
 
     if channel == Channel.telegram:
-        parts = [escape_telegram("\n\n".join(lines))]
+        # §10: one line per block, packed rather than concatenated. A body that
+        # interpolates client free text -- a note, a counter's words -- reaches
+        # §17's 4096-character cap on its own, and escaping expands it further,
+        # so joining the lines into one string built a message Telegram refuses
+        # to send. Escaped, never parsed: these are translated sentences with a
+        # client's words in them, and running them through the markdown path
+        # would let a client put formatting in the therapist's chat.
         return RenderedMessage(
-            parts=parts,
+            parts=pack_telegram_parts([escape_telegram(line) for line in lines]),
             subject=None,
             actions=actions,
             parse_mode=TELEGRAM_PARSE_MODE,

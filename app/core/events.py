@@ -90,10 +90,18 @@ class RequestCounter(DomainEvent):
 @dataclass(frozen=True, slots=True)
 class RequestNote(DomainEvent):
     """§7.1: the client added information. Not a transition -- the status is
-    whatever it was. The body is not carried: it stays in the admin UI."""
+    whatever it was.
+
+    The body travels with the event. §13.4 keeps negotiation bodies out of
+    email, and it is enforced at the outbox row, not here -- so this carries the
+    note and the email copy is the one that loses it. Without the body the
+    therapist was told only that a note existed, which on Telegram meant opening
+    a browser to read one sentence.
+    """
 
     request_id: int
     request_uuid: UUID
+    note: str | None = None
     intent_key: str = field(init=False, default="request.note")
 
 

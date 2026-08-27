@@ -1,4 +1,5 @@
 {% extends "admin/base.html" %}
+{% from "admin/partials/contact.html" import contact_link %}
 {% block title %}{{ t.nav_requests }}{% endblock %}
 {% block content %}
 <h1>{{ t.nav_requests }}</h1>
@@ -23,7 +24,7 @@
 <table>
   <thead><tr>
     <th>UUID</th><th>Status</th><th>Type</th><th>Modality</th>
-    <th>Name</th><th>Requested</th><th>Scheduled</th>
+    <th>Name</th><th>Contact</th><th>Requested</th><th>Scheduled</th>
   </tr></thead>
   <tbody>
   {% for r in rows %}
@@ -33,11 +34,16 @@
       <td>{{ r.session_type }}</td>
       <td>{{ r.modality }}</td>
       <td>{{ r.name }}</td>
+      {# §12.2: this is where she decides what to open, so a row she cannot
+         answer from should say so here rather than after a click. #}
+      <td class="muted">
+        {% for c in r.contact %}{{ contact_link(c) }}<br>{% else %}—{% endfor %}
+      </td>
       <td>{{ r.created }}</td>
       <td>{{ r.scheduled or r.desired }}</td>
     </tr>
   {% else %}
-    <tr><td colspan="7" class="muted">Nothing here yet.</td></tr>
+    <tr><td colspan="8" class="muted">Nothing here yet.</td></tr>
   {% endfor %}
   </tbody>
 </table>

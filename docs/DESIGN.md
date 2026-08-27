@@ -448,7 +448,7 @@ Roughly in the order they would be worth doing:
 4. **The therapist's** calendar: export and synchronisation of her whole schedule (a subscribable `.ics` feed first, CalDAV later). Not to be confused with the per-session file a client gets attached to a confirmation email, which is built (IMPLEMENTATION.md §13.5)
 5. The same per-session calendar file on Telegram, which needs `send_document` and a transport that can carry an attachment. Worth doing only after checking the hand-off: an `.ics` sent into a Telegram chat opens in a calendar app reliably on iOS and unreliably on Android, and a file the client cannot open is worse than no file
 6. The week schedule (§15) on Telegram. **Needs design thought and testing with the therapist before any code is written**, because the obvious answer does not fit. A grid needs monospace, so it needs `<pre>` — the only tag in the supported subset that holds alignment (hard rule 6) — and a phone shows roughly 30 to 40 monospace characters before wrapping or side-scrolling. Seven day-columns do not fit in that, and the version that renders correctly on a desk will be unreadable on the device the surface exists for. The likely shape is therefore not a grid but a day-grouped agenda — a heading per day, its sessions beneath, empty days collapsed to one line — which is a different design and should be judged as one rather than as a degraded grid. Two things to settle by trying it rather than by reasoning: whether a day-grouped agenda actually beats the flat soonest-first list already at `asess:7` (§13.2), and how many days belong on one screen given the 4096-character limit and the current cap of ten sessions. Until both are answered from use, the honest Telegram answer is the existing list plus a link to the web schedule, which is what §13.2 already does for every web-only capability
-7. Recurring clients: session history, prepaid packages
+7. Recurring clients: prepaid packages. Session history is **done** — `/admin/clients` and `/admin/clients/{id}` (§12.2) give each person their bookings, their last and next session, and how to reach them. What is left here is the commercial half
 8. Client self-study materials as a content type
 9. Multi-practice operation (§18)
 10. Statistics for the therapist: conversion, no-shows, load by weekday
@@ -495,6 +495,134 @@ appear; the risk is specific to link-scanning gateways rather than to consumer
 mail. Any fix moves when the token burns, which §6.2 pins as single-use, so it
 is not worth changing on a hypothetical. Revisit if a client reports a dead
 link, and treat "the therapist's clients are on corporate mail" as the trigger.
+
+### 20.2 Reported defects and refinements, smallest first
+
+Found in use, August 2026. Ordered by the size of the change rather than by
+importance, so the small ones can be cleared without waiting on the two that
+need design first. Each entry says what is actually wrong, what closing it
+takes, and whether IMPLEMENTATION.md has to move — where it does, the normative
+wording is written there as the work is done, not in advance. An entry leaves
+this list when it is fixed: the reasoning goes to §12.2 or wherever the rule now
+lives, so what is left here is what is left to do.
+
+Four are already gone. The request page offered all four actions whatever the
+status, so Cancel on a negotiation could only end in a refusal; §7.1 now decides
+what that page renders, as §13.2 has always required of the Telegram panel. The
+requests list could not say how to reach anybody, which §12.2 had already argued
+for one level down on the request page. And a client's note reached the
+therapist as an announcement that a note existed, which on the surface built for
+answering away from a desk meant opening a browser to read one sentence.
+
+That third one turned out to be four faults rather than one, which is worth
+remembering the next time something looks like a missing line of copy. The body
+was absent from the payload. The renderer concatenated its lines into a single
+Telegram message and never split, so any body carrying client free text at §17's
+cap built a message Telegram refuses outright — live already in
+`request.counter.admin`, which has carried a client's words since it was
+written, and a notification that is refused is one she simply never receives.
+The note was truncated at 2000 characters in silence, by a cap that field had to
+itself. And the body opened on the client's name with no variant for the client
+who has none. Only the first was the thing reported.
+
+The fourth was "Clients", which was §16's export-and-erase surface wearing a
+name that promised the practice's people. It is now `/admin/privacy` under its
+own name and deliberately unfiltered, and `/admin/clients` is a real view of the
+people who have actually booked, with their history behind each one. The
+grouping that was asked for turned out to exist already — a `client` row *is*
+the grouping of somebody's Telegram and email identities — so what was missing
+was never the grouping but the bookings, and a page framed around the person
+rather than around a data-subject request.
+
+**What the contact column shows, and what it could show.** It shows identities
+— where a message would actually land, and for an address whether §13.3 would
+send to it at all. It does not show `contact_note`, which is the client's own
+sentence about how they would like to be reached: "телеграм @ab, после шести".
+Those are different facts and the second is often the more useful one. Two ways
+to add it, neither urgent:
+
+1. **Both**, the note above and the identities below. The most informative and
+   the widest column.
+2. **The note when there is one, identities otherwise.** The narrowest, but it
+   hides the verified marker in exactly the case where she is most likely to try
+   to reach somebody — which is the whole reason §12.2 argued for identities.
+
+Identities alone were chosen for now because they are always there and always
+true. Revisit when the column has been lived with, and prefer 1 if the answer is
+not obvious: the verified marker is a fact, and trading a fact for column width
+is the wrong way round.
+
+Each identity is also a link — `mailto:` for an address, `tg://user?id=` for a
+Telegram id — so answering somebody does not begin with selecting text and
+copying it. The Telegram half is best-effort: it resolves only where the
+therapist's own client already knows that person, and the *bot* is what has
+spoken to them. **This is interim.** Replying to a client belongs somewhere of
+its own rather than in a table cell, and that is a question for the UI pass, not
+for a column.
+
+**One person can still be two rows, and nothing here can join them.** A client
+whose Telegram and email were never linked is two `client` rows with two
+histories, because the service does not know they are one human. The clients
+list shows both, correctly — it cannot show otherwise without guessing.
+
+The safe join already exists and belongs to the client: the `link_channel` token
+in the login email, which only the owner of that address can follow (§5.1). What
+is missing is a way for the therapist to *notice* the case and prompt it. A
+"these may be the same person" hint is the cheap half and is guesswork — a
+shared display name is weak evidence and a wrong guess puts two strangers' names
+beside each other on a page about them.
+
+An admin-side **merge** is the expensive half and is what would actually fix it:
+moving identities, requests, waitlist entries, tokens and flow state from one
+client to another, irreversibly. `link_identity` already refuses to reassign an
+identity that belongs to somebody else, on the grounds that silently moving one
+between people is not a recoverable mistake, and an admin merge is that mistake
+with a button. It wants an audit entry, a confirmation that names both people,
+and a decision about what happens to the losing row — none of which is worth
+designing before the duplicate case has actually been hit. Revisit when it has.
+
+**The client is asked for a time and handed a blank box.** A counter is one
+free-text input with a placeholder. The core prefers a structured time and keeps
+the words either way (§9), so the parser runs over whatever is typed — and a
+client with no reason to guess `2026-08-27 15:00` writes a sentence, no instant
+is recorded, and the therapist turns the words into a time by hand. The form
+should offer the free slots first, since a slot the practice is already holding
+open is the answer that needs no negotiation at all, and keep free text beside
+them, gated on `fallback_to_negotiation` — the setting that already decides
+whether words are an acceptable answer — with a line saying how a time is best
+written. `list_available_slots` is the read. The same question is asked on
+Telegram, where the slot keyboard exists already and the hint has to carry the
+format instead. New keys in all three locale files.
+
+**The therapist has to type an ISO timestamp to propose a time.** The panel's
+propose prompt asks for `YYYY-MM-DD HH:MM`, and the parser accepts three
+formats, every one of which needs a full date. This is the surface that exists
+for answering away from a desk, and typing a full timestamp on a phone is the
+least usable thing in it. What is wanted is a pick: the practice's own free
+slots first, and a date-and-time picker when the answer is not one of them, with
+typing kept as the escape hatch.
+
+Two reasons it is last. §13.2 states that propose and cancel need typing, so the
+panel's table changes and the section is rewritten rather than extended. And the
+Bot API has no date picker, so the shape has to be chosen by trying it:
+
+1. An inline-keyboard calendar — a month of day buttons, then a row of times. A
+   well-worn Telegram pattern, entirely within the existing panel keyboard, at
+   the cost of two or three taps and a keyboard that is large on a small screen.
+2. A list of the next open slots as buttons. One tap, covers the common case,
+   and says nothing about a time the practice has not published.
+3. A Mini App: a `web_app` button opening a real date-time control served from
+   the admin ingress already running under TLS. The best control, and a whole
+   new surface to authenticate and maintain.
+
+Settle it with the therapist on her own phone before any of it is written, the
+way §20's item 6 says to settle the Telegram schedule.
+
+A widened parser helps whichever shape wins and is independently small, but it
+does not belong in the parser clients' answers go through. That one is shared,
+and clients write in Russian and Armenian, so relative wording — "tomorrow
+15:00" — and a bare `15:00` want a separate admin parser: the same question
+asked of a different person, in a known language and a known timezone.
 
 ---
 

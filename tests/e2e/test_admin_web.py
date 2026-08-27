@@ -470,6 +470,8 @@ def test_every_admin_page_requires_a_session(web: TestClient) -> None:
         "/admin/session-types",
         "/admin/timezones",
         "/admin/delivery",
+        "/admin/clients",
+        "/admin/privacy",
     ):
         response = web.get(path, follow_redirects=False)
         assert response.status_code == 303, path
@@ -1318,9 +1320,9 @@ async def test_identities_say_whether_an_address_is_verified() -> None:
     log."""
     from types import SimpleNamespace
 
-    from app.channels.web.admin import _identity_labels
+    from app.channels.web.admin import _identity_contacts
 
-    labels = _identity_labels(
+    contacts = _identity_contacts(
         [
             SimpleNamespace(channel=Channel.email, external_id="a@b.test", verified_at=None),
             SimpleNamespace(
@@ -1330,9 +1332,483 @@ async def test_identities_say_whether_an_address_is_verified() -> None:
         ]
     )
 
-    assert labels == [
+    assert [c.label for c in contacts] == [
         "email: a@b.test (unverified)",
         "email: c@d.test (verified)",
         # Telegram vouches for the id, so verified state is not a question there.
         "telegram: 100200300",
     ]
+
+
+async def test_a_contact_is_something_to_click_rather_than_copy() -> None:
+    """Interim, until the UI pass: answering somebody should not begin with
+    selecting an address. An identity with no way of being opened stays plain
+    text rather than becoming a link that goes nowhere."""
+    from types import SimpleNamespace
+
+    from app.channels.web.admin import _identity_contacts
+
+    contacts = _identity_contacts(
+        [
+            SimpleNamespace(channel=Channel.email, external_id="a@b.test", verified_at=None),
+            SimpleNamespace(channel=Channel.telegram, external_id="100200300", verified_at=None),
+            SimpleNamespace(channel=Channel.web, external_id="session-only", verified_at=None),
+        ]
+    )
+
+    assert [c.href for c in contacts] == [
+        "mailto:a@b.test",
+        # Resolves only where her own Telegram client knows the person; where it
+        # does not, this reads as the id it always was.
+        "tg://user?id=100200300",
+        None,
+    ]
+
+
+async def test_the_list_says_how_to_reach_the_client(
+    db: AsyncSession, client: Client, session_type_id: int
+) -> None:
+    """§12.2: the list is where she decides what to open, so a row she cannot
+    answer from should say so there rather than one click later. Both identities
+    appear when both exist, Telegram first, because §13.3 tries Telegram first.
+    """
+    from app.channels.web.admin import _summaries
+
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    db.add(
+        Identity(
+            practice_id=practice.id,
+            client_id=client.id,
+            channel=Channel.email,
+            external_id="anna@example.test",
+            verified_at=None,
+        )
+    )
+    booking_request = BookingRequest(
+        practice_id=practice.id,
+        client_id=client.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        status=RequestStatus.pending,
+        source_channel=Channel.web,
+    )
+    db.add(booking_request)
+    await db.flush()
+
+    rows = await _summaries(db, [booking_request])
+
+    assert [c.label for c in rows[0]["contact"]] == [
+        # The `client` fixture is Telegram-identified; the address above is not
+        # verified, and §13.3 would deliver nothing to it.
+        "telegram: 100200300",
+        "email: anna@example.test (unverified)",
+    ]
+
+
+async def test_a_client_with_nothing_left_to_reach_them_by_shows_nothing(
+    db: AsyncSession, session_type_id: int
+) -> None:
+    """An erased client keeps their bookings and loses every identity (§16), so
+    the join has a row and no channel on it. That must read as "no contact",
+    not as a missing key or a crash."""
+    from app.channels.web.admin import _summaries
+
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    erased = Client(practice_id=practice.id, language="ru")
+    db.add(erased)
+    await db.flush()
+    booking_request = BookingRequest(
+        practice_id=practice.id,
+        client_id=erased.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        status=RequestStatus.pending,
+        source_channel=Channel.web,
+    )
+    db.add(booking_request)
+    await db.flush()
+
+    rows = await _summaries(db, [booking_request])
+
+    assert rows[0]["contact"] == ()
+    assert rows[0]["name"] == ""
+
+
+# --- Offering only what §7.1 allows (§12.2, §13.2) --------------------------
+
+
+def _action_form(html: str, uuid: object, action: str) -> str:
+    """The one form on the request page that posts `action`."""
+    marker = f'action="/admin/requests/{uuid}/{action}"'
+    assert marker in html, f"no {action} form on the page"
+    return html.split(marker, 1)[1].split("</form>", 1)[0]
+
+
+def test_the_page_knows_about_every_admin_transition_the_core_has() -> None:
+    """A transition added to §7.1 that this page has never heard of is a control
+    it can only render as always-available, which is the fault being fixed."""
+    from app.channels.web.admin import UNAVAILABLE_BECAUSE
+    from app.core.services import booking
+
+    in_the_table = {
+        event
+        for events in booking.ALLOWED.values()
+        for event in events
+        if event.startswith("admin_")
+    }
+    assert in_the_table == set(UNAVAILABLE_BECAUSE)
+
+
+def test_each_status_offers_what_7_1_allows_and_greys_the_rest() -> None:
+    """§7.1's table, spelled out per status, so a change to either side has to
+    be made deliberately rather than discovered by a therapist."""
+    from app.channels.web.admin import UNAVAILABLE_BECAUSE
+    from app.core.services import booking
+
+    expected = {
+        RequestStatus.pending: {"admin_approve", "admin_propose", "admin_reject"},
+        # A client who counters with a time has said what suits them, so
+        # agreeing is an approval -- but nothing here is confirmed yet, and
+        # cancel is for a confirmed session. This is the reported case.
+        RequestStatus.negotiating: {"admin_approve", "admin_propose", "admin_reject"},
+        RequestStatus.confirmed: {"admin_cancel"},
+        RequestStatus.rejected: set(),
+        RequestStatus.expired: set(),
+        RequestStatus.cancelled: set(),
+        RequestStatus.completed: set(),
+    }
+
+    for status, offered in expected.items():
+        greyed = {e for e in UNAVAILABLE_BECAUSE if e not in booking.ALLOWED[status]}
+        assert set(UNAVAILABLE_BECAUSE) - greyed == offered, status
+
+
+async def test_cancel_on_a_negotiation_is_greyed_with_its_reason(
+    web: TestClient, scratch: dict[str, object], committed: AsyncSession
+) -> None:
+    """The reported fault. Pressing Cancel on a `negotiating` request could only
+    ever end in `InvalidTransition`, and the page said "refused" -- which
+    explains nothing to somebody who has just been told that the obvious way to
+    call a session off does not work."""
+    _sign_in(web)
+    await committed.execute(
+        update(BookingRequest)
+        .where(BookingRequest.id == scratch["request_id"])
+        .values(status=RequestStatus.negotiating)
+    )
+    await committed.commit()
+
+    page = web.get(f"/admin/requests/{scratch['request_uuid']}")
+    assert page.status_code == 200
+
+    cancel = _action_form(page.text, scratch["request_uuid"], "cancel")
+    assert "Only a confirmed session can be cancelled" in cancel
+    assert "<button" not in cancel, "a greyed action must not still be pressable"
+
+    # Reject is the verb that fits a request which was never confirmed, and §7.1
+    # allows it from here -- so it keeps its button.
+    reject = _action_form(page.text, scratch["request_uuid"], "reject")
+    assert "<button" in reject
+    assert "Only a request that is still open can be rejected" not in reject
+
+    await committed.rollback()
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
+# --- The practice's people, and §16's paperwork (§12.2) ---------------------
+
+
+async def test_the_clients_list_leaves_out_everybody_who_never_booked(
+    db: AsyncSession, session_type_id: int
+) -> None:
+    """The reported fault. `/admin/clients` listed every `client` row, which is
+    the right population for a data-subject request and the wrong one for a view
+    of the practice's clients: most of it was people who asked for a magic link
+    and stopped."""
+    from app.core.services.clients import list_clients_for_admin
+
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    booked = Client(practice_id=practice.id, language="ru", display_name="Booked")
+    curious = Client(practice_id=practice.id, language="ru", display_name="Never booked")
+    db.add_all([booked, curious])
+    await db.flush()
+    db.add(
+        BookingRequest(
+            practice_id=practice.id,
+            client_id=booked.id,
+            session_type_id=session_type_id,
+            modality=Modality.online,
+            status=RequestStatus.pending,
+            source_channel=Channel.web,
+        )
+    )
+    await db.flush()
+
+    listed = {row.client_id for row in await list_clients_for_admin(db)}
+
+    assert booked.id in listed
+    assert curious.id not in listed
+
+
+async def test_an_erased_client_is_not_listed_but_still_has_a_page(
+    db: AsyncSession, session_type_id: int
+) -> None:
+    """§16: they asked to be forgotten and their bookings stay for the
+    practice's statistics. Naming them in the day-to-day list is against the
+    point of having honoured it -- but a booking elsewhere still links to them,
+    so the page itself must resolve."""
+    from app.core.services.clients import list_clients_for_admin
+
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    erased = Client(
+        practice_id=practice.id,
+        language="ru",
+        display_name=None,
+        erased_at=datetime.now(UTC),
+    )
+    db.add(erased)
+    await db.flush()
+    db.add(
+        BookingRequest(
+            practice_id=practice.id,
+            client_id=erased.id,
+            session_type_id=session_type_id,
+            modality=Modality.online,
+            status=RequestStatus.completed,
+            source_channel=Channel.web,
+        )
+    )
+    await db.flush()
+
+    assert erased.id not in {row.client_id for row in await list_clients_for_admin(db)}
+
+
+async def test_a_client_row_counts_their_bookings_and_finds_both_ends_of_them(
+    db: AsyncSession, client: Client, session_type_id: int
+) -> None:
+    """The point of the page: one person, everything they have booked, without
+    a status filter and a squint."""
+    from app.core.services.clients import list_clients_for_admin
+
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    past = datetime.now(UTC) - timedelta(days=30)
+    ahead = datetime.now(UTC) + timedelta(days=14)
+
+    for status, when in (
+        (RequestStatus.completed, past),
+        (RequestStatus.confirmed, ahead),
+        # Neither end: pending has no `scheduled_start` yet, but it is a
+        # request and it counts.
+        (RequestStatus.pending, None),
+    ):
+        db.add(
+            BookingRequest(
+                practice_id=practice.id,
+                client_id=client.id,
+                session_type_id=session_type_id,
+                modality=Modality.online,
+                status=status,
+                source_channel=Channel.web,
+                scheduled_start=when,
+                # §6.5: a confirmed row must carry both, and the check
+                # constraint is right to insist.
+                confirmed_at=datetime.now(UTC)
+                if status is RequestStatus.confirmed
+                else None,
+            )
+        )
+    await db.flush()
+
+    row = next(r for r in await list_clients_for_admin(db) if r.client_id == client.id)
+
+    assert row.requests == 3
+    assert row.last_session == past
+    assert row.next_session == ahead
+
+
+async def test_a_future_session_that_is_not_confirmed_is_not_a_next_session(
+    db: AsyncSession, client: Client, session_type_id: int
+) -> None:
+    """A cancelled or rejected booking is not something she is about to sit
+    down to, and a page that said otherwise would be worse than no page."""
+    from app.core.services.clients import list_clients_for_admin
+
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    db.add(
+        BookingRequest(
+            practice_id=practice.id,
+            client_id=client.id,
+            session_type_id=session_type_id,
+            modality=Modality.online,
+            status=RequestStatus.cancelled,
+            source_channel=Channel.web,
+            scheduled_start=datetime.now(UTC) + timedelta(days=3),
+        )
+    )
+    await db.flush()
+
+    row = next(r for r in await list_clients_for_admin(db) if r.client_id == client.id)
+
+    assert row.requests == 1
+    assert row.next_session is None
+
+
+async def test_one_person_with_two_identities_is_one_row(
+    db: AsyncSession, client: Client, session_type_id: int
+) -> None:
+    """A `client` row is already the grouping of somebody's Telegram and email
+    identities (§8), which is what was being asked for. Grouping by identity
+    would split a linked person back into two."""
+    from app.core.services.clients import link_identity, list_clients_for_admin
+
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    await link_identity(db, client.id, Channel.email, "anna@example.test", verified=True)
+    db.add(
+        BookingRequest(
+            practice_id=practice.id,
+            client_id=client.id,
+            session_type_id=session_type_id,
+            modality=Modality.online,
+            status=RequestStatus.pending,
+            source_channel=Channel.web,
+        )
+    )
+    await db.flush()
+
+    rows = [r for r in await list_clients_for_admin(db) if r.client_id == client.id]
+
+    assert len(rows) == 1, "one person, however many ways there are to reach them"
+    assert {i.channel for i in rows[0].identities} == {Channel.telegram, Channel.email}
+
+
+async def test_the_clients_list_does_not_query_per_row(
+    db: AsyncSession, session_type_id: int
+) -> None:
+    """§12.2: a list whose query count depends on how many rows it draws is the
+    fault the requests list already had once."""
+    from app.core.services.clients import list_clients_for_admin
+
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    for index in range(6):
+        person = Client(practice_id=practice.id, language="ru", display_name=f"P{index}")
+        db.add(person)
+        await db.flush()
+        db.add(
+            Identity(
+                practice_id=practice.id,
+                client_id=person.id,
+                channel=Channel.telegram,
+                external_id=f"9900{index}",
+                verified_at=datetime.now(UTC),
+            )
+        )
+        db.add(
+            BookingRequest(
+                practice_id=practice.id,
+                client_id=person.id,
+                session_type_id=session_type_id,
+                modality=Modality.online,
+                status=RequestStatus.pending,
+                source_channel=Channel.web,
+            )
+        )
+    await db.flush()
+
+    one = await _count_queries(db, list_clients_for_admin(db, limit=1))
+    six = await _count_queries(db, list_clients_for_admin(db, limit=6))
+
+    assert six == one, f"{six} queries for six rows against {one} for one"
+    # The practice lookup, the grouped read, and the identities.
+    assert one <= 3, f"{one} queries to render a single row"
+
+
+async def test_privacy_still_lists_everybody_including_the_erased(
+    web: TestClient, scratch: dict[str, object], committed: AsyncSession
+) -> None:
+    """§12.2: the one list that must not be filtered. A data-subject request is
+    answerable only against the whole population."""
+    _sign_in(web)
+
+    page = web.get("/admin/privacy")
+    assert page.status_code == 200
+    assert str(scratch["client_id"]) in page.text
+    # Export and erase live here and only here.
+    assert f"/admin/clients/{scratch['client_id']}/export" in page.text
+    assert "type erase" in page.text
+
+    await committed.rollback()
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
+async def test_the_clients_page_does_not_offer_erasure(
+    web: TestClient, scratch: dict[str, object], committed: AsyncSession
+) -> None:
+    """Irreversible, so it stays off the page opened for ordinary work -- the
+    same reasoning that already makes it require the word typed out."""
+    _sign_in(web)
+
+    listing = web.get("/admin/clients")
+    assert listing.status_code == 200
+    assert "type erase" not in listing.text
+
+    detail = web.get(f"/admin/clients/{scratch['client_id']}")
+    assert detail.status_code == 200
+    assert "type erase" not in detail.text
+    # It says where to go instead.
+    assert f"/admin/privacy#c-{scratch['client_id']}" in detail.text
+
+    await committed.rollback()
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
+async def test_the_request_count_is_a_way_into_the_requests(
+    web: TestClient, scratch: dict[str, object], committed: AsyncSession
+) -> None:
+    """A count is the thing somebody wants to click. The page behind it already
+    existed -- only the name linked to it, so the number read as though there
+    were nowhere to go."""
+    _sign_in(web)
+
+    listing = web.get("/admin/clients")
+    assert listing.status_code == 200
+    assert f'/admin/clients/{scratch["client_id"]}#requests' in listing.text
+
+    detail = web.get(f"/admin/clients/{scratch['client_id']}")
+    assert 'id="requests"' in detail.text, "the anchor the count lands on"
+
+    await committed.rollback()
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
+async def test_a_client_page_shows_their_bookings_but_never_what_they_wrote(
+    web: TestClient, scratch: dict[str, object], committed: AsyncSession
+) -> None:
+    """Hard rule 8: `problem_text` appears on the request page and nowhere else.
+    A client's history is a list, and a list never carries it."""
+    _sign_in(web)
+
+    page = web.get(f"/admin/clients/{scratch['client_id']}")
+    assert page.status_code == 200
+    assert str(scratch["request_uuid"])[:8] in page.text
+    assert "something private" not in page.text
+
+    await committed.rollback()
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
+async def test_an_unknown_client_page_is_a_404_not_a_crash(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    _sign_in(web)
+
+    assert web.get("/admin/clients/not-a-uuid").status_code == 404
+    assert web.get("/admin/clients/00000000-0000-0000-0000-000000000000").status_code == 404
+
+    await committed.rollback()
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
