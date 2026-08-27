@@ -496,6 +496,25 @@ async def _last_admin_proposal(session: AsyncSession, request_id: int) -> Negoti
     ).scalar_one_or_none()
 
 
+async def _keep_hold_alive(session: AsyncSession, request: BookingRequest) -> None:
+    """Push the held slot's expiry out while the conversation is still going.
+
+    §7.1 expires only `pending`, so a negotiation has no expiry of its own and
+    the hold inherited from submission would lapse in the middle of one --
+    putting the time under discussion back on the picker with the request still
+    pointing at it (§7.2).
+
+    Every negotiation move that *keeps* the slot calls this, not just the rare
+    one that proposes the very time being held. A words-only proposal -- what a
+    mistyped time produces -- keeps the slot precisely because it has not moved
+    away from it, and so has the most need of this.
+    """
+    if request.slot_id is None:
+        return
+    practice = await get_practice(session)
+    await slot_service.extend_hold(session, request.slot_id, pending_expiry(practice))
+
+
 async def _last_proposed_instant(session: AsyncSession, request_id: int) -> datetime | None:
     """The most recent time either side put forward, if either did (§7.1).
 
@@ -769,12 +788,9 @@ async def admin_propose(
         if held is None or held.starts_at != proposed_start:
             await slot_service.release_slot(session, request.slot_id)
             request.slot_id = None
-        else:
-            # Keeping the slot means keeping it held, and a negotiation has no
-            # expiry of its own (§7.1 expires only `pending`). Re-stamped from
-            # the proposal, so the hold follows the conversation rather than
-            # lapsing on a clock started at submission.
-            await slot_service.extend_hold(session, request.slot_id, pending_expiry(practice))
+
+    # Whatever slot is still held after that, the conversation keeps alive.
+    await _keep_hold_alive(session, request)
 
     session.add(
         NegotiationMessage(
@@ -949,7 +965,13 @@ async def client_counter(
     proposed_start: datetime | None = None,
     body_text: str | None = None,
 ) -> BookingRequest:
-    """negotiating -> negotiating."""
+    """negotiating -> negotiating.
+
+    The slot is deliberately *not* released: a client suggesting an alternative
+    has not given up on the one they picked, and the therapist may still approve
+    it. The hold is kept alive instead -- a client still talking is a client
+    still interested.
+    """
     request = await _get(session, request_id)
     _guard(request, "client_counter")
 
@@ -962,6 +984,7 @@ async def client_counter(
             body_text=body_text,
         )
     )
+    await _keep_hold_alive(session, request)
     await session.flush()
 
     await _audit(session, request, ActorType.client, "request.counter")

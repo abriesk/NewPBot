@@ -594,6 +594,8 @@ A **client note** is deliberately not in the table, because it is not a transiti
 
 `hold` and `book` **MUST** execute `SELECT … FROM slot WHERE id = :id FOR UPDATE` before checking status. This is the only place where a lost update would double-book.
 
+**A negotiation keeps its slot held for as long as it goes on.** Every move that leaves the slot attached — a proposal naming the same time, a proposal of words only, a client's counter — re-stamps the hold. §7.1 expires only `pending`, so a negotiation has no expiry of its own, and a hold left on the clock started at submission lapses in the middle of one: the time under discussion goes back on the picker while the request still points at it. Only a proposal naming a *different* time releases it, because that is the one case where the therapist has moved away from it.
+
 **A hold lasts as long as whatever it is protecting.** `slot_hold_minutes` is the window a *client* has to finish a form, and it applies only until the request exists. `submit_slot_request` holds until the request's own `expires_at` instead: the request stays `pending` for `pending_expiry_hours`, and a slot released ahead of that goes back on the picker while the request still points at it. A proposal that keeps its slot re-stamps the hold (`extend`), because §7.1 expires only `pending` — a negotiation has no expiry of its own, so a hold inherited from submission would lapse mid-conversation. `hold_expires_at` is never NULL while `held`; §6.4 makes that a biconditional.
 
 ---

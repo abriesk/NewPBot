@@ -1137,3 +1137,43 @@ async def test_approving_a_negotiation_with_no_time_and_no_slot_is_refused(
 
     with pytest.raises(InvalidTransition):
         await booking.admin_approve(db, request.id)
+
+
+async def test_a_words_only_proposal_also_re_stamps_the_hold(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """§7.1: a proposal that names no instant keeps the slot -- it has not moved
+    away from it -- so it has to keep the hold alive too.
+
+    Only the "proposed the very same time" branch re-stamped, which is the
+    rarest case. A words-only proposal, the one a mistyped time produces, left
+    the hold running on the clock started at submission: the slot went back on
+    the picker mid-negotiation with the request still pointing at it.
+    """
+    request = await _submit(db, client, session_type_id, future_slot)
+    at_submission = future_slot.hold_expires_at
+
+    with time_machine.travel(datetime.now(UTC) + timedelta(hours=24), tick=False):
+        await booking.admin_propose(db, request.id, body_text="which evening suits you?")
+
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.held
+    assert request.slot_id == future_slot.id
+    assert future_slot.hold_expires_at > at_submission
+
+
+async def test_a_client_counter_re_stamps_the_hold_too(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The other half of the conversation. A client still talking is a client
+    still interested in the slot they picked."""
+    request = await _submit(db, client, session_type_id, future_slot)
+    await booking.admin_propose(db, request.id, body_text="which evening suits you?")
+    before = future_slot.hold_expires_at
+
+    with time_machine.travel(datetime.now(UTC) + timedelta(hours=24), tick=False):
+        await booking.client_counter(db, request.id, body_text="thursday would be better")
+
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.held
+    assert future_slot.hold_expires_at > before
