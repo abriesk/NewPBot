@@ -591,3 +591,35 @@ def test_the_scenario_covers_both_channels() -> None:
     assert "test_the_full_scenario_on_the_web_channel" in source
     assert "test_the_full_scenario_on_the_telegram_channel" in source
     assert datetime.now(UTC).tzinfo is not None  # naive datetimes are banned
+
+
+async def test_agreeing_to_a_proposal_of_words_reaches_the_therapist(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """§7.1's other accept branch, end to end.
+
+    The therapist typed a time Telegram could not parse, so it went out as
+    words. The client agreed. Before, `client_accept` refused: the tap did
+    nothing the client could see, the request sat in `negotiating`, and the one
+    person who could move it forward heard nothing at all.
+    """
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+
+    # Exactly what the Telegram admin panel does with an unparseable answer:
+    # it keeps the words and proposes them (§9).
+    await booking.admin_propose(db, request.id, proposed_start=None, body_text="2026-08-29-14:30")
+    await notifications.publish(db)
+
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=f"accept:{request.id}"))
+    assert reply is not None
+
+    await db.refresh(request)
+    assert request.status is RequestStatus.negotiating, "words cannot confirm a session"
+    assert request.scheduled_start is None
+
+    await notifications.publish(db)
+    assert await _rows(db, request.id, "request.accepted.admin"), "the therapist must hear it"
+
+    # And it is her turn: she is the one who turns an agreement into a time.
+    assert await booking.whose_turn(db, request.id) is SenderType.admin

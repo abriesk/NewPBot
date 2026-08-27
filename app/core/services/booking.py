@@ -50,6 +50,7 @@ from app.core.errors import (
     RateLimited,
 )
 from app.core.events import (
+    RequestAccepted,
     RequestCancelled,
     RequestConfirmed,
     RequestCounter,
@@ -749,7 +750,10 @@ async def admin_propose(
     collect(
         session,
         RequestProposal(
-            request_id=request.id, request_uuid=request.uuid, proposed_start=proposed_start
+            request_id=request.id,
+            request_uuid=request.uuid,
+            proposed_start=proposed_start,
+            note=body_text,
         ),
     )
     return request
@@ -810,14 +814,21 @@ async def admin_cancel(
 
 
 async def client_accept(session: AsyncSession, request_id: int) -> BookingRequest:
-    """negotiating -> confirmed, at the last time the admin proposed."""
+    """negotiating -> confirmed, at the last time the admin proposed.
+
+    Or, when that proposal named no instant, negotiating -> negotiating: §7.1
+    lets a proposal be words only, and agreeing to words confirms nothing --
+    there is no `scheduled_start` to set, no reminder to schedule and nothing
+    for the schedule to draw. Refusing the client outright was worse: the one
+    person who could move it forward was told nothing, and the client's tap did
+    nothing visible. So the agreement is recorded and the therapist is asked to
+    put a time to it.
+    """
     request = await _get(session, request_id)
     _guard(request, "client_accept")
 
     proposal = await _last_admin_proposal(session, request.id)
-    if proposal is None or proposal.proposed_start is None:
-        # Accepting free text has no instant to confirm against; the therapist
-        # must propose a real datetime first.
+    if proposal is None:
         raise InvalidTransition("booking_request", request.status.value, "client_accept")
 
     session.add(
@@ -825,6 +836,17 @@ async def client_accept(session: AsyncSession, request_id: int) -> BookingReques
             request_id=request.id, sender=SenderType.client, kind=NegotiationKind.accept
         )
     )
+
+    if proposal.proposed_start is None:
+        await session.flush()
+        await _audit(session, request, ActorType.client, "request.accept")
+        collect(
+            session,
+            RequestAccepted(
+                request_id=request.id, request_uuid=request.uuid, note=proposal.body_text
+            ),
+        )
+        return request
 
     matching = await _matching_slot(session, proposal.proposed_start)
     if matching is not None:

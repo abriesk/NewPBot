@@ -36,6 +36,7 @@ def test_every_intent_in_section_10_has_a_spec() -> None:
         "request.expired.client",
         "request.cancelled.client",
         "reminder.client",
+        "request.accepted.admin",
         "waitlist.joined.client",
         "waitlist.joined.admin",
         "auth.login_link.client",

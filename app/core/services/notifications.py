@@ -32,6 +32,7 @@ from app.config import get_settings
 from app.core.enums import Channel, Modality, OutboxStatus, TokenPurpose
 from app.core.events import (
     DomainEvent,
+    RequestAccepted,
     RequestCancelled,
     RequestConfirmed,
     RequestCounter,
@@ -198,8 +199,22 @@ async def envelopes_for(session: AsyncSession, event: DomainEvent) -> list[Envel
                 {
                     "uuid": str(request.uuid),
                     "time": _iso(event.proposed_start),
-                    "note": None,  # negotiation bodies stay in the admin UI
+                    # §10 puts the note in this payload, and it had been pinned
+                    # to None: the therapist wrote to the client and the client
+                    # never saw it. A proposal of words only is nothing else.
+                    "note": event.note,
                 },
+                request_id=request.id,
+            )
+        ]
+
+    if isinstance(event, RequestAccepted):
+        request = await _request(session, event.request_id)
+        return [
+            Envelope(
+                "request.accepted.admin",
+                Recipient.admin,
+                {"uuid": str(request.uuid), "note": event.note},
                 request_id=request.id,
             )
         ]

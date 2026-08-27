@@ -131,6 +131,7 @@ request:
 
 intent:
   request.proposal.client.body: "Предложено время по вашей заявке {uuid}: {time}."
+  request.proposal.client.body.no_time: "По вашей заявке {uuid} есть ответ."
   request.proposal.client.note: "Комментарий специалиста: {note}"               # TODO
   request.proposal.client.action.accept: "Согласиться"
   request.proposal.client.action.counter: "Предложить другое время"

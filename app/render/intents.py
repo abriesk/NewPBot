@@ -57,6 +57,14 @@ CATALOGUE: dict[str, IntentSpec] = {
         optional_parts=(("note", "intent.request.proposal.client.note"),),
         email_subject_key="email.subject.request_update",
     ),
+    # §7.1: the client agreed to a proposal that named no instant. Nothing can
+    # be confirmed from words, so this asks the therapist to put a time to it.
+    "request.accepted.admin": IntentSpec(
+        key="request.accepted.admin",
+        body_key="admin.intent.request.accepted.admin.body",
+        actions=("approve", "propose", "reject"),
+        email_subject_key="email.subject.request_update",
+    ),
     "request.counter.admin": IntentSpec(
         key="request.counter.admin",
         body_key="admin.intent.request.counter.admin.body",
@@ -164,6 +172,9 @@ ACTION_LABEL_KEYS: dict[tuple[str, str], str] = {
     ("request.submitted.admin", "approve"): "admin.request.approve",
     ("request.submitted.admin", "propose"): "admin.request.propose",
     ("request.submitted.admin", "reject"): "admin.request.reject",
+    ("request.accepted.admin", "approve"): "admin.request.approve",
+    ("request.accepted.admin", "propose"): "admin.request.propose",
+    ("request.accepted.admin", "reject"): "admin.request.reject",
     ("request.counter.admin", "approve"): "admin.request.approve",
     ("request.counter.admin", "propose"): "admin.request.propose",
     ("request.counter.admin", "reject"): "admin.request.reject",
@@ -189,6 +200,10 @@ def body_key_for(intent_key: str, payload: dict[str, object]) -> str:
         offset = payload.get("offset_min")
         if isinstance(offset, int) and offset in REMINDER_BODY_KEYS:
             return REMINDER_BODY_KEYS[offset]
+    if intent_key == "request.proposal.client" and not payload.get("time"):
+        # §7.1: a proposal of words only is ordinary. Announcing a time and
+        # leaving a blank where it should be is not.
+        return "intent.request.proposal.client.body.no_time"
     return spec_for(intent_key).body_key
 
 

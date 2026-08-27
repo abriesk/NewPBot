@@ -55,7 +55,25 @@ class RequestProposal(DomainEvent):
     request_id: int
     request_uuid: UUID
     proposed_start: datetime | None
+    #: What the therapist wrote alongside it. §10 puts it in the client's
+    #: message: it is addressed to them, and a proposal of words only is
+    #: nothing else (§7.1).
+    note: str | None = None
     intent_key: str = field(init=False, default="request.proposal")
+
+
+@dataclass(frozen=True, slots=True)
+class RequestAccepted(DomainEvent):
+    """The client agreed to a proposal that named no instant (§7.1).
+
+    Not a confirmation: nothing can be scheduled from words. It exists so the
+    therapist hears the agreement and can put a time to it.
+    """
+
+    request_id: int
+    request_uuid: UUID
+    note: str | None = None
+    intent_key: str = field(init=False, default="request.accepted")
 
 
 @dataclass(frozen=True, slots=True)

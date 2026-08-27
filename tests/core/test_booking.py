@@ -26,7 +26,13 @@ from app.core.enums import (
     SlotStatus,
 )
 from app.core.errors import BookingClosed, InvalidTransition, NegotiationDisabled
-from app.core.events import RequestConfirmed, RequestSubmitted, drain, pending
+from app.core.events import (
+    RequestAccepted,
+    RequestConfirmed,
+    RequestSubmitted,
+    drain,
+    pending,
+)
 from app.core.models import (
     AuditLog,
     BookingRequest,
@@ -316,13 +322,54 @@ async def test_client_accept_uses_the_most_recent_proposal(
     assert confirmed.scheduled_start == newer
 
 
-async def test_accepting_a_free_text_proposal_is_refused(
+async def test_accepting_a_free_text_proposal_tells_the_therapist(
     db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
 ) -> None:
-    """ "some evening next week" has no instant to confirm against."""
+    """§7.1: "some evening next week" has no instant to confirm against, so
+    accepting it cannot confirm anything -- no `scheduled_start`, no reminder,
+    nothing for the schedule to draw.
+
+    It used to be refused outright, which was worse than useless: the client's
+    tap did nothing visible and the one person who could move it forward was
+    told nothing. The agreement is recorded and she is asked for a time.
+    """
     request = await _negotiating(db, client, session_type_id, future_slot, proposed=None)
-    with pytest.raises(InvalidTransition):
-        await booking.client_accept(db, request.id)
+    drain(db)
+
+    same = await booking.client_accept(db, request.id)
+
+    assert same.status is RequestStatus.negotiating
+    assert same.scheduled_start is None
+    assert same.confirmed_at is None
+
+    accept = (
+        await db.execute(
+            select(NegotiationMessage).where(
+                NegotiationMessage.request_id == request.id,
+                NegotiationMessage.kind == NegotiationKind.accept,
+            )
+        )
+    ).scalar_one()
+    assert accept.sender is SenderType.client
+
+    assert any(isinstance(e, RequestAccepted) for e in pending(db))
+    # Not a confirmation: nothing may be scheduled from words.
+    assert not any(isinstance(e, RequestConfirmed) for e in pending(db))
+
+    # And the turn goes back to the therapist, who is the one who sets a time.
+    assert await booking.whose_turn(db, request.id) is SenderType.admin
+
+
+async def test_accepting_a_proposal_that_names_a_time_still_confirms(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The other branch, unchanged."""
+    request = await _negotiating(db, client, session_type_id, future_slot, proposed=LATER)
+
+    confirmed = await booking.client_accept(db, request.id)
+
+    assert confirmed.status is RequestStatus.confirmed
+    assert confirmed.scheduled_start == LATER
 
 
 async def test_client_counter_stays_negotiating(
