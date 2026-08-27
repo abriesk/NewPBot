@@ -1764,6 +1764,26 @@ async def test_the_clients_page_does_not_offer_erasure(
     await committed.commit()
 
 
+async def test_the_request_count_is_a_way_into_the_requests(
+    web: TestClient, scratch: dict[str, object], committed: AsyncSession
+) -> None:
+    """A count is the thing somebody wants to click. The page behind it already
+    existed -- only the name linked to it, so the number read as though there
+    were nowhere to go."""
+    _sign_in(web)
+
+    listing = web.get("/admin/clients")
+    assert listing.status_code == 200
+    assert f'/admin/clients/{scratch["client_id"]}#requests' in listing.text
+
+    detail = web.get(f"/admin/clients/{scratch['client_id']}")
+    assert 'id="requests"' in detail.text, "the anchor the count lands on"
+
+    await committed.rollback()
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
 async def test_a_client_page_shows_their_bookings_but_never_what_they_wrote(
     web: TestClient, scratch: dict[str, object], committed: AsyncSession
 ) -> None:

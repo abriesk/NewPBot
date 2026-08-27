@@ -26,7 +26,10 @@
       <td class="muted">
         {% for c in row.contact %}{{ contact_link(c) }}<br>{% else %}—{% endfor %}
       </td>
-      <td>{{ row.requests }}</td>
+      {# The same page the name opens, landing on the table rather than the top
+         of it: a count is the thing somebody wants to click, and one that does
+         nothing reads as though there were nowhere to go. #}
+      <td><a href="/admin/clients/{{ row.id }}#requests">{{ row.requests }}</a></td>
       <td>{{ row.last_session or '—' }}</td>
       <td>{{ row.next_session or '—' }}</td>
       <td class="muted">{{ row.since }}</td>
