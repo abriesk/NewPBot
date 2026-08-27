@@ -72,7 +72,13 @@ from app.core.models import (
 from app.core.policies import now_utc
 from app.core.services import booking, content, notifications, waitlist
 from app.core.services import slots as slot_service
-from app.core.services.clients import erase_client, export_client, identities_for
+from app.core.services.clients import (
+    erase_client,
+    export_client,
+    identities_for,
+    identities_for_many,
+    list_clients_for_admin,
+)
 from app.core.services.config_io import (
     ConfigInvalid,
     ImportReport,
@@ -138,6 +144,8 @@ async def _labels(session: AsyncSession) -> dict[str, str]:
         "nav_session_types": "admin.nav.session_types",
         "nav_timezones": "admin.nav.timezones",
         "nav_delivery": "admin.nav.delivery",
+        "nav_clients": "admin.nav.clients",
+        "nav_privacy": "admin.nav.privacy",
         "nav_maintenance": "admin.nav.maintenance",
         "nav_help": "admin.nav.help",
         "nav_status": "admin.nav.status",
@@ -1061,17 +1069,25 @@ def build_router() -> APIRouter:
                 return _back("/admin/login")
 
             if confirm.strip().lower() != "erase":
-                return _back("/admin/clients", "type erase to confirm")
+                return _back("/admin/privacy", "type erase to confirm")
 
             try:
                 await erase_client(session, UUID(client_id))
             except (NotFound, ValueError):
                 return Response(status_code=404)
 
-            return _back("/admin/clients", "erased")
+            return _back("/admin/privacy", "erased")
 
-    @router.get("/clients", response_class=HTMLResponse, include_in_schema=False)
-    async def clients_page(request: Request) -> Response:
+    @router.get("/privacy", response_class=HTMLResponse, include_in_schema=False)
+    async def privacy_page(request: Request) -> Response:
+        """§16's surface, under its own name.
+
+        Every `client` row, deliberately: erased people, and people who asked
+        for a magic link and never booked. A data-subject request is answerable
+        only against the whole population, so this is the one list that must
+        not be filtered -- which is exactly what made it misleading while it
+        was also the page called Clients.
+        """
         async with unit_of_work() as session:
             admin = await current_admin(session, request)
             if admin is None:
@@ -1086,16 +1102,107 @@ def build_router() -> APIRouter:
                 .scalars()
                 .all()
             )
-            identities: dict[str, list[str]] = {}
-            for client in rows:
-                identities[str(client.id)] = [
-                    f"{i.channel.value}: {i.external_id}"
-                    for i in await identities_for(session, client.id)
-                ]
+            found = await identities_for_many(session, [row.id for row in rows])
+            identities = {
+                str(row.id): _identity_contacts(found.get(row.id, [])) for row in rows
+            }
+
+            return _render(
+                "admin/privacy.html",
+                await _context(session, request, admin, rows=rows, identities=identities),
+            )
+
+    @router.get("/clients", response_class=HTMLResponse, include_in_schema=False)
+    async def clients_page(request: Request) -> Response:
+        """§12.2's clients list: the practice's people, busiest first.
+
+        A different population from `/admin/privacy` and for a different
+        question -- who is the practice seeing, and what has this person booked
+        before.
+        """
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+
+            practice = await get_practice(session)
+            zone = ZoneInfo(practice.timezone)
+            rows = [
+                {
+                    "id": str(summary.client_id),
+                    "name": summary.display_name,
+                    "contact": _identity_contacts(summary.identities),
+                    "requests": summary.requests,
+                    "last_session": _in_zone(summary.last_session, zone),
+                    "next_session": _in_zone(summary.next_session, zone),
+                    "since": summary.created_at.astimezone(zone).strftime("%Y-%m-%d"),
+                }
+                for summary in await list_clients_for_admin(session)
+            ]
 
             return _render(
                 "admin/clients.html",
-                await _context(session, request, admin, rows=rows, identities=identities),
+                await _context(session, request, admin, rows=rows),
+            )
+
+    @router.get("/clients/{client_id}", response_class=HTMLResponse, include_in_schema=False)
+    async def client_detail(request: Request, client_id: str) -> Response:
+        """One person: how to reach them, and everything they have booked.
+
+        Resolves for an erased client too, though the list does not show them:
+        a booking elsewhere in the admin UI must never link to a dead page.
+        """
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+
+            try:
+                client = (
+                    await session.execute(select(Client).where(Client.id == UUID(client_id)))
+                ).scalar_one_or_none()
+            except ValueError:
+                return Response(status_code=404)
+            if client is None:
+                return Response(status_code=404)
+
+            requests = (
+                (
+                    await session.execute(
+                        select(BookingRequest)
+                        .where(BookingRequest.client_id == client.id)
+                        .order_by(BookingRequest.created_at.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            waitlist_entries = (
+                (
+                    await session.execute(
+                        select(WaitlistEntry)
+                        .where(WaitlistEntry.client_id == client.id)
+                        .order_by(WaitlistEntry.created_at.desc())
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
+            return _render(
+                "admin/client_detail.html",
+                await _context(
+                    session,
+                    request,
+                    admin,
+                    client=client,
+                    identities=_identity_contacts(await identities_for(session, client.id)),
+                    # The same summary row the requests list draws, so a
+                    # client's history reads exactly like the queue it came from
+                    # -- and carries no `problem_text` (hard rule 8).
+                    rows=await _summaries(session, requests),
+                    waitlist_entries=waitlist_entries,
+                ),
             )
 
     # --- Health (§12.2, §16.8) ---------------------------------------------
@@ -1435,6 +1542,11 @@ def _identity_contact(channel: Channel, external_id: str, verified_at: Any) -> _
     if channel is Channel.telegram and external_id.isdigit():
         return _Contact(label=label, href=f"tg://user?id={external_id}")
     return _Contact(label=label, href=None)
+
+
+def _in_zone(value: datetime | None, zone: ZoneInfo) -> str:
+    """An instant in the practice's clock, or nothing at all. DESIGN.md §8."""
+    return value.astimezone(zone).strftime("%Y-%m-%d %H:%M") if value else ""
 
 
 def _identity_contacts(identities: Sequence[Any]) -> list[_Contact]:

@@ -200,6 +200,8 @@ admin:
   nav.session_types: "Session types"
   nav.timezones: "Timezones"
   nav.delivery: "Delivery"
+  nav.clients: "Clients"
+  nav.privacy: "Privacy"
   request.approve: "Approve"
   request.propose: "Propose another time"
   request.reject: "Reject"

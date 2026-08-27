@@ -10,8 +10,9 @@ from __future__ import annotations
 import hashlib
 import re
 import secrets
+from collections.abc import Collection
 from dataclasses import dataclass
-from datetime import timedelta
+from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
@@ -269,6 +270,121 @@ async def identities_for(session: AsyncSession, client_id: UUID) -> list[Identit
         .scalars()
         .all()
     )
+
+
+async def identities_for_many(
+    session: AsyncSession, client_ids: Collection[UUID]
+) -> dict[UUID, list[Identity]]:
+    """The same, for a page of clients, in one query.
+
+    §12.2 forbids a list whose query count depends on how many rows it draws,
+    and `identities_for` in a loop is exactly that.
+    """
+    if not client_ids:
+        return {}
+    rows = (
+        (await session.execute(select(Identity).where(Identity.client_id.in_(client_ids))))
+        .scalars()
+        .all()
+    )
+    grouped: dict[UUID, list[Identity]] = {client_id: [] for client_id in client_ids}
+    for identity in rows:
+        grouped[identity.client_id].append(identity)
+    return grouped
+
+
+@dataclass(frozen=True, slots=True)
+class ClientSummary:
+    """One person on §12.2's clients list.
+
+    Everything the row draws, resolved by the query rather than by the caller:
+    a channel that goes back for a count or a next session is the per-row page
+    the requests list was already found to be.
+    """
+
+    client_id: UUID
+    display_name: str
+    created_at: datetime
+    requests: int
+    #: The most recent session that has already happened, if there is one.
+    last_session: datetime | None
+    #: The soonest confirmed session still ahead, if there is one.
+    next_session: datetime | None
+    identities: tuple[Identity, ...] = ()
+
+
+async def list_clients_for_admin(
+    session: AsyncSession, *, limit: int = 200
+) -> list[ClientSummary]:
+    """§12.2's clients list: the practice's people, busiest first.
+
+    Not every `client` row. A person who asked for a magic link and never booked
+    is not a client of the practice, and an erased one asked to be forgotten --
+    both are on `/admin/privacy`, which is the page whose population has to be
+    complete. Listing them here is what made one page misleading as the other.
+
+    Ordered by the newest request rather than by `created_at`: a practice cares
+    who it is seeing now, not who registered first.
+    """
+    from sqlalchemy import case, func
+
+    from app.core.enums import RequestStatus
+    from app.core.models import BookingRequest
+
+    now = now_utc()
+    practice = await get_practice(session)
+
+    # `filter` is PostgreSQL's aggregate FILTER: last and next session in the
+    # same pass as the count, so the list is one query and not one per person.
+    past = case(
+        (
+            (BookingRequest.scheduled_start < now)
+            & BookingRequest.status.in_((RequestStatus.confirmed, RequestStatus.completed)),
+            BookingRequest.scheduled_start,
+        ),
+        else_=None,
+    )
+    ahead = case(
+        (
+            (BookingRequest.scheduled_start >= now)
+            & (BookingRequest.status == RequestStatus.confirmed),
+            BookingRequest.scheduled_start,
+        ),
+        else_=None,
+    )
+
+    rows = (
+        await session.execute(
+            select(
+                Client.id,
+                Client.display_name,
+                Client.created_at,
+                func.count(BookingRequest.id),
+                func.max(past),
+                func.min(ahead),
+                func.max(BookingRequest.created_at).label("latest"),
+            )
+            .join(BookingRequest, BookingRequest.client_id == Client.id)
+            .where(Client.practice_id == practice.id, Client.erased_at.is_(None))
+            .group_by(Client.id, Client.display_name, Client.created_at)
+            .order_by(func.max(BookingRequest.created_at).desc())
+            .limit(limit)
+        )
+    ).all()
+
+    identities = await identities_for_many(session, [row[0] for row in rows])
+    return [
+        ClientSummary(
+            client_id=row[0],
+            display_name=str(row[1]) if row[1] else "",
+            created_at=row[2],
+            requests=int(row[3]),
+            last_session=row[4],
+            next_session=row[5],
+            identities=tuple(identities.get(row[0], ())),
+        )
+        for row in rows
+    ]
 
 
 # --- Rate limiting, from rows that already exist (§17) -----------------------

@@ -448,7 +448,7 @@ Roughly in the order they would be worth doing:
 4. **The therapist's** calendar: export and synchronisation of her whole schedule (a subscribable `.ics` feed first, CalDAV later). Not to be confused with the per-session file a client gets attached to a confirmation email, which is built (IMPLEMENTATION.md §13.5)
 5. The same per-session calendar file on Telegram, which needs `send_document` and a transport that can carry an attachment. Worth doing only after checking the hand-off: an `.ics` sent into a Telegram chat opens in a calendar app reliably on iOS and unreliably on Android, and a file the client cannot open is worse than no file
 6. The week schedule (§15) on Telegram. **Needs design thought and testing with the therapist before any code is written**, because the obvious answer does not fit. A grid needs monospace, so it needs `<pre>` — the only tag in the supported subset that holds alignment (hard rule 6) — and a phone shows roughly 30 to 40 monospace characters before wrapping or side-scrolling. Seven day-columns do not fit in that, and the version that renders correctly on a desk will be unreadable on the device the surface exists for. The likely shape is therefore not a grid but a day-grouped agenda — a heading per day, its sessions beneath, empty days collapsed to one line — which is a different design and should be judged as one rather than as a degraded grid. Two things to settle by trying it rather than by reasoning: whether a day-grouped agenda actually beats the flat soonest-first list already at `asess:7` (§13.2), and how many days belong on one screen given the 4096-character limit and the current cap of ten sessions. Until both are answered from use, the honest Telegram answer is the existing list plus a link to the web schedule, which is what §13.2 already does for every web-only capability
-7. Recurring clients: session history, prepaid packages
+7. Recurring clients: prepaid packages. Session history is **done** — `/admin/clients` and `/admin/clients/{id}` (§12.2) give each person their bookings, their last and next session, and how to reach them. What is left here is the commercial half
 8. Client self-study materials as a content type
 9. Multi-practice operation (§18)
 10. Statistics for the therapist: conversion, no-shows, load by weekday
@@ -506,7 +506,7 @@ wording is written there as the work is done, not in advance. An entry leaves
 this list when it is fixed: the reasoning goes to §12.2 or wherever the rule now
 lives, so what is left here is what is left to do.
 
-Three are already gone. The request page offered all four actions whatever the
+Four are already gone. The request page offered all four actions whatever the
 status, so Cancel on a negotiation could only end in a refusal; §7.1 now decides
 what that page renders, as §13.2 has always required of the Telegram panel. The
 requests list could not say how to reach anybody, which §12.2 had already argued
@@ -524,6 +524,15 @@ written, and a notification that is refused is one she simply never receives.
 The note was truncated at 2000 characters in silence, by a cap that field had to
 itself. And the body opened on the client's name with no variant for the client
 who has none. Only the first was the thing reported.
+
+The fourth was "Clients", which was §16's export-and-erase surface wearing a
+name that promised the practice's people. It is now `/admin/privacy` under its
+own name and deliberately unfiltered, and `/admin/clients` is a real view of the
+people who have actually booked, with their history behind each one. The
+grouping that was asked for turned out to exist already — a `client` row *is*
+the grouping of somebody's Telegram and email identities — so what was missing
+was never the grouping but the bookings, and a page framed around the person
+rather than around a data-subject request.
 
 **What the contact column shows, and what it could show.** It shows identities
 — where a message would actually land, and for an address whether §13.3 would
@@ -551,30 +560,26 @@ spoken to them. **This is interim.** Replying to a client belongs somewhere of
 its own rather than in a table cell, and that is a question for the UI pass, not
 for a column.
 
-**"Clients" is the data-protection page wearing the wrong name.** It lists every
-`client` row with its identities and offers export and erasure. That is §16's
-surface — the answer to "send me my data" and "forget me" — and not a view of
-the practice's clients in any sense the therapist means by the word. It leads
-with a UUID, it includes everyone who ever asked for a magic link without
-booking, and one person whose Telegram and email were never linked appears as
-two rows with nothing to say they are the same human. Renaming it Privacy, or
-Data requests, costs a nav label and a heading.
+**One person can still be two rows, and nothing here can join them.** A client
+whose Telegram and email were never linked is two `client` rows with two
+histories, because the service does not know they are one human. The clients
+list shows both, correctly — it cannot show otherwise without guessing.
 
-What is missing is the other page: clients grouped by their identities, each
-showing their bookings, so a returning client's history is one click instead of
-a status filter and a squint. Nothing like it exists today. This is the first
-step of §20's item 7, so it is an addition rather than a repair. §12.2 gains a
-route — which it needs regardless, because it lists `/admin/clients/{id}/export`
-and `/erase` and does not list the `/admin/clients` page that exists in the code
-and in the navigation. That disagreement is a documentation bug in its own
-right.
+The safe join already exists and belongs to the client: the `link_channel` token
+in the login email, which only the owner of that address can follow (§5.1). What
+is missing is a way for the therapist to *notice* the case and prompt it. A
+"these may be the same person" hint is the cheap half and is guesswork — a
+shared display name is weak evidence and a wrong guess puts two strangers' names
+beside each other on a page about them.
 
-Two things to settle before building: whether the page groups by `client` row —
-what the schema means by a person — or by identity; and whether an unlinked
-Telegram and email that plainly belong to one person should be mergeable from
-here. Merging is a write, and the only merge that is safe today is the one the
-client performs themselves, with a `link_channel` token sent to an address that
-has proved it is theirs (§5.1).
+An admin-side **merge** is the expensive half and is what would actually fix it:
+moving identities, requests, waitlist entries, tokens and flow state from one
+client to another, irreversibly. `link_identity` already refuses to reassign an
+identity that belongs to somebody else, on the grounds that silently moving one
+between people is not a recoverable mistake, and an admin merge is that mistake
+with a button. It wants an audit entry, a confirmation that names both people,
+and a decision about what happens to the losing row — none of which is worth
+designing before the duplicate case has actually been hit. Revisit when it has.
 
 **The client is asked for a time and handed a blank box.** A counter is one
 free-text input with a placeholder. The core prefers a structured time and keeps

@@ -790,7 +790,7 @@ A message *about a request* **MUST** link to `/r/{uuid}` carrying a `view_reques
 
 All under `/admin`, session-authenticated, CSRF-protected.
 
-`/admin/login`, `/admin/requests` (+ `?view=`, `?start=`), `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`), `/admin/help`, `/admin/status`.
+`/admin/login`, `/admin/requests` (+ `?view=`, `?start=`), `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients`, `/admin/clients/{id}`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/privacy`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`), `/admin/help`, `/admin/status`.
 
 **A time the therapist types and the form cannot read MUST be refused, not dropped.** `/admin/requests/{uuid}/approve` and `/propose` parse `scheduled_start` as `YYYY-MM-DDTHH:MM` in the practice timezone; anything else answers with a flash naming the format and changes nothing. Silently reading it as "no time given" turned a mistyped proposal into a timeless one, which the therapist had no way to notice — she had said when, and the client was told nothing. A proposal of words only is still available by leaving the field empty (§7.1).
 
@@ -830,6 +830,26 @@ Requirements:
 - The grid is **read-only**. There is no route that writes from it: no drag to reschedule, no click to create a slot, no inline approve.
 - Both views are English like the rest of the admin surface (§15, DESIGN.md §11) and add **no** translation keys.
 - No schema change. The read is served by `booking.scheduled_in_window` and `booking.unscheduled_for_admin` in `app/core/services/` — the channel does no scheduling logic of its own, and does not query per row.
+
+**`/admin/clients` is the practice's people; `/admin/privacy` is §16's paperwork.** One page tried to be both and was named after the wrong one. It listed every `client` row — leading with a UUID, including everyone who ever asked for a magic link and never booked, including people who had been erased — because that is the correct population for answering "send me my data" and "forget me". As a view of the therapist's clients it was misleading, and it was the only such view there was: a returning client's history was a status filter and a squint.
+
+`/admin/privacy` is that page under its own name, unchanged: every `client` row, its identities, when it was created, whether it has been erased, and the export and erase controls. It **MUST** stay complete — a data-subject request is answerable only against the whole population, and a filtered privacy page is a privacy page with a hole in it.
+
+`/admin/clients` is the new one, and it is a different population:
+
+- One row per **`client`**, never per identity. A `client` row *is* the grouping of a person's Telegram and email identities — that is what `resolve_client` and `link_identity` maintain (§8) — so grouping by identity would split a linked person back into two.
+- A client with **no booking request MUST NOT** appear. Somebody who asked for a magic link and stopped is not a client of the practice, and they were most of what made the old page misleading. They remain on `/admin/privacy`, which is where a request about them is answered. Waitlist-only entries do not appear either; `/admin/waitlist` is their page.
+- An **erased** client **MUST NOT** appear. They asked to be forgotten, their bookings stay for the practice's statistics (§16), and listing the person by name in the day-to-day view is against the point of having honoured it. `/admin/clients/{id}` still resolves for them, so a booking elsewhere never links to a dead page.
+- Rows are ordered by **most recent activity** — the newest request — rather than by when the row was created. A practice cares who it is currently seeing.
+- Each row carries the client's name, their identities as §12.2's contact labels, how many requests they have made, their last and next session, and when they first appeared.
+
+**A person whose Telegram and email were never linked is two rows, and MUST be left as two.** The service does not know they are one human; only the client can say so, by following the `link_channel` token that the login email already offers (§5.1). An admin-side merge would move identities, requests, waitlist entries and tokens between people irreversibly — `link_identity` already refuses to reassign an identity for that reason, and a page that quietly did it anyway would be worse than the duplicate.
+
+`/admin/clients/{id}` is one person: their identities, language, timezone, when they first appeared, every request they have made rendered as §12.2's summary row, and their waitlist entries. It carries **no** `problem_text` (hard rule 8 — never in a list), which stays one click away on each request page.
+
+Export and erase are reachable from `/admin/privacy` only, and `/admin/clients/{id}` links to that person's row there. Erasure is irreversible, and the reasoning that already makes it require the word "erase" typed rather than one click also keeps it off the page opened for ordinary work. The routes themselves stay at `/admin/clients/{id}/export` and `/erase`: they are actions on a client, whichever page renders the button.
+
+**The list MUST NOT query per row.** Two queries serve it however many clients there are: one grouped over `booking_request` — the count, and the last and next session as conditional aggregates — and one for the identities of the clients it returned. The read lives in `app/core/services/`, like the week schedule's (§12.2 above); the channel draws the table and computes nothing.
 
 The maintenance page carries both halves of §16.7 and §16.6 and nothing else:
 
