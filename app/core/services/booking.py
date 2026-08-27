@@ -316,6 +316,22 @@ async def upcoming_sessions(
     return list(rows.all())
 
 
+def _slot_still_belongs(request_id: Any) -> Any:
+    """Whether the joined slot is actually this request's, as SQL.
+
+    `booking_request.slot_id` records the slot the client *asked for*, and
+    nothing clears it: a terminal transition releases the slot without
+    forgetting which one it was, and a hold that lapses in an abandoned
+    negotiation releases it too. So the column can name a slot that has since
+    gone back on the picker and been taken by somebody else.
+
+    Kept as one expression because three readers ask the same question, and a
+    reader that forgot to ask drew a request in the week schedule at a time
+    belonging to another client (§12.2).
+    """
+    return (Slot.held_by_request == request_id) | (Slot.booked_request == request_id)
+
+
 async def scheduled_in_window(
     session: AsyncSession, *, window_from: datetime, window_to: datetime
 ) -> list[ScheduleEntry]:
@@ -338,7 +354,10 @@ async def scheduled_in_window(
             BookingRequest.display_name,
             effective.label("starts_at"),
         )
-        .outerjoin(Slot, Slot.id == BookingRequest.slot_id)
+        .outerjoin(
+            Slot,
+            (Slot.id == BookingRequest.slot_id) & _slot_still_belongs(BookingRequest.id),
+        )
         .where(
             BookingRequest.status.in_(SCHEDULE_STATUSES),
             effective >= window_from,
@@ -359,6 +378,10 @@ async def unscheduled_for_admin(session: AsyncSession, *, limit: int = 20) -> li
     next week?" -- so it has neither `scheduled_start` nor a slot, and belongs
     beside the grid rather than nowhere. These are the ones most in need of an
     answer; dropping them would hide exactly the wrong thing.
+
+    A request whose slot lapsed out from under it lands here too, and must: the
+    grid has no honest cell for it either, and this is the exact complement of
+    what the grid draws. Between the two, every live request appears once.
     """
     rows = await session.execute(
         select(
@@ -367,12 +390,16 @@ async def unscheduled_for_admin(session: AsyncSession, *, limit: int = 20) -> li
             BookingRequest.display_name,
             BookingRequest.desired_time_text,
         )
+        .outerjoin(
+            Slot,
+            (Slot.id == BookingRequest.slot_id) & _slot_still_belongs(BookingRequest.id),
+        )
         .where(
             BookingRequest.status.in_(
                 (RequestStatus.pending, RequestStatus.negotiating),
             ),
             BookingRequest.scheduled_start.is_(None),
-            BookingRequest.slot_id.is_(None),
+            Slot.id.is_(None),
         )
         .order_by(BookingRequest.created_at.desc(), BookingRequest.id.desc())
         .limit(limit)
@@ -394,8 +421,15 @@ async def requested_start(session: AsyncSession, request: BookingRequest) -> dat
         return request.scheduled_start
     if request.slot_id is None:
         return None
+    # Only while the slot is still this request's: a hold that lapsed in an
+    # abandoned negotiation leaves the column pointing at a slot the practice
+    # has since offered to somebody else.
     return (
-        await session.execute(select(Slot.starts_at).where(Slot.id == request.slot_id))
+        await session.execute(
+            select(Slot.starts_at).where(
+                Slot.id == request.slot_id, _slot_still_belongs(request.id)
+            )
+        )
     ).scalar_one_or_none()
 
 

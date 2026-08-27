@@ -756,6 +756,19 @@ async def _at(
     )
     db.add(request)
     await db.flush()
+
+    if slot is not None:
+        # The slot side of the relationship, which §7.1 always establishes and
+        # a row built by hand does not. Without it the slot is not this
+        # request's, and the schedule is right to say so (§12.2).
+        slot.status = SlotStatus.booked if scheduled is not None else SlotStatus.held
+        if scheduled is None:
+            slot.held_by_request = request.id
+            slot.hold_expires_at = request.expires_at or datetime.now(UTC) + timedelta(hours=48)
+        else:
+            slot.booked_request = request.id
+        await db.flush()
+
     return request
 
 
@@ -1221,3 +1234,57 @@ async def test_a_pending_request_still_confirms_at_the_slot_it_holds(
     await db.refresh(future_slot)
     assert confirmed.scheduled_start == future_slot.starts_at
     assert future_slot.status is SlotStatus.booked
+
+
+# --- A slot the request no longer holds is not its time (§12.2) -------------
+
+
+async def test_a_lapsed_slot_stops_standing_for_the_time_of_a_request(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """A negotiation goes quiet long enough for the worker to release its hold.
+    The slot goes back on the picker and somebody else may take it -- but
+    `slot_id` still names it, because that is the record of what this client
+    asked for and nothing clears it.
+
+    The grid used to draw the abandoned request at that instant anyway, so the
+    therapist saw two requests at one time and one of them was a ghost.
+    """
+    request = await _submit(db, client, session_type_id, future_slot)
+    await booking.admin_propose(db, request.id, body_text="thursday instead?")
+
+    future_slot.hold_expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    await db.flush()
+    await slot_service.expire_hold(db, future_slot.id)
+
+    assert request.slot_id == future_slot.id, "the record of what they asked for stays"
+    assert await booking.requested_start(db, request) is None
+
+    drawn = await booking.scheduled_in_window(
+        db,
+        window_from=future_slot.starts_at - timedelta(days=1),
+        window_to=future_slot.starts_at + timedelta(days=1),
+    )
+    assert request.uuid not in {e.uuid for e in drawn}
+
+    # And it appears beside the grid instead, where it can still be answered.
+    beside = await booking.unscheduled_for_admin(db)
+    assert request.uuid in {e.uuid for e in beside}
+
+
+async def test_a_slot_the_request_still_holds_is_its_time(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The ordinary case, and the reason the check is on the slot row rather
+    than on `slot_id` being set."""
+    request = await _submit(db, client, session_type_id, future_slot)
+
+    assert await booking.requested_start(db, request) == future_slot.starts_at
+
+    drawn = await booking.scheduled_in_window(
+        db,
+        window_from=future_slot.starts_at - timedelta(days=1),
+        window_to=future_slot.starts_at + timedelta(days=1),
+    )
+    assert request.uuid in {e.uuid for e in drawn}
+    assert request.uuid not in {e.uuid for e in await booking.unscheduled_for_admin(db)}

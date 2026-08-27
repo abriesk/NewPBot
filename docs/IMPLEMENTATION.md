@@ -806,6 +806,8 @@ All under `/admin`, session-authenticated, CSRF-protected.
 
 `start` is a date rather than a week offset so a week is linkable and means the same thing tomorrow. A value that does not parse, or that is not a Monday, is snapped to the Monday of the week it falls in; a missing value means the current week. The grid **MUST NOT** carry the `status` filter: the view is defined by one rule instead, and the filter chips are replaced by the week navigation.
 
+**`slot_id` records the slot a request *asked for*, not one it necessarily still has.** Nothing clears it: a terminal transition releases the slot without forgetting which one it was, and an abandoned negotiation has its hold lapse the same way. So every reader that treats the slot as the request's time — the grid, the list beside it, `requested_start` — **MUST** check that the slot row still names this request in `held_by_request` or `booked_request`. A reader that skipped the check drew an abandoned request in the week at a slot the practice had since offered to somebody else, so the therapist saw two requests in one cell and one of them was not there.
+
 The grid shows a request whose effective start falls in the week — `scheduled_start` when set, otherwise the `starts_at` of the slot in `slot_id` (§7.1 sets `scheduled_start` only at approval, so a held slot is what a pending request has). Statuses shown are `confirmed`, `completed`, `pending`, and `negotiating`. `completed` is included and rendered muted: the worker sweeps a confirmed session to `completed` once its end passes (§14), so a grid without it renders every past week as empty. `rejected`, `expired`, and `cancelled` do not appear.
 
 Requirements:
