@@ -564,12 +564,15 @@ error_event
 | `negotiating` | `client_accept` (proposal names an instant) | `confirmed` | `scheduled_start` = last admin proposal; book matching slot if one exists; create reminders; emit `request.confirmed` |
 | `negotiating` | `client_accept` (proposal is words only) | `negotiating` | Insert `negotiation_message(client, accept)`; emit `request.accepted` so the therapist can put a time to it |
 | `negotiating` | `client_counter` | `negotiating` | Insert `negotiation_message(client, counter)`; emit `request.counter` |
+| `negotiating` | `admin_approve` | `confirmed` | `scheduled_start` = the time given, else the last instant proposed by *either* side; book a matching slot if one is free; create reminders; emit `request.confirmed` |
 | `negotiating` | `admin_propose` | `negotiating` | Insert message; emit `request.proposal` |
 | `negotiating` | `client_decline` / `admin_reject` | `rejected` | Release slot; emit `request.rejected` |
 | `confirmed` | `admin_cancel` | `cancelled` | Release slot; cancel scheduled reminders; emit `request.cancelled` |
 | `confirmed` | `complete` (worker) | `completed` | Release slot booking; no notification |
 
 Any transition not in this table **MUST** raise `InvalidTransition` and change nothing. There is no path from `confirmed` back to `negotiating`.
+
+**The therapist may approve a negotiation outright.** A client who counters with a time has said what suits them; the therapist agreeing is an approval, and making her propose that same time back so the client can accept it a second time is a round trip that says nothing. §10 has always given `request.counter.admin` an `approve` action and §13.2 requires every button to come from this table — so a table without this row made the notification offer something the core refused, which is what the button did: nothing. When she names no time, the last instant proposed by either side is the one meant; a negotiation that never named one has nothing to approve and is still refused.
 
 **A proposal need not name an instant.** §9 prefers a structured time and does not require one, and the Telegram admin panel takes the therapist's words as both — parsed if they parse, kept as the note either way. A proposal of words only is therefore ordinary, not an error, and everything downstream **MUST** handle it: the client's message says what she wrote rather than announcing a time and leaving a blank where it should be, and the client can still agree to it. Agreeing to words cannot confirm anything — there is no instant to put in `scheduled_start`, no reminder to schedule, and nothing for the schedule to draw — so it stays `negotiating` and tells the therapist, who is the one who turns an agreement into a time. Only the *web* form, which has a dedicated time field with a known format, refuses a value it cannot read rather than silently dropping it (§12.2).
 

@@ -623,3 +623,33 @@ async def test_agreeing_to_a_proposal_of_words_reaches_the_therapist(
 
     # And it is her turn: she is the one who turns an agreement into a time.
     assert await booking.whose_turn(db, request.id) is SenderType.admin
+
+
+async def test_the_approve_button_on_a_counter_actually_approves(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """Request, therapist counters, client counters back, therapist taps
+    Approve on the notification.
+
+    §10 gives `request.counter.admin` an approve action and §13.2 requires every
+    button to come from §7.1's table -- which did not allow approving a
+    negotiation. So the notification offered a button the core refused, and
+    tapping it did nothing whatsoever.
+    """
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+
+    await booking.admin_propose(db, request.id, proposed_start=now_utc() + timedelta(days=9))
+    countered = now_utc() + timedelta(days=10)
+    await booking.client_counter(db, request.id, proposed_start=countered, body_text="later?")
+    await notifications.publish(db)
+
+    assert await _rows(db, request.id, "request.counter.admin")
+
+    # chat_id=1 is the admin chat, as TELEGRAM_ADMIN_IDS configures it.
+    reply = await handle(db, Update(chat_id=1, callback_data=f"{kb.APPROVE}:{request.id}"))
+    assert reply is not None
+
+    await db.refresh(request)
+    assert request.status is RequestStatus.confirmed
+    assert request.scheduled_start == countered

@@ -130,7 +130,18 @@ NOTE_MAX_CHARS = 2000
 ALLOWED: dict[RequestStatus, frozenset[str]] = {
     RequestStatus.pending: frozenset({"admin_approve", "admin_propose", "admin_reject", "expire"}),
     RequestStatus.negotiating: frozenset(
-        {"client_accept", "client_counter", "admin_propose", "client_decline", "admin_reject"}
+        {
+            "client_accept",
+            "client_counter",
+            # §7.1: a client who counters with a time has said what suits them,
+            # and the therapist agreeing is an approval. Without this she had to
+            # propose that same time back and wait to be accepted again -- and
+            # both surfaces offered an Approve button that the core refused.
+            "admin_approve",
+            "admin_propose",
+            "client_decline",
+            "admin_reject",
+        }
     ),
     RequestStatus.confirmed: frozenset({"admin_cancel", "complete"}),
     RequestStatus.rejected: frozenset(),
@@ -485,6 +496,25 @@ async def _last_admin_proposal(session: AsyncSession, request_id: int) -> Negoti
     ).scalar_one_or_none()
 
 
+async def _last_proposed_instant(session: AsyncSession, request_id: int) -> datetime | None:
+    """The most recent time either side put forward, if either did (§7.1).
+
+    Deliberately not restricted to the therapist's own proposals: the case this
+    exists for is her approving the time the *client* countered with.
+    """
+    return (
+        await session.execute(
+            select(NegotiationMessage.proposed_start)
+            .where(
+                NegotiationMessage.request_id == request_id,
+                NegotiationMessage.proposed_start.isnot(None),
+            )
+            .order_by(NegotiationMessage.created_at.desc(), NegotiationMessage.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
 async def whose_turn(session: AsyncSession, request_id: int) -> SenderType | None:
     """Derived from the last message's sender, never stored (§6.6).
 
@@ -665,16 +695,28 @@ async def admin_approve(
     request = await _get(session, request_id)
     _guard(request, "admin_approve")
 
-    if scheduled_start is None and request.slot_id is None:
-        # A free-text request has no instant to derive; the admin must name one.
-        raise InvalidTransition("booking_request", request.status.value, "admin_approve")
-
     start = scheduled_start
+    if start is None and request.slot_id is None:
+        # §7.1: approving a negotiation without naming a time means the time
+        # under discussion -- the last one either side put forward. A request
+        # that never had one (free text, or words-only negotiation) still has
+        # nothing to confirm and is refused.
+        start = await _last_proposed_instant(session, request.id)
+        if start is None:
+            raise InvalidTransition("booking_request", request.status.value, "admin_approve")
+
     if request.slot_id is not None:
         booked = await slot_service.book_slot(session, request.slot_id, request.id)
         if start is None:
             start = booked.starts_at
-    assert start is not None  # both branches above establish it
+    elif start is not None:
+        # The agreed time may happen to be a slot the practice offers; if it is,
+        # take it off the picker rather than leave it double-bookable.
+        matching = await _matching_slot(session, start)
+        if matching is not None:
+            await slot_service.book_slot(session, matching, request.id)
+            request.slot_id = matching
+    assert start is not None  # every branch above establishes it
 
     session_type = (
         await session.execute(select(SessionType).where(SessionType.id == request.session_type_id))

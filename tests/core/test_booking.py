@@ -600,6 +600,7 @@ LEGAL: dict[RequestStatus, set[str]] = {
     RequestStatus.negotiating: {
         "client_accept",
         "client_counter",
+        "admin_approve",
         "admin_propose",
         "client_decline",
         "admin_reject",
@@ -1062,3 +1063,77 @@ async def test_a_countered_time_and_the_words_both_reach_the_therapist(
     event = next(e for e in pending(db) if isinstance(e, RequestCounter))
     assert event.proposed_start == when
     assert event.note == "2026-08-29 13:30"
+
+
+# --- Approving a negotiation (§7.1) -----------------------------------------
+
+
+async def test_approving_a_negotiation_takes_the_time_last_put_forward(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """Client requests, therapist counters, client counters back, therapist
+    approves. Her agreeing to the client's time is an approval; making her
+    propose that same time back and be accepted again says nothing.
+
+    Both surfaces offered the Approve button already -- §10 gives
+    `request.counter.admin` the action -- and §7.1 did not allow it, so the
+    button did nothing at all.
+    """
+    request = await _negotiating(db, client, session_type_id, future_slot)
+    countered = LATER + timedelta(hours=2)
+    await booking.client_counter(db, request.id, proposed_start=countered, body_text="later?")
+    drain(db)
+
+    confirmed = await booking.admin_approve(db, request.id)
+
+    assert confirmed.status is RequestStatus.confirmed
+    assert confirmed.scheduled_start == countered, "the client's time, not the therapist's"
+    assert confirmed.confirmed_at is not None
+    assert any(isinstance(e, RequestConfirmed) for e in pending(db))
+
+
+async def test_approving_a_negotiation_with_an_explicit_time_still_wins(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The fallback is for the button, which carries no time. A time she names
+    is the one she meant."""
+    request = await _negotiating(db, client, session_type_id, future_slot)
+    await booking.client_counter(db, request.id, proposed_start=LATER + timedelta(hours=2))
+
+    named = LATER + timedelta(hours=5)
+    confirmed = await booking.admin_approve(db, request.id, scheduled_start=named)
+
+    assert confirmed.scheduled_start == named
+
+
+async def test_a_words_only_negotiation_still_confirms_at_the_slot_it_holds(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """A proposal that names no time does not release the slot (§7.1), so the
+    request is still holding the one the client picked. That is the instant."""
+    request = await _negotiating(db, client, session_type_id, future_slot, proposed=None)
+    await booking.client_counter(db, request.id, body_text="that works")
+
+    confirmed = await booking.admin_approve(db, request.id)
+
+    assert confirmed.scheduled_start == future_slot.starts_at
+
+
+async def test_approving_a_negotiation_with_no_time_and_no_slot_is_refused(
+    db: AsyncSession, client: Client, session_type_id: int
+) -> None:
+    """Nothing to confirm at all: free text throughout, and a session needs an
+    instant (§7.1)."""
+    request = await booking.submit_free_time_request(
+        db,
+        client_id=client.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        desired_time_text="some evening next week?",
+        source_channel=Channel.web,
+    )
+    await booking.admin_propose(db, request.id, body_text="which evening suits?")
+    await booking.client_counter(db, request.id, body_text="thursday maybe")
+
+    with pytest.raises(InvalidTransition):
+        await booking.admin_approve(db, request.id)
