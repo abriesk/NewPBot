@@ -1051,3 +1051,168 @@ async def test_a_slot_taken_since_the_panel_was_drawn_is_refused(
 
     await db.refresh(request)
     assert request.status is RequestStatus.pending, "nothing proposed"
+
+
+# --- The client's own picker (§12.1, §13.1) ---------------------------------
+
+
+async def test_a_client_answering_a_proposal_is_offered_the_picker(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """Item 5 gave the web a `datetime-local` and left Telegram with a format
+    hint, so a client on a phone was the last person still typing timestamps."""
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+    await booking.admin_propose(db, request.id, proposed_start=now_utc() + timedelta(days=9))
+
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=f"counter:{request.id}"))
+    assert reply is not None
+    assert f"{kb.COUNTER_MONTHS}:{request.id}" in _callbacks(reply)
+    # Typing survives beneath it: §9 keeps the words either way.
+    assert await flow.current_step(db, tg.id, Channel.telegram) is Step.entering_counter
+
+
+async def test_the_client_picker_looks_two_months_ahead_not_three(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """A suggestion four months out is not one she can act on, and a shorter row
+    nudges toward something sooner. Hers is three (§13.2)."""
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+    await booking.admin_propose(db, request.id, proposed_start=now_utc() + timedelta(days=9))
+
+    reply = await handle(
+        db, Update(chat_id=CHAT, callback_data=f"{kb.COUNTER_MONTHS}:{request.id}")
+    )
+    assert reply is not None
+    months = [c for c in _callbacks(reply) if c.startswith(f"{kb.COUNTER_DAYS}:")]
+    assert len(months) == 2
+    assert kb.ADMIN_PICKER.months_ahead == 3
+
+
+async def test_the_client_picker_never_shows_the_therapists_diary(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """Marking her filled hours would tell a client when *other people* have
+    sessions, and quietly omitting them would say the same by the gap. So all
+    twenty-four are offered, whatever her day looks like."""
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+    await booking.admin_propose(db, request.id, proposed_start=now_utc() + timedelta(days=9))
+
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    tz = request.client_timezone or tg.timezone or practice.timezone
+    day = (now_utc().astimezone(ZoneInfo(tz)) + timedelta(days=9)).date()
+
+    # A session she has confirmed and an hour she has blocked, both on that day.
+    busy = datetime.combine(day, time(14, 0), tzinfo=ZoneInfo(practice.timezone))
+    db.add(
+        BookingRequest(
+            practice_id=practice.id,
+            client_id=tg.id,
+            session_type_id=session_type_id,
+            modality=Modality.online,
+            status=RequestStatus.confirmed,
+            source_channel=Channel.web,
+            scheduled_start=busy.astimezone(UTC),
+            confirmed_at=now_utc(),
+        )
+    )
+    await db.flush()
+    assert await booking.taken_hours_on(
+        db, day=day, tz=practice.timezone
+    ), "the therapist really does have something that day"
+
+    reply = await handle(
+        db,
+        Update(
+            chat_id=CHAT,
+            callback_data=f"{kb.COUNTER_HOURS}:{request.id}:{day.isoformat()}",
+        ),
+    )
+    assert reply is not None
+
+    offered = [c for c in _callbacks(reply) if c.startswith(f"{kb.COUNTER_AT}:")]
+    assert len(offered) == 24, "every hour, so the gaps say nothing"
+    labels = [b.text for row in reply.keyboard.inline_keyboard for b in row]
+    assert not any(kb.TAKEN_MARK in label for label in labels)
+
+
+async def test_the_client_picker_reads_in_their_own_timezone(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """DESIGN.md §8: the therapist picks in her clock, a client in theirs."""
+    from app.core.services.clients import set_client_timezone
+
+    tg = await _tg_client(db)
+    await set_client_timezone(db, tg.id, "Asia/Tokyo")
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+    request.client_timezone = "Asia/Tokyo"
+    await db.flush()
+    await booking.admin_propose(db, request.id, proposed_start=now_utc() + timedelta(days=9))
+
+    day = (now_utc().astimezone(ZoneInfo("Asia/Tokyo")) + timedelta(days=10)).date()
+    await handle(
+        db,
+        Update(
+            chat_id=CHAT,
+            callback_data=f"{kb.COUNTER_AT}:{request.id}:{day.isoformat()}T18",
+        ),
+    )
+
+    last = (
+        await db.execute(
+            select(NegotiationMessage)
+            .where(NegotiationMessage.request_id == request.id)
+            .order_by(NegotiationMessage.id.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+    assert last.kind is NegotiationKind.counter
+    assert last.proposed_start is not None
+    local = last.proposed_start.astimezone(ZoneInfo("Asia/Tokyo"))
+    assert (local.date(), local.hour) == (day, 18)
+
+
+async def test_the_client_picker_speaks_the_clients_language(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    """§15: the admin surface is English and never translated; a client's is
+    never English by accident. The month names come from the catalogue the slot
+    picker already uses."""
+    from app.core.services.translations import get_text
+
+    tg = await _tg_client(db)  # /start chose ru
+    assert tg.language == "ru"
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+    await booking.admin_propose(db, request.id, proposed_start=now_utc() + timedelta(days=9))
+
+    reply = await handle(
+        db, Update(chat_id=CHAT, callback_data=f"{kb.COUNTER_MONTHS}:{request.id}")
+    )
+    assert reply is not None
+
+    this_month = now_utc().date().month
+    russian = await get_text(db, "ru", f"date.month.{this_month}")
+    labels = [b.text for row in reply.keyboard.inline_keyboard for b in row]
+    assert any(russian in label for label in labels), labels
+    assert reply.text == await get_text(db, "ru", "request.counter.pick_month")
+
+
+async def test_with_free_text_off_the_client_gets_no_picker(
+    db: AsyncSession, session_type_id: int, future_slot: Slot, practice: Practice
+) -> None:
+    """The picker is the free-text half in another shape, so it sits behind the
+    same gate -- otherwise switching words off would leave the way in open."""
+    practice.fallback_to_negotiation = False
+    await db.flush()
+
+    tg = await _tg_client(db)
+    request = await _book(db, tg, session_type_id, future_slot, Channel.telegram)
+    await booking.admin_propose(db, request.id, proposed_start=now_utc() + timedelta(days=9))
+
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=f"counter:{request.id}"))
+    assert reply is not None
+    offered = _callbacks(reply)
+    assert f"{kb.COUNTER_MONTHS}:{request.id}" not in offered
+    assert f"{kb.COUNTER_WAITLIST}:{request.id}" in offered

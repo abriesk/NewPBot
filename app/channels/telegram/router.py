@@ -971,8 +971,9 @@ async def _counter_options(
 
     The same question the web asks and the same gate on it, because a client
     answering a proposal on a phone and one answering it in a browser are being
-    asked the same thing. There is no date picker in a chat, so where the web
-    shows one this keeps the typed format and says what it looks like.
+    asked the same thing -- and where the web shows a `datetime-local`, this
+    offers the picker §13.2 gives the therapist. Typing survives beneath both,
+    for `18:30` and for the words §9 keeps either way.
     """
     practice = await get_practice(session)
     tz = request.client_timezone or client.timezone or practice.timezone
@@ -1010,6 +1011,14 @@ async def _counter_options(
         )
         lines.append(await get_text(session, client.language, "intent.request.counter.client.ask"))
         lines.append(await get_text(session, client.language, "request.counter.time_hint"))
+        extra.append(
+            [
+                (
+                    await get_text(session, client.language, "request.counter.other_time"),
+                    f"{kb.COUNTER_MONTHS}:{request.id}",
+                )
+            ]
+        )
     else:
         await flow.clear(session, client.id, Channel.telegram)
         extra.append(
@@ -1032,6 +1041,94 @@ async def _counter_options(
             extra=extra,
         ),
     )
+
+
+#: §12.1's picker screens, reached the same way as §13.2's and drawn by the same
+#: builders.
+_COUNTER_PICKER_SCREENS = frozenset(
+    {kb.COUNTER_MONTHS, kb.COUNTER_DAYS, kb.COUNTER_HOURS, kb.COUNTER_AT}
+)
+
+
+async def _client_picker(session: AsyncSession, client: Client) -> kb.Picker:
+    """§12.1's picker, written in the client's own language.
+
+    Two months rather than the therapist's three: a time four months out is not
+    a suggestion she can act on. `taken` is never passed to it -- marking her
+    filled hours here would tell a client when other people have sessions, and
+    omitting them would say the same thing by the gap.
+    """
+    lang = client.language
+    return kb.Picker(
+        days=kb.COUNTER_DAYS,
+        hours=kb.COUNTER_HOURS,
+        at=kb.COUNTER_AT,
+        months=kb.COUNTER_MONTHS,
+        cancel=kb.COUNTER,
+        months_ahead=2,
+        month_names={
+            number: await get_text(session, lang, f"date.month.{number}")
+            for number in range(1, 13)
+        },
+        weekdays=[
+            await get_text(session, lang, f"date.weekday.{number}") for number in range(7)
+        ],
+        back_to_months=await get_text(session, lang, "request.counter.back_months"),
+        back_to_days=await get_text(session, lang, "request.counter.back_days"),
+        cancel_label=await get_text(session, lang, "common.cancel"),
+    )
+
+
+async def _counter_picker(
+    session: AsyncSession, client: Client, request: BookingRequest, action: str, rest: str
+) -> Reply:
+    """§12.1's month -> day -> hour, in the client's own timezone."""
+    practice = await get_practice(session)
+    tz = request.client_timezone or client.timezone or practice.timezone
+    today = now_utc().astimezone(ZoneInfo(tz)).date()
+    picker = await _client_picker(session, client)
+
+    if action == kb.COUNTER_MONTHS:
+        return Reply(
+            await get_text(session, client.language, "request.counter.pick_month"),
+            keyboard=kb.months_keyboard(picker, request.id, today),
+        )
+
+    if action == kb.COUNTER_DAYS:
+        try:
+            year, month = (int(part) for part in rest.split("-", 1))
+            date(year, month, 1)
+        except ValueError:
+            return Reply(await get_text(session, client.language, "common.error.generic"))
+        return Reply(
+            await get_text(session, client.language, "request.counter.pick_day"),
+            keyboard=kb.days_keyboard(picker, request.id, year, month, today=today),
+        )
+
+    if action == kb.COUNTER_HOURS:
+        try:
+            day = date.fromisoformat(rest)
+        except ValueError:
+            return Reply(await get_text(session, client.language, "common.error.generic"))
+        # No `taken`: see `_client_picker`.
+        return Reply(
+            await get_text(session, client.language, "request.counter.pick_hour"),
+            keyboard=kb.hours_keyboard(picker, request.id, day),
+        )
+
+    # kb.COUNTER_AT
+    when = _local_hour(rest, tz)
+    if when is None:
+        return Reply(await get_text(session, client.language, "common.error.generic"))
+
+    await flow.clear(session, client.id, Channel.telegram)
+    try:
+        await booking.client_counter(session, request.id, proposed_start=when)
+    except DomainError:
+        return Reply(await get_text(session, client.language, "common.error.generic"))
+
+    await notifications.publish(session)
+    return Reply(await get_text(session, client.language, "intent.request.counter.client.sent"))
 
 
 async def _counter_with_slot(
@@ -1072,19 +1169,19 @@ async def _negotiation_action(
     A refusal is answered with an explanation rather than silence -- the client
     pressed a button and deserves to know it did nothing.
     """
-    # §13.1: a slot tapped in answer to a proposal carries both ids, so the
-    # button still works when the parked flow has since been cleared.
+    # §13.1: a slot tapped in answer to a proposal carries both ids, and §12.1's
+    # picker carries its answer so far, so the button still works when the
+    # parked flow has since been cleared.
+    head, _, rest = argument.partition(":")
     slot_id: int | None = None
     if action == kb.COUNTER_SLOT:
-        head, _, tail = argument.partition(":")
-        argument = head
         try:
-            slot_id = int(tail)
+            slot_id = int(rest)
         except ValueError:
             return None
 
     try:
-        request_id = int(argument)
+        request_id = int(head)
     except ValueError:
         return None
 
@@ -1097,6 +1194,9 @@ async def _negotiation_action(
 
     if action == kb.COUNTER_SLOT and slot_id is not None:
         return await _counter_with_slot(session, client, request, slot_id)
+
+    if action in _COUNTER_PICKER_SCREENS:
+        return await _counter_picker(session, client, request, action, rest)
 
     if action == kb.COUNTER_WAITLIST:
         # §12.1: the way out where a counter may not be words.
@@ -1228,7 +1328,7 @@ async def _propose_screen(
     if action == kb.PROPOSE_MONTHS:
         return Reply(
             f"Which month? Times are in {practice.timezone}.",
-            keyboard=kb.propose_months_keyboard(request.id, today),
+            keyboard=kb.months_keyboard(kb.ADMIN_PICKER, request.id, today),
             edit=True,
         )
 
@@ -1240,7 +1340,7 @@ async def _propose_screen(
             return await _admin_request(session, request, toast="That month is not a month.")
         return Reply(
             f"{date(year, month, 1):%B %Y}. Which day?",
-            keyboard=kb.propose_days_keyboard(request.id, year, month, today=today),
+            keyboard=kb.days_keyboard(kb.ADMIN_PICKER, request.id, year, month, today=today),
             edit=True,
         )
 
@@ -1252,7 +1352,7 @@ async def _propose_screen(
         taken = await booking.taken_hours_on(session, day=day, tz=practice.timezone)
         return Reply(
             f"{day:%A %d %B}. Which hour? Marked ones already have something in them.",
-            keyboard=kb.propose_hours_keyboard(request.id, day, taken),
+            keyboard=kb.hours_keyboard(kb.ADMIN_PICKER, request.id, day, taken),
             edit=True,
         )
 

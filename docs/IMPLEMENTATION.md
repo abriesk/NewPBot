@@ -929,7 +929,15 @@ A message whose text exactly matches a main-keyboard label is **navigation, not 
 
 Multi-step input state is stored in the database against the client, **not** in aiogram FSM memory, so a restart does not lose a half-finished booking.
 
-**Counter offers the free slots here too**, under §12.1's rules — the same slots, the same gate, the same waitlist exit. A client answering a proposal on a phone and one answering it in a browser are being asked the same question, and a rule that lives in one adapter is one the other gets wrong. The slot buttons **MUST** carry their own callback action rather than the booking picker's `slot:<id>`: a tap in a negotiation means "I suggest this", not "hold this for me", and one action doing both would depend on parked flow state to tell them apart. There is no date picker in a chat, so where §12.1 shows one Telegram keeps the typed format and its hint.
+**Counter offers the free slots here too**, under §12.1's rules — the same slots, the same gate, the same waitlist exit. A client answering a proposal on a phone and one answering it in a browser are being asked the same question, and a rule that lives in one adapter is one the other gets wrong. The slot buttons **MUST** carry their own callback action rather than the booking picker's `slot:<id>`: a tap in a negotiation means "I suggest this", not "hold this for me", and one action doing both would depend on parked flow state to tell them apart.
+
+**Where §12.1 shows a `datetime-local`, Telegram shows §13.2's picker.** The same month → day → hour screens and the same builders, because the question is the same one; typing stays beneath it for `18:30` and for the words §9 keeps either way. It differs from the therapist's in three ways, and each is the point rather than an accident:
+
+- **It never shows what she has booked.** `taken` is not passed and **MUST NOT** be: marking her filled hours would tell a client when *other people* have sessions, and quietly omitting those hours would say the same thing by the gap it left. All twenty-four are offered. A client may therefore suggest an hour she already has something in, and she declines or proposes again — an ordinary round trip, and a far better trade than leaking her diary.
+- **Two months ahead, not three.** A suggestion four months out is not one she can act on, and a shorter row nudges toward something sooner.
+- **The client's timezone and the client's language.** Month and weekday names come from `date.month.*` and `date.weekday.*`, the keys the slot picker's day headings already use (§15) — the admin's come from `calendar` and are never translated (DESIGN.md §11).
+
+It sits behind `fallback_to_negotiation` with the typed counter: the picker is the free-text half in another shape, so switching words off must not leave the way in open.
 
 ### 13.2 Admin
 
