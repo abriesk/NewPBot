@@ -32,6 +32,7 @@ from app.core.models import (
     Practice,
     SessionType,
     Slot,
+    WaitlistEntry,
 )
 from app.main import create_app
 
@@ -119,6 +120,13 @@ async def web_slot(committed: AsyncSession) -> AsyncIterator[int]:
             delete(OutboxMessage).where(OutboxMessage.client_id.in_(client_ids))
         )
         await committed.execute(delete(AuthToken).where(AuthToken.client_id.in_(client_ids)))
+        # §12.1's way out leaves one of these, and `waitlist_entry.client_id`
+        # has no ON DELETE -- so a client who took it cannot be removed until
+        # the entry is. Without this the *next* test finds two clients on the
+        # shared address and fails somewhere unrelated.
+        await committed.execute(
+            delete(WaitlistEntry).where(WaitlistEntry.client_id.in_(client_ids))
+        )
 
     if doomed:
         await committed.execute(delete(BookingRequest).where(BookingRequest.id.in_(doomed)))
@@ -128,6 +136,25 @@ async def web_slot(committed: AsyncSession) -> AsyncIterator[int]:
         await committed.execute(delete(Identity).where(Identity.client_id.in_(client_ids)))
         await committed.execute(delete(Client).where(Client.id.in_(client_ids)))
     await committed.commit()
+
+
+@pytest_asyncio.fixture
+async def free_text_off(committed: AsyncSession) -> AsyncIterator[None]:
+    """§12.1's gate closed, and reliably reopened.
+
+    Restored in teardown rather than at the end of a test body: these tests
+    commit like production, so a test that fails before its own cleanup leaves
+    the practice switched over for every test after it -- which then fails
+    somewhere with no connection to the setting at all.
+    """
+    await committed.execute(update(Practice).values(fallback_to_negotiation=False))
+    await committed.commit()
+    try:
+        yield
+    finally:
+        await committed.rollback()
+        await committed.execute(update(Practice).values(fallback_to_negotiation=True))
+        await committed.commit()
 
 
 @pytest.fixture
@@ -868,3 +895,215 @@ async def test_onsite_selection_shows_the_clinic_address(
     finally:
         practice.clinic_onsite_url = None
         await committed.commit()
+
+
+# --- Answering a proposal on the web (§12.1) --------------------------------
+
+
+async def _proposed(web: TestClient, committed: AsyncSession, web_slot: int) -> BookingRequest:
+    """A booked request the therapist has proposed another time for, with the
+    browser signed in as the client who made it."""
+    from app.core.services import booking
+    from app.core.services.clients import issue_token
+
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+    web.get("/book")
+    web.post(
+        "/book/hold",
+        data={
+            "csrf_token": _csrf(web),
+            "slot_id": web_slot,
+            "session_type_id": session_type_id,
+            "modality": "online",
+            "tz": "Europe/Moscow",
+        },
+        follow_redirects=False,
+    )
+    web.get("/book/details")
+    web.post("/book", data={"csrf_token": _csrf(web), "problem": "x", "email": EMAIL})
+    await committed.rollback()
+
+    identity = (
+        await committed.execute(select(Identity).where(Identity.external_id == EMAIL))
+    ).scalar_one()
+    request = (
+        await committed.execute(
+            select(BookingRequest).where(BookingRequest.client_id == identity.client_id)
+        )
+    ).scalar_one()
+
+    # A proposal for another time, which releases the held slot (§7.1) and puts
+    # it back among the times the client can be offered.
+    await booking.admin_propose(
+        committed, request.id, proposed_start=datetime.now(UTC) + timedelta(days=9)
+    )
+    raw = await issue_token(
+        committed, TokenPurpose.view_request, client_id=identity.client_id
+    )
+    await committed.commit()
+
+    web.get(f"/r/{request.uuid}", params={"token": raw})
+    return request
+
+
+async def test_a_client_answering_a_proposal_is_offered_the_free_slots(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """The reported fault: one text input and no hint, so a client with no
+    reason to guess `2026-09-02 18:00` wrote a sentence, no instant was
+    recorded, and the therapist had to turn the words into a time by hand."""
+    request = await _proposed(web, committed, web_slot)
+
+    page = web.get(f"/r/{request.uuid}")
+    assert page.status_code == 200
+    assert f'name="slot_id" value="{web_slot}"' in page.text
+    # And a picker for a time of their own, since the practice accepts one.
+    assert 'type="datetime-local"' in page.text
+
+
+async def test_countering_with_a_slot_records_its_instant(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    from app.core.enums import NegotiationKind
+    from app.core.models import NegotiationMessage
+
+    request = await _proposed(web, committed, web_slot)
+
+    posted = web.post(
+        f"/r/{request.uuid}/counter",
+        data={"csrf_token": _csrf(web), "slot_id": web_slot},
+        follow_redirects=False,
+    )
+    assert posted.status_code == 303
+    assert "refused" not in (posted.headers.get("location") or "")
+
+    await committed.rollback()
+    slot = (await committed.execute(select(Slot).where(Slot.id == web_slot))).scalar_one()
+    last = (
+        await committed.execute(
+            select(NegotiationMessage)
+            .where(NegotiationMessage.request_id == request.id)
+            .order_by(NegotiationMessage.id.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+    assert last.kind is NegotiationKind.counter
+    assert last.proposed_start == slot.starts_at
+    # §12.1: nothing is held by a counter.
+    assert slot.status is SlotStatus.available
+
+
+async def test_countering_with_the_picker_records_the_clients_own_time(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """A `datetime-local` is read in the client's own zone, not the practice's:
+    the picker sits under times already rendered in it (DESIGN.md §8)."""
+    from app.core.models import NegotiationMessage
+
+    request = await _proposed(web, committed, web_slot)
+
+    web.post(
+        f"/r/{request.uuid}/counter",
+        data={
+            "csrf_token": _csrf(web),
+            "proposed_start": "2027-05-14T16:30",
+            "body": "afternoons do not work for me",
+        },
+        follow_redirects=False,
+    )
+
+    await committed.rollback()
+    last = (
+        await committed.execute(
+            select(NegotiationMessage)
+            .where(NegotiationMessage.request_id == request.id)
+            .order_by(NegotiationMessage.id.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+    assert last.proposed_start is not None
+    assert last.proposed_start == datetime(2027, 5, 14, 16, 30, tzinfo=ZoneInfo("Europe/Moscow"))
+    # §9 keeps the words either way.
+    assert last.body_text == "afternoons do not work for me"
+
+
+async def test_a_slot_taken_since_the_page_was_drawn_is_refused(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """§12.1: a proposal for a time that is no longer an opening is worse than
+    no proposal, and §12.2 requires a refusal to say so."""
+    from sqlalchemy import func
+
+    from app.core.models import NegotiationMessage
+
+    request = await _proposed(web, committed, web_slot)
+    # Read off what the assertions need: the rollback below expires the object,
+    # and an expired attribute lazy-loads, which outside the async context is
+    # what MissingGreenlet means.
+    request_id, request_uuid = request.id, request.uuid
+
+    await committed.execute(
+        update(Slot).where(Slot.id == web_slot).values(status=SlotStatus.blocked)
+    )
+    await committed.commit()
+
+    counted = (
+        select(func.count())
+        .select_from(NegotiationMessage)
+        .where(NegotiationMessage.request_id == request_id)
+    )
+    before = (await committed.execute(counted)).scalar_one()
+
+    posted = web.post(
+        f"/r/{request_uuid}/counter",
+        data={"csrf_token": _csrf(web), "slot_id": web_slot},
+        follow_redirects=False,
+    )
+    assert posted.status_code == 303
+    assert "refused=1" in (posted.headers.get("location") or "")
+
+    await committed.rollback()
+    assert (await committed.execute(counted)).scalar_one() == before
+
+
+async def test_with_free_text_off_the_page_offers_the_waitlist_instead(
+    web: TestClient, web_slot: int, committed: AsyncSession, free_text_off: None
+) -> None:
+    """§12.1: accept and decline must not be the only replies, or a client who
+    cannot make the proposed time has to reject their own request to say so."""
+    request = await _proposed(web, committed, web_slot)
+
+    page = web.get(f"/r/{request.uuid}")
+    assert f"/r/{request.uuid}/waitlist" in page.text
+    assert 'type="datetime-local"' not in page.text
+    # The slots are still offered; only the words are gated.
+    assert f'name="slot_id" value="{web_slot}"' in page.text
+
+    posted = web.post(
+        f"/r/{request.uuid}/waitlist",
+        data={"csrf_token": _csrf(web)},
+        follow_redirects=False,
+    )
+    assert posted.status_code == 303
+
+    # `expire_on_commit=False` means the identity map would hand back the same
+    # object with the status it had before the app committed -- `expunge_all`
+    # is what makes the next read a read.
+    await committed.rollback()
+    committed.expunge_all()
+    closed = (
+        await committed.execute(select(BookingRequest).where(BookingRequest.id == request.id))
+    ).scalar_one()
+    assert closed.status is RequestStatus.rejected
+    entries = (
+        (
+            await committed.execute(
+                select(WaitlistEntry).where(WaitlistEntry.client_id == closed.client_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert entries, "they asked to be told when something opens"

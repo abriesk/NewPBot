@@ -116,6 +116,15 @@ CATALOGUE: dict[str, IntentSpec] = {
         body_key="intent.waitlist.joined.client.body",
         email_subject_key="email.subject.request_update",
     ),
+    # §12.1: a client walking away from a negotiation reached her as silence,
+    # because both sides emitted the same rejection event and neither carried an
+    # admin envelope. No actions: `rejected` is terminal in §7.1, and no admin
+    # surface offers what the core would refuse.
+    "request.declined.admin": IntentSpec(
+        key="request.declined.admin",
+        body_key="admin.intent.request.declined.admin.body",
+        email_subject_key="email.subject.request_update",
+    ),
     "request.note.admin": IntentSpec(
         key="request.note.admin",
         body_key="admin.intent.request.note.admin.body",
@@ -213,6 +222,7 @@ def spec_for(intent_key: str) -> IntentSpec:
 _NAMED_BODIES = {
     "request.submitted.admin": "admin.intent.request.submitted.admin.body",
     "request.note.admin": "admin.intent.request.note.admin.body",
+    "request.declined.admin": "admin.intent.request.declined.admin.body",
 }
 
 

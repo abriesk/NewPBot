@@ -43,6 +43,14 @@ ACCEPT = "accept"
 COUNTER = "counter"
 DECLINE = "decline"
 
+#: §13.1: a slot tapped while answering a proposal. Its own action rather than
+#: the booking picker's `SLOT`, because a tap here means "I suggest this", not
+#: "hold this for me" -- and one action doing both would have to consult parked
+#: flow state to know which it was.
+COUNTER_SLOT = "cslot"
+#: §12.1's way out where a counter may not be words.
+COUNTER_WAITLIST = "cwait"
+
 #: The admin actions §13.2 keeps on the phone.
 APPROVE = "approve"
 PROPOSE = "propose"
@@ -58,7 +66,7 @@ PANEL_WAITLIST = "awl"
 PANEL_AVAILABILITY = "aavail"
 PANEL_SKIP = "askip"
 
-CLIENT_ACTIONS = frozenset({ACCEPT, COUNTER, DECLINE})
+CLIENT_ACTIONS = frozenset({ACCEPT, COUNTER, DECLINE, COUNTER_SLOT, COUNTER_WAITLIST})
 ADMIN_ACTIONS = frozenset(
     {
         APPROVE,
@@ -148,7 +156,13 @@ def timezone_keyboard(options: list[tuple[str, str]]) -> InlineKeyboardMarkup:
 
 
 def slot_keyboard(
-    slots: list[SlotView], tz: str, day_labels: dict[str, str]
+    slots: list[SlotView],
+    tz: str,
+    day_labels: dict[str, str],
+    *,
+    action: str = SLOT,
+    prefix: str = "",
+    extra: list[list[tuple[str, str]]] | None = None,
 ) -> InlineKeyboardMarkup:
     """§13.1 step 6: grouped by day, times in the client's timezone.
 
@@ -159,6 +173,11 @@ def slot_keyboard(
     already written because this module is synchronous and holds no session,
     and a translated name needs both (§15) -- which is why the headings used to
     come out of `strftime` in English whatever the client's language was.
+
+    `action` and `prefix` let the same picker mean two things (§13.1): booking a
+    slot, and suggesting one in answer to a proposal. `extra` appends rows
+    beneath -- the waitlist button, where §12.1's gate leaves nothing else to
+    offer.
     """
     zone = ZoneInfo(tz)
     by_day: dict[str, list[SlotView]] = defaultdict(list)
@@ -177,11 +196,13 @@ def slot_keyboard(
                 [
                     InlineKeyboardButton(
                         text=slot.starts_at_utc.astimezone(zone).strftime("%H:%M"),
-                        callback_data=f"{SLOT}:{slot.id}",
+                        callback_data=f"{action}:{prefix}{slot.id}",
                     )
                     for slot in times[start : start + 3]
                 ]
             )
+    for row in extra or ():
+        rows.append([InlineKeyboardButton(text=label, callback_data=data) for label, data in row])
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 

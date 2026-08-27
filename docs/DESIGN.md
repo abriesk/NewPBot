@@ -506,7 +506,7 @@ wording is written there as the work is done, not in advance. An entry leaves
 this list when it is fixed: the reasoning goes to §12.2 or wherever the rule now
 lives, so what is left here is what is left to do.
 
-Four are already gone. The request page offered all four actions whatever the
+Five are already gone. The request page offered all four actions whatever the
 status, so Cancel on a negotiation could only end in a refusal; §7.1 now decides
 what that page renders, as §13.2 has always required of the Telegram panel. The
 requests list could not say how to reach anybody, which §12.2 had already argued
@@ -533,6 +533,23 @@ grouping that was asked for turned out to exist already — a `client` row *is*
 the grouping of somebody's Telegram and email identities — so what was missing
 was never the grouping but the bookings, and a page framed around the person
 rather than around a data-subject request.
+
+The fifth was the blank box a client got when asked to suggest a time. It now
+offers the practice's free slots first, then a picker for a time of their own —
+and the therapist gets an instant she can approve rather than a sentence she has
+to turn into one. `fallback_to_negotiation` gates the words, as it gates them on
+the booking path, and where it closes them off the client is offered the
+waitlist instead: with no slots free and no words allowed, accept and decline
+would be the only replies, and somebody who simply cannot make the proposed time
+would have had to reject their own request to say so.
+
+That last part turned up something separate and worse. **A client declining
+reached the therapist as silence** — `client_decline` and `admin_reject` emitted
+the same event and neither carried an admin notification at all, so a
+negotiation the client walked away from was something she would have found out
+by noticing the request had stopped moving. The event now says which side closed
+it, which is the only thing that could distinguish news from her own action read
+back to her.
 
 **What the contact column shows, and what it could show.** It shows identities
 — where a message would actually land, and for an address whether §13.3 would
@@ -580,19 +597,6 @@ between people is not a recoverable mistake, and an admin merge is that mistake
 with a button. It wants an audit entry, a confirmation that names both people,
 and a decision about what happens to the losing row — none of which is worth
 designing before the duplicate case has actually been hit. Revisit when it has.
-
-**The client is asked for a time and handed a blank box.** A counter is one
-free-text input with a placeholder. The core prefers a structured time and keeps
-the words either way (§9), so the parser runs over whatever is typed — and a
-client with no reason to guess `2026-08-27 15:00` writes a sentence, no instant
-is recorded, and the therapist turns the words into a time by hand. The form
-should offer the free slots first, since a slot the practice is already holding
-open is the answer that needs no negotiation at all, and keep free text beside
-them, gated on `fallback_to_negotiation` — the setting that already decides
-whether words are an acceptable answer — with a line saying how a time is best
-written. `list_available_slots` is the read. The same question is asked on
-Telegram, where the slot keyboard exists already and the hint has to carry the
-format instead. New keys in all three locale files.
 
 **The therapist has to type an ISO timestamp to propose a time.** The panel's
 propose prompt asks for `YYYY-MM-DD HH:MM`, and the parser accepts three

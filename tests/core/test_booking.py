@@ -31,6 +31,7 @@ from app.core.events import (
     RequestConfirmed,
     RequestCounter,
     RequestNote,
+    RequestRejected,
     RequestSubmitted,
     drain,
     pending,
@@ -1336,3 +1337,74 @@ async def test_a_slot_the_request_still_holds_is_its_time(
     )
     assert request.uuid in {e.uuid for e in drawn}
     assert request.uuid not in {e.uuid for e in await booking.unscheduled_for_admin(db)}
+
+
+async def test_a_rejection_says_which_side_did_it(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """§12.1. Both sides emitted this identically, so a client walking away from
+    a negotiation reached the therapist as silence -- there was nothing in the
+    event to notify her on that would not also have notified her about her own
+    rejections."""
+    declined = await _negotiating(db, client, session_type_id, future_slot)
+    drain(db)
+    await booking.client_decline(db, declined.id)
+    events = [e for e in pending(db) if isinstance(e, RequestRejected)]
+    assert [e.by for e in events] == [ActorType.client]
+    assert [e.to_waitlist for e in events] == [False]
+
+    rejected = await _negotiating(db, client, session_type_id, future_slot)
+    drain(db)
+    await booking.admin_reject(db, rejected.id)
+    events = [e for e in pending(db) if isinstance(e, RequestRejected)]
+    assert [e.by for e in events] == [ActorType.admin]
+
+
+async def test_the_waitlist_way_out_closes_the_request_and_leaves_an_entry(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """§12.1: where a counter may not be words and no slots are free, accept and
+    decline would be the only replies -- so a client who cannot make the
+    proposed time would have to reject their own request to say so.
+
+    Not a new transition. It *is* `client_decline`; the entry is what they get
+    in exchange for it.
+    """
+    from app.core.models import WaitlistEntry
+
+    request = await booking.submit_slot_request(
+        db,
+        client_id=client.id,
+        slot_id=future_slot.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        source_channel=Channel.web,
+        problem_text="what I would like to work on",
+        contact_note="phone after six",
+    )
+    await booking.admin_propose(db, request.id, proposed_start=LATER)
+
+    declined, entry = await booking.client_decline_to_waitlist(db, request.id)
+
+    assert declined.status is RequestStatus.rejected
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.available, "the slot goes back on the picker"
+
+    stored = (
+        await db.execute(select(WaitlistEntry).where(WaitlistEntry.id == entry.id))
+    ).scalar_one()
+    # Their own words go with them: an anonymous line on the waitlist page is
+    # not something the therapist can act on.
+    assert stored.problem_text == "what I would like to work on"
+    assert stored.contact_note == "phone after six"
+
+
+async def test_the_waitlist_way_out_is_refused_where_a_decline_would_be(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """§7.1 is the only authority on what may close a request, and this closes
+    one. A pending request has no proposal to walk away from."""
+    request = await _submit(db, client, session_type_id, future_slot)
+
+    with pytest.raises(InvalidTransition):
+        await booking.client_decline_to_waitlist(db, request.id)

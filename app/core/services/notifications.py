@@ -29,7 +29,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import get_settings
-from app.core.enums import Channel, Modality, OutboxStatus, TokenPurpose
+from app.core.enums import ActorType, Channel, Modality, OutboxStatus, TokenPurpose
 from app.core.events import (
     DomainEvent,
     RequestAccepted,
@@ -272,7 +272,7 @@ async def envelopes_for(session: AsyncSession, event: DomainEvent) -> list[Envel
 
     if isinstance(event, RequestRejected):
         request = await _request(session, event.request_id)
-        return [
+        envelopes = [
             Envelope(
                 "request.rejected.client",
                 Recipient.client,
@@ -281,6 +281,31 @@ async def envelopes_for(session: AsyncSession, event: DomainEvent) -> list[Envel
                 dedupe_scope=f"rejected:{request.id}",
             )
         ]
+        if event.to_waitlist:
+            # §12.1: the client asked for the waitlist and is told they are on
+            # it. Telling them their request was rejected, for something they
+            # chose, would be the wrong sentence about their own action -- and
+            # `waitlist.joined.admin` below already reaches her.
+            return []
+        if event.by is ActorType.client:
+            # §12.1: a client walking away from a negotiation reached her as
+            # silence, and she would have found out by noticing the request had
+            # stopped moving. Her own rejection is not news to her, which is
+            # why this is not sent for both.
+            envelopes.append(
+                Envelope(
+                    "request.declined.admin",
+                    Recipient.admin,
+                    {
+                        "uuid": str(request.uuid),
+                        "name": request.display_name
+                        or await _client_name(session, request.client_id),
+                    },
+                    request_id=request.id,
+                    dedupe_scope=f"declined-admin:{request.id}",
+                )
+            )
+        return envelopes
 
     if isinstance(event, RequestExpired):
         request = await _request(session, event.request_id)
