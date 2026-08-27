@@ -564,13 +564,15 @@ error_event
 | `negotiating` | `client_accept` (proposal names an instant) | `confirmed` | `scheduled_start` = last admin proposal; book matching slot if one exists; create reminders; emit `request.confirmed` |
 | `negotiating` | `client_accept` (proposal is words only) | `negotiating` | Insert `negotiation_message(client, accept)`; emit `request.accepted` so the therapist can put a time to it |
 | `negotiating` | `client_counter` | `negotiating` | Insert `negotiation_message(client, counter)`; emit `request.counter` |
-| `negotiating` | `admin_approve` | `confirmed` | `scheduled_start` = the time given, else the last instant proposed by *either* side; book a matching slot if one is free; create reminders; emit `request.confirmed` |
+| `negotiating` | `admin_approve` | `confirmed` | `scheduled_start` = the time given, else the last instant proposed by *either* side; the held slot is **released** unless it is that instant; book a matching slot if one is free; create reminders; emit `request.confirmed` |
 | `negotiating` | `admin_propose` | `negotiating` | Insert message; emit `request.proposal` |
 | `negotiating` | `client_decline` / `admin_reject` | `rejected` | Release slot; emit `request.rejected` |
 | `confirmed` | `admin_cancel` | `cancelled` | Release slot; cancel scheduled reminders; emit `request.cancelled` |
 | `confirmed` | `complete` (worker) | `completed` | Release slot booking; no notification |
 
 Any transition not in this table **MUST** raise `InvalidTransition` and change nothing. There is no path from `confirmed` back to `negotiating`.
+
+**A slot is the booking only while it is the time.** Approving names an instant — given, or the last one the conversation put forward — and the held slot is kept only if it *is* that instant. Otherwise it is released: a slot at Tuesday marked `booked` for a Thursday session is off the picker for good and attached to a request that is not at it. And once any proposal exists, the slot stops being the fallback for "no time given": it is what the client *asked for*, while the negotiation is what they *settled on*, and confirming the former would tell the client a time they never agreed to. A negotiation that named no instant at all is therefore refused — only the therapist can turn "thursday evening" into one. A `pending` request is the unchanged case: nothing has been discussed, so the slot is both.
 
 **The therapist may approve a negotiation outright.** A client who counters with a time has said what suits them; the therapist agreeing is an approval, and making her propose that same time back so the client can accept it a second time is a round trip that says nothing. §10 has always given `request.counter.admin` an `approve` action and §13.2 requires every button to come from this table — so a table without this row made the notification offer something the core refused, which is what the button did: nothing. When she names no time, the last instant proposed by either side is the one meant; a negotiation that never named one has nothing to approve and is still refused.
 

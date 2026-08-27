@@ -1106,19 +1106,6 @@ async def test_approving_a_negotiation_with_an_explicit_time_still_wins(
     assert confirmed.scheduled_start == named
 
 
-async def test_a_words_only_negotiation_still_confirms_at_the_slot_it_holds(
-    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
-) -> None:
-    """A proposal that names no time does not release the slot (§7.1), so the
-    request is still holding the one the client picked. That is the instant."""
-    request = await _negotiating(db, client, session_type_id, future_slot, proposed=None)
-    await booking.client_counter(db, request.id, body_text="that works")
-
-    confirmed = await booking.admin_approve(db, request.id)
-
-    assert confirmed.scheduled_start == future_slot.starts_at
-
-
 async def test_approving_a_negotiation_with_no_time_and_no_slot_is_refused(
     db: AsyncSession, client: Client, session_type_id: int
 ) -> None:
@@ -1177,3 +1164,60 @@ async def test_a_client_counter_re_stamps_the_hold_too(
     await db.refresh(future_slot)
     assert future_slot.status is SlotStatus.held
     assert future_slot.hold_expires_at > before
+
+
+async def test_confirming_another_time_frees_the_slot_the_client_picked(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """A slot is the booking only while it is the time.
+
+    Approving at a time the negotiation settled on used to book the held slot
+    anyway: a slot at Tuesday marked `booked` for a Thursday session, off the
+    picker for good and attached to a request that is not at it.
+    """
+    request = await _submit(db, client, session_type_id, future_slot)
+    await booking.admin_propose(db, request.id, body_text="thursday instead?")
+
+    elsewhere = LATER + timedelta(days=3)
+    confirmed = await booking.admin_approve(db, request.id, scheduled_start=elsewhere)
+
+    await db.refresh(future_slot)
+    assert confirmed.scheduled_start == elsewhere
+    assert future_slot.status is SlotStatus.available, "somebody else may have it"
+    assert confirmed.slot_id is None
+
+
+async def test_approving_a_words_only_negotiation_does_not_fall_back_to_the_slot(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The client agreed to "thursday evening". Confirming their original pick
+    would tell them a time they never agreed to -- so she is asked for one.
+
+    The slot is not a fallback once a proposal exists: it is what the client
+    asked for, and the negotiation is what they settled on.
+    """
+    request = await _submit(db, client, session_type_id, future_slot)
+    await booking.admin_propose(db, request.id, body_text="how about thursday evening?")
+    await booking.client_accept(db, request.id)
+
+    with pytest.raises(InvalidTransition):
+        await booking.admin_approve(db, request.id)
+
+    # Still hers to settle, and the slot is still held while she does.
+    await db.refresh(future_slot)
+    assert request.status is RequestStatus.negotiating
+    assert future_slot.status is SlotStatus.held
+
+
+async def test_a_pending_request_still_confirms_at_the_slot_it_holds(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The ordinary path, unchanged: nothing has been discussed, so the slot is
+    both what was asked for and what is agreed."""
+    request = await _submit(db, client, session_type_id, future_slot)
+
+    confirmed = await booking.admin_approve(db, request.id)
+
+    await db.refresh(future_slot)
+    assert confirmed.scheduled_start == future_slot.starts_at
+    assert future_slot.status is SlotStatus.booked

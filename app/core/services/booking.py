@@ -496,6 +496,12 @@ async def _last_admin_proposal(session: AsyncSession, request_id: int) -> Negoti
     ).scalar_one_or_none()
 
 
+async def _slot(session: AsyncSession, slot_id: int | None) -> Slot | None:
+    if slot_id is None:
+        return None
+    return (await session.execute(select(Slot).where(Slot.id == slot_id))).scalar_one_or_none()
+
+
 async def _keep_hold_alive(session: AsyncSession, request: BookingRequest) -> None:
     """Push the held slot's expiry out while the conversation is still going.
 
@@ -714,28 +720,41 @@ async def admin_approve(
     request = await _get(session, request_id)
     _guard(request, "admin_approve")
 
+    # What is being confirmed, in the order of how sure we are of it. The slot
+    # is the answer only while nobody has discussed anything else: once a
+    # proposal exists, the slot is what the client asked for and the
+    # negotiation is what they settled on (§7.1).
     start = scheduled_start
-    if start is None and request.slot_id is None:
-        # §7.1: approving a negotiation without naming a time means the time
-        # under discussion -- the last one either side put forward. A request
-        # that never had one (free text, or words-only negotiation) still has
-        # nothing to confirm and is refused.
+    if start is None:
         start = await _last_proposed_instant(session, request.id)
-        if start is None:
-            raise InvalidTransition("booking_request", request.status.value, "admin_approve")
+    if start is None and request.status is RequestStatus.pending:
+        held = await _slot(session, request.slot_id)
+        start = held.starts_at if held is not None else None
+    if start is None:
+        # A negotiation that never named an instant has nothing to confirm. The
+        # slot is *not* a fallback here: the conversation moved to words, and
+        # confirming the client's original pick would tell them a time they
+        # never agreed to. Only she can turn "thursday evening" into one.
+        raise InvalidTransition("booking_request", request.status.value, "admin_approve")
 
+    # A slot is the booking only while it is the time. A negotiation that
+    # settled on another one leaves it for somebody else, rather than marking it
+    # booked for a session that is not at it.
     if request.slot_id is not None:
-        booked = await slot_service.book_slot(session, request.slot_id, request.id)
-        if start is None:
-            start = booked.starts_at
-    elif start is not None:
+        held = await _slot(session, request.slot_id)
+        if held is not None and held.starts_at == start:
+            await slot_service.book_slot(session, request.slot_id, request.id)
+        else:
+            await slot_service.release_slot(session, request.slot_id)
+            request.slot_id = None
+
+    if request.slot_id is None:
         # The agreed time may happen to be a slot the practice offers; if it is,
         # take it off the picker rather than leave it double-bookable.
         matching = await _matching_slot(session, start)
         if matching is not None:
             await slot_service.book_slot(session, matching, request.id)
             request.slot_id = matching
-    assert start is not None  # every branch above establishes it
 
     session_type = (
         await session.execute(select(SessionType).where(SessionType.id == request.session_type_id))
