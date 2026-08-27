@@ -1217,3 +1217,57 @@ async def test_a_week_that_loses_an_hour_still_has_seven_days(
     # Her clock, not the stored instant: 10:00 local is 09:00 UTC that day.
     assert "10:00" in _day_sections(html)[6]
     assert "09:00" not in _day_sections(html)[6]
+
+
+# --- The requests list scales with the table, not the rows ------------------
+
+
+async def _count_queries(db: AsyncSession, work: object) -> int:
+    """How many statements one coroutine issues on this session."""
+    from sqlalchemy import event
+
+    connection = (await db.connection()).sync_connection
+    assert connection is not None
+    seen = 0
+
+    def counter(*_args: object, **_kwargs: object) -> None:
+        nonlocal seen
+        seen += 1
+
+    event.listen(connection, "before_cursor_execute", counter)
+    try:
+        await work  # type: ignore[misc]
+    finally:
+        event.remove(connection, "before_cursor_execute", counter)
+    return seen
+
+
+async def test_the_requests_list_does_not_query_per_row(
+    db: AsyncSession, client: Client, session_type_id: int
+) -> None:
+    """`_summary` looks the practice and the session type up itself, which is
+    right for one request and wrong for two hundred: the list route was issuing
+    two queries per row to render a table whose lookups are all identical.
+    """
+    from app.channels.web.admin import _summaries
+
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    requests = []
+    for _ in range(6):
+        booking_request = BookingRequest(
+            practice_id=practice.id,
+            client_id=client.id,
+            session_type_id=session_type_id,
+            modality=Modality.online,
+            status=RequestStatus.pending,
+            source_channel=Channel.web,
+        )
+        db.add(booking_request)
+        requests.append(booking_request)
+    await db.flush()
+
+    one = await _count_queries(db, _summaries(db, requests[:1]))
+    six = await _count_queries(db, _summaries(db, requests))
+
+    assert six == one, f"{six} queries for six rows against {one} for one"
+    assert one <= 3, f"{one} queries to render a single row"
