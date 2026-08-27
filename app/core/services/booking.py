@@ -805,7 +805,16 @@ async def client_accept(session: AsyncSession, request_id: int) -> BookingReques
 
 
 async def _matching_slot(session: AsyncSession, starts_at: datetime) -> int | None:
-    """An available slot at exactly this instant, if the practice offers one."""
+    """An available slot at exactly this instant, if the practice offers one.
+
+    Locked, because the caller books what this returns. Read without the lock,
+    two clients accepting proposals for the same instant could both be handed
+    the same slot id; the second `book_slot` then raised `SlotUnavailable` and
+    the client saw a generic error for a booking that was about to succeed on
+    retry. Postgres re-checks the predicate after taking the lock, so a slot
+    taken in the meantime comes back as None -- and confirming without a slot
+    is a case the negotiation path already allows (§7.1).
+    """
     from app.core.enums import SlotStatus
     from app.core.models import Slot
 
@@ -814,6 +823,7 @@ async def _matching_slot(session: AsyncSession, starts_at: datetime) -> int | No
             select(Slot.id)
             .where(Slot.starts_at == starts_at, Slot.status == SlotStatus.available)
             .limit(1)
+            .with_for_update()
         )
     ).scalar_one_or_none()
 

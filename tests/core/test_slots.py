@@ -13,9 +13,26 @@ from sqlalchemy import NullPool, select
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
 from app.config import get_settings
-from app.core.enums import Channel, Modality, RequestStatus, SlotStatus
+from app.core.enums import (
+    Channel,
+    Modality,
+    NegotiationKind,
+    RequestStatus,
+    SenderType,
+    SlotStatus,
+)
 from app.core.errors import InvalidTransition, SlotInThePast, SlotUnavailable
-from app.core.models import BookingRequest, Identity, Practice, SessionType, Slot
+from app.core.models import (
+    AuditLog,
+    BookingRequest,
+    Identity,
+    NegotiationMessage,
+    OutboxMessage,
+    Practice,
+    Reminder,
+    SessionType,
+    Slot,
+)
 from app.core.services import slots as slot_service
 from app.core.services.clients import resolve_client
 from app.core.services.settings import get_practice
@@ -309,6 +326,157 @@ async def test_two_concurrent_holds_and_exactly_one_wins() -> None:
             await conn.execute(
                 Identity.__table__.delete().where(
                     Identity.__table__.c.external_id == "concurrency-probe"
+                )
+            )
+        await engine.dispose()
+
+
+async def test_two_concurrent_accepts_do_not_both_claim_the_same_slot() -> None:
+    """`_matching_slot` finds a slot and `book_slot` takes it, so the search has
+    to be locked too (§18, same shape as the hold race above).
+
+    Read without the lock, both accepts were handed the same slot id and the
+    loser's `book_slot` raised -- a generic error for a booking that would have
+    gone through on retry. Locked, the loser simply finds nothing and confirms
+    without a slot, which §7.1's negotiation path already allows.
+
+    Exactly one slot booking, and neither accept fails.
+    """
+    from app.core.services import booking
+
+    settings = get_settings()
+    engine = create_async_engine(settings.database_url, poolclass=NullPool)
+
+    contested_slot_id: int | None = None
+    request_ids: list[int] = []
+    request_uuids: list[object] = []
+    # Before the 2028 boundary that test_admin_web counts slots from, and clear
+    # of the bulk-creation fixtures in 2027-03 and 2027-04. Microsecond
+    # precision keeps it unique under the NULLS NOT DISTINCT index.
+    when = datetime.now(UTC) + timedelta(days=400)
+
+    try:
+        async with AsyncSession(engine) as setup:
+            practice = await get_practice(setup)
+            session_type = (
+                await setup.execute(select(SessionType).order_by(SessionType.id).limit(1))
+            ).scalar_one()
+            contender = await resolve_client(setup, Channel.telegram, "accept-race-probe")
+
+            for _ in range(2):
+                request = BookingRequest(
+                    practice_id=practice.id,
+                    client_id=contender.id,
+                    session_type_id=session_type.id,
+                    modality=Modality.online,
+                    status=RequestStatus.negotiating,
+                    source_channel=Channel.web,
+                )
+                setup.add(request)
+                await setup.flush()
+                setup.add(
+                    NegotiationMessage(
+                        request_id=request.id,
+                        sender=SenderType.admin,
+                        kind=NegotiationKind.proposal,
+                        proposed_start=when,
+                    )
+                )
+                request_ids.append(int(request.id))
+                request_uuids.append(request.uuid)
+
+            slot = Slot(
+                practice_id=practice.id,
+                starts_at=when,
+                duration_min=60,
+                status=SlotStatus.available,
+            )
+            setup.add(slot)
+            await setup.flush()
+            contested_slot_id = int(slot.id)
+            await setup.commit()
+
+        async def accept(request_id: int) -> bool:
+            contender_engine = create_async_engine(settings.database_url, poolclass=NullPool)
+            try:
+                async with AsyncSession(contender_engine) as session:
+                    try:
+                        await booking.client_accept(session, request_id)
+                        await session.commit()
+                        return True
+                    except SlotUnavailable:
+                        await session.rollback()
+                        return False
+            finally:
+                await contender_engine.dispose()
+
+        results = await asyncio.gather(*(accept(rid) for rid in request_ids))
+
+        assert all(results), f"neither accept should fail on a race, got {results}"
+
+        async with AsyncSession(engine) as check:
+            slot_row = (
+                await check.execute(select(Slot).where(Slot.id == contested_slot_id))
+            ).scalar_one()
+            assert slot_row.status is SlotStatus.booked
+
+            owners = (
+                (
+                    await check.execute(
+                        select(BookingRequest.slot_id).where(
+                            BookingRequest.id.in_(request_ids),
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+            # One took the slot; the other confirmed at the same instant without
+            # one, which is the therapist's call to make rather than a crash.
+            assert sorted(owners, key=lambda v: (v is None, v)) == [contested_slot_id, None]
+    finally:
+        async with engine.begin() as conn:
+            # Free the slot before the requests go: §6.4 requires a `booked`
+            # slot to name its request, and the FK nulls `booked_request` on
+            # delete -- dropping the request first trips the check constraint.
+            if contested_slot_id is not None:
+                await conn.execute(
+                    Slot.__table__.update()
+                    .where(Slot.__table__.c.id == contested_slot_id)
+                    .values(
+                        status=SlotStatus.available,
+                        booked_request=None,
+                        held_by_request=None,
+                        hold_expires_at=None,
+                    )
+                )
+            if request_ids:
+                for table, column in (
+                    (Reminder.__table__, "request_id"),
+                    (NegotiationMessage.__table__, "request_id"),
+                    (OutboxMessage.__table__, "request_id"),
+                ):
+                    await conn.execute(table.delete().where(table.c[column].in_(request_ids)))
+                # Scoped to this test's own rows. `entity_type` alone would take
+                # every booking audit row in the database with it.
+                await conn.execute(
+                    AuditLog.__table__.delete().where(
+                        AuditLog.__table__.c.entity_type == "booking_request",
+                        AuditLog.__table__.c.entity_id.in_([str(u) for u in request_uuids]),
+                    )
+                )
+                await conn.execute(
+                    BookingRequest.__table__.delete().where(
+                        BookingRequest.__table__.c.id.in_(request_ids)
+                    )
+                )
+            if contested_slot_id is not None:
+                await conn.execute(
+                    Slot.__table__.delete().where(Slot.__table__.c.id == contested_slot_id)
+                )
+            await conn.execute(
+                Identity.__table__.delete().where(
+                    Identity.__table__.c.external_id == "accept-race-probe"
                 )
             )
         await engine.dispose()
