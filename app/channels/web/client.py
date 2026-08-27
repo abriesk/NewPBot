@@ -530,7 +530,15 @@ def build_router() -> APIRouter:
                     **context,
                     "t": labels,
                     "signed_in": client is not None,
+                    # §12.1: both prefills need a session. At this step an
+                    # unsigned visitor has not identified themselves -- the
+                    # address arrives at submit -- so filling either from a
+                    # typed one would tell whoever guessed it that the address
+                    # is known here, and whose it is.
                     "display_name": client.display_name if client else None,
+                    "contact_note": await booking.last_contact_note(session, client.id)
+                    if client
+                    else None,
                 },
             )
 

@@ -63,6 +63,7 @@ from app.core.events import (
 from app.core.models import (
     AuditLog,
     BookingRequest,
+    Client,
     NegotiationMessage,
     Reminder,
     SessionType,
@@ -161,6 +162,32 @@ async def _enforce_submission_rate(session: AsyncSession, client_id: UUID) -> No
         raise RateLimited(f"{SUBMISSIONS_PER_HOUR} booking requests an hour is the limit")
 
 
+async def _learn_display_name(
+    session: AsyncSession, client_id: UUID, display_name: str | None
+) -> None:
+    """Fill `client.display_name` from the first submission that supplies one.
+
+    It was only ever written when the client row was created (§6.2), which
+    Telegram does from the profile and the web cannot do at all -- the address
+    arrives before the name. So the web asked "what should I call you?" on every
+    booking, threw the answer onto the request, and asked again next time.
+
+    Never overwritten (§12.1). A later booking may carry a different name, but a
+    typo on one request must not rename the person on every other.
+    """
+    if not display_name or not display_name.strip():
+        return
+
+    client = (
+        await session.execute(select(Client).where(Client.id == client_id))
+    ).scalar_one_or_none()
+    if client is None or (client.display_name or "").strip():
+        return
+
+    client.display_name = display_name.strip()
+    await session.flush()
+
+
 def _guard(request: BookingRequest, event: str) -> None:
     """Refuse anything outside §7.1 before a single field is touched."""
     if event not in ALLOWED[request.status]:
@@ -174,6 +201,27 @@ async def _get(session: AsyncSession, request_id: int) -> BookingRequest:
     if request is None:
         raise NotFound(f"booking request {request_id}")
     return request
+
+
+async def last_contact_note(session: AsyncSession, client_id: UUID) -> str | None:
+    """The most recent contact note this client gave, if they ever gave one.
+
+    §12.1 prefills step 3 with it. Unlike the name it stays on the request
+    rather than moving to the client: "phone after six" is situational, and the
+    prefill is a convenience rather than a fact about the person.
+    """
+    return (
+        await session.execute(
+            select(BookingRequest.contact_note)
+            .where(
+                BookingRequest.client_id == client_id,
+                BookingRequest.contact_note.isnot(None),
+                BookingRequest.contact_note != "",
+            )
+            .order_by(BookingRequest.created_at.desc(), BookingRequest.id.desc())
+            .limit(1)
+        )
+    ).scalar_one_or_none()
 
 
 async def active_for_client(
@@ -492,6 +540,8 @@ async def _submit(
     ).scalar_one_or_none()
     if session_type is None or not session_type.is_active:
         raise NotFound(f"session type {session_type_id}")
+
+    await _learn_display_name(session, client_id, display_name)
 
     request = BookingRequest(
         practice_id=practice.id,

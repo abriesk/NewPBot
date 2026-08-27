@@ -763,6 +763,12 @@ The renderer **MUST** have golden tests including: Russian text containing `.`, 
 
 Timezone is detected client-side and posted with the booking; a visible selector allows override. On-site selection **MUST** show `clinic_onsite_url`.
 
+**Step 3 remembers what the client has already said.** `client.display_name` is filled by the first submission that supplies a name and is **not** overwritten afterwards — a later booking may carry a different name, but a typo on one request must not rename the person everywhere, and correcting a client is the therapist's to do. `contact_note` is prefilled from the client's most recent request that carried one; unlike the name it stays per-request, because "phone after six" is situational rather than a fact about the person.
+
+Both prefills require a **session**, never a typed address: at step 3 an unsigned visitor has not identified themselves — the email arrives at submit — so prefilling from a typed address would confirm to anyone who guessed it that the address is known here and whom it belongs to (DESIGN.md §5.1).
+
+The name field is prefilled rather than hidden, which is the opposite of the email field's treatment on the same form. An email is a credential: the session establishes it and changing it goes through verification. A name is a label, and no client-facing route lets a client edit one anywhere else — hiding it once set would make a client's own name uncorrectable by them for good.
+
 A message *about a request* **MUST** link to `/r/{uuid}` carrying a `view_request` token (§6.2), so following it opens the request rather than a sign-in form. Consuming that token starts a client session, which is what makes the link still work when it is opened a second time — the token itself is single-use, as §6.2 requires of every token.
 
 ### 12.2 Admin routes
@@ -770,6 +776,10 @@ A message *about a request* **MUST** link to `/r/{uuid}` carrying a `view_reques
 All under `/admin`, session-authenticated, CSRF-protected.
 
 `/admin/login`, `/admin/requests` (+ `?view=`, `?start=`), `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`), `/admin/help`, `/admin/status`.
+
+**Every admin surface that names a client MUST be able to name them.** `booking_request.display_name` is what that request was submitted under and may be empty; where it is, the surface falls back to `client.display_name`. This applies to the requests list, the week schedule, the request page, and the Telegram card (§13.2).
+
+`/admin/requests/{uuid}` additionally shows the client's **identities** — every `(channel, external_id)` on the client, with the email annotated by whether it is verified, because §13.3 silently delivers nothing to an unverified address and a therapist waiting on a reply needs to know that. This is the only place the therapist can reach a client who left no name and no contact note; without it a request from a known, verified client is unattributable. Contact identities are not `problem_text` and hard rule 8 does not reach them.
 
 `/admin/requests` serves two views of one query, selected by `?view=` (DESIGN.md §15). `view=list` is the default and is the status-filtered table that already exists; `view=grid` is the **week schedule**. An unrecognised value falls back to `list` rather than erroring — the parameter is navigation, not input.
 
@@ -862,7 +872,7 @@ The surface is a **panel**: one message with an inline keyboard, which the thera
 |---|---|---|---|
 | Panel | `apanel` | availability, pending and negotiating counts, next confirmed session, waitlist size, admin URL | requests, sessions, waitlist, availability toggle |
 | Requests | `areq:<page>` | pending and negotiating, newest first, 5 a page | one request; panel |
-| Request | `aopen:<id>` | uuid, status, client name, contact note, session type, modality, time, `problem_text`, last 3 thread messages | its permitted actions; requests; panel |
+| Request | `aopen:<id>` | uuid, status, client name, client identities, contact note, session type, modality, time, `problem_text`, last 3 thread messages | its permitted actions; requests; panel |
 | Sessions | `asess:<days>` | confirmed sessions in the next `days` (2 or 7), with join links, at most 10 | one request; the other window; panel |
 | Waitlist | `awl:<page>` | entries, 5 a page, **read-only** | panel |
 
@@ -875,6 +885,7 @@ Requirements:
 - The webhook **MUST** answer the callback query, or the therapist's client spins on every tap. A refused action answers with its reason.
 - `/admin` while a typed answer is pending abandons it, exactly as a main-keyboard label does in §13.1.
 - `problem_text` **MAY** be shown here: this is an admin surface, and DESIGN.md §16 names the therapist's own Telegram account as one of the two places it is visible. It **MUST NOT** be logged (hard rule 8).
+- The client's identities **MAY** be shown here for the same reason, and are: a request with no name and no contact note is otherwise unanswerable from the phone, which is the surface that exists for answering away from a desk. This does put a client's email address on Telegram's servers — a deliberate choice, and a smaller one than it looks, since `problem_text` already goes to the same place.
 
 Content, translations, settings, session types, timezones, slot creation, the delivery log, and client export or erasure are **web-only** and **MUST** answer with a link to the admin UI.
 

@@ -18,7 +18,7 @@
     <input type="text" name="name" value="{{ display_name or '' }}">
   </label>
   <label>{{ t.ask_contact }}
-    <input type="text" name="contact" maxlength="{{ text_max }}" data-counter>
+    <input type="text" name="contact" maxlength="{{ text_max }}" data-counter value="{{ contact_note or '' }}">
   </label>
   {% if not signed_in %}
     <label>{{ t.email_label }}

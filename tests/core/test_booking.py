@@ -888,3 +888,102 @@ async def test_a_request_with_a_time_is_never_in_both_places(
     assert beside & mine == {timeless.uuid}
     # Disjoint everywhere, not just here: one query wants an instant and the
     # other wants none, so no request can be counted twice.
+    assert placed & beside == set()
+
+
+# --- The practice learns who a client is (§12.1) ----------------------------
+
+
+async def test_a_submitted_name_is_remembered_on_the_client(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """`client.display_name` was only ever written when the row was created,
+    which Telegram does from the profile and the web cannot do at all -- the
+    address arrives before the name. So the web asked "what should I call you?"
+    on every booking and threw the answer onto the request.
+    """
+    assert not client.display_name
+
+    await booking.submit_slot_request(
+        db,
+        client_id=client.id,
+        slot_id=future_slot.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        source_channel=Channel.web,
+        display_name="  Anna  ",
+    )
+
+    await db.refresh(client)
+    assert client.display_name == "Anna"
+
+
+async def test_a_later_name_does_not_rename_the_client(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot, practice: Practice
+) -> None:
+    """§12.1: filled once, never overwritten. A typo on one booking must not
+    rename the person on every other, and correcting a client is the
+    therapist's to do."""
+    client.display_name = "Anna"
+    await db.flush()
+
+    await booking.submit_slot_request(
+        db,
+        client_id=client.id,
+        slot_id=future_slot.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        source_channel=Channel.web,
+        display_name="Annna",
+    )
+
+    await db.refresh(client)
+    assert client.display_name == "Anna"
+
+
+async def test_a_blank_name_leaves_the_client_alone(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """The name is optional on both channels, and whitespace is not a name."""
+    await booking.submit_slot_request(
+        db,
+        client_id=client.id,
+        slot_id=future_slot.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        source_channel=Channel.web,
+        display_name="   ",
+    )
+
+    await db.refresh(client)
+    assert not client.display_name
+
+
+async def test_the_last_contact_note_is_the_one_offered_back(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot, practice: Practice
+) -> None:
+    """§12.1 prefills step 3 with it. Unlike the name it stays per-request, so
+    the prefill reads the newest one rather than a field on the client."""
+    assert await booking.last_contact_note(db, client.id) is None
+
+    await booking.submit_free_time_request(
+        db,
+        client_id=client.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        desired_time_text="any evening",
+        source_channel=Channel.web,
+        contact_note="phone after six",
+    )
+    assert await booking.last_contact_note(db, client.id) == "phone after six"
+
+    # A later request without one must not erase the answer they did give.
+    await booking.submit_free_time_request(
+        db,
+        client_id=client.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        desired_time_text="or a morning",
+        source_channel=Channel.web,
+    )
+    assert await booking.last_contact_note(db, client.id) == "phone after six"
