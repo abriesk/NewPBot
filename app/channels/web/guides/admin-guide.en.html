@@ -4,6 +4,9 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Psychobooking — Admin user guide</title>
+<!-- The commit this guide was last checked against. See the footer. -->
+<meta name="guide-revision" content="1b3b0ee">
+<meta name="guide-revised" content="2026-08-28">
 <style>
   :root {
     --bg: #f6f1ea;
@@ -337,7 +340,7 @@
       <table>
         <thead><tr><th>Page</th><th>Address</th><th>Use it for</th></tr></thead>
         <tbody>
-          <tr><td>Requests</td><td><code>/admin/requests</code></td><td>Approve, propose, reject, cancel</td></tr>
+          <tr><td>Requests</td><td><code>/admin/requests</code></td><td>Approve, propose, reject, cancel — as a list or as a week schedule</td></tr>
           <tr><td>Waitlist</td><td><code>/admin/waitlist</code></td><td>People waiting while bookings are closed</td></tr>
           <tr><td>Slots</td><td><code>/admin/slots</code></td><td>Create a week; block or delete free times</td></tr>
           <tr><td>Content</td><td><code>/admin/content</code></td><td>Practice pages in Markdown</td></tr>
@@ -346,9 +349,11 @@
           <tr><td>Timezones</td><td><code>/admin/timezones</code></td><td>Client timezone list</td></tr>
           <tr><td>Delivery</td><td><code>/admin/delivery</code></td><td>Did a message actually leave?</td></tr>
           <tr><td>Maintenance</td><td><code>/admin/maintenance</code></td><td>Config export/import; download dumps</td></tr>
-          <tr><td>Status</td><td><code>/admin/status</code></td><td>The traffic light: what is working, and what to tell your IT person</td></tr>
-          <tr><td>Clients</td><td><code>/admin/clients</code></td><td>Export one person, or erase them</td></tr>
+          <tr><td>Clients</td><td><code>/admin/clients</code></td><td>The people who have booked: their history and how to reach them</td></tr>
+          <tr><td>Privacy</td><td><code>/admin/privacy</code></td><td>Every client row there has ever been. Export one person, or erase them</td></tr>
           <tr><td>Settings</td><td><code>/admin/settings</code></td><td>Availability and operational knobs</td></tr>
+          <tr><td>Help</td><td><code>/admin/help</code></td><td>This guide</td></tr>
+          <tr><td>The dot</td><td><code>/admin/status</code></td><td>The traffic light: what is working, and what to tell your IT person</td></tr>
         </tbody>
       </table>
       <p>The header brand returns to Requests — that is the home screen.</p>
@@ -360,6 +365,7 @@
         <li>Open <strong>Requests</strong>. Filter by <code>pending</code> or <code>negotiating</code>.</li>
         <li>Open each new request. Read what they wrote (detail page only).</li>
         <li>Approve, propose another time, or reject.</li>
+        <li>Before proposing a time of your own, switch to <strong>schedule</strong> and look at the week.</li>
         <li>Check <strong>Waitlist</strong> if availability is off.</li>
         <li>If someone missed a message, open <strong>Delivery</strong>.</li>
         <li>On the phone, send <code>/admin</code> to the bot.</li>
@@ -369,7 +375,14 @@
 
     <section class="card" id="requests">
       <h2>5. Requests</h2>
-      <p>The list at <code>/admin/requests</code> can be filtered by status. Click the short UUID for the detail page.</p>
+      <h3>Two views of the same queue</h3>
+      <p><strong>list</strong> and <strong>schedule</strong> switch at the top of <code>/admin/requests</code>.</p>
+      <ul>
+        <li><strong>list</strong> — filterable by status. Click the short UUID for the detail page.</li>
+        <li><strong>schedule</strong> — the week as a grid in the practice timezone, so you can see what a time collides with before you propose it. Arrows move a week at a time; <em>this week</em> comes back.</li>
+      </ul>
+      <p>Under the grid, <strong>Unscheduled</strong> holds the requests with no instant to draw: someone who asked in words, and a slot request whose hold has since lapsed. They are listed rather than dropped — these are usually the ones most in need of an answer.</p>
+      <p>The list carries <strong>Name</strong> and <strong>Contact</strong>, because this is where you decide what to open. A name falls back to the client's remembered name, so a returning client is not blank just because they did not retype it. Each contact is a link: email opens your mail client, a Telegram id opens the chat where your own Telegram already knows that person and otherwise stays the plain id it always was.</p>
       <div class="flow">pending  →  negotiating  →  confirmed  →  completed
     │              │              │
     ├─ reject      ├─ reject      └─ cancel
@@ -390,21 +403,43 @@
       <details class="box" open>
         <summary>Detail page</summary>
         <p>Status, type, modality, name, scheduled and/or desired time, client timezone, contact note, negotiation thread, whose turn it is.</p>
+        <p><strong>Reachable at</strong> lists the client's identities — often the only thing identifying a request booked from the web with no name. An email is marked <code>verified</code> or <code>unverified</code>: nothing is delivered to an unverified address, which is worth knowing <em>before</em> you spend a day waiting for a reply.</p>
         <p><strong>What they wrote</strong> (problem text) is only on this page — never in the list, logs, or email. Telegram shows it only to you.</p>
       </details>
       <details class="box" open>
         <summary>Actions</summary>
-        <p><strong>Approve</strong> — leave time blank to keep the held slot, or set a time in the practice timezone. Optional per-session meeting URL; otherwise the standing room from Settings is used for online sessions.</p>
-        <p><strong>Propose</strong> — time plus optional note. Moves the request to negotiating.</p>
-        <p class="callout warn"><strong>Proposing a time outside your slots leaves that time unprotected.</strong> Propose the time the client already picked and their slot stays held for them. Propose any other time and the held slot is released back to the grid, because you have moved away from it — and the new time is only guarded if you happen to have a free slot at exactly that moment. If you do not, nothing stops you confirming a second client into the same hour later. The calendar cannot catch that for you, so check the week schedule before you propose a time you invented.</p>
-        <p><strong>Reject</strong> / <strong>Cancel</strong> — optional reason. Cancel stops reminders on a confirmed session.</p>
-        <p>If the current status does not allow the action, the page flashes <code>refused</code> and nothing changes.</p>
+        <p>Only the actions this status allows are live. The rest stay on the page, greyed, with a line saying why — so someone looking for Cancel learns that it is for confirmed sessions only, instead of hunting for a button that was removed.</p>
+        <p><strong>Approve</strong> — from <code>pending</code> and from <code>negotiating</code>. Leave the time blank and it confirms the last time either side put forward; on a <code>pending</code> request, where nothing has been discussed, that is the slot the client picked. Naming a time still wins. Optional per-session meeting URL; otherwise the standing room from Settings is used for online sessions.</p>
+        <p><strong>Propose</strong> — a time, a note, or both. A note with no time is a real move, not a mistake: the client is told there is a reply and sent to their request page to read it, and they can accept it there. Nothing can be scheduled out of words, so the request stays <code>negotiating</code> until one of you names a time — you are told when they accept.</p>
+        <p><strong>Reject</strong> / <strong>Cancel</strong> — optional reason. Cancel stops reminders on a confirmed session. Cancel is not an alias for Reject: they send the client different messages.</p>
+        <p>A time this form cannot read flashes <code>bad-time</code> and changes nothing — nothing is sent, so retype it and submit again. An empty time field still means words only. If the status moved while the page was open, it flashes <code>refused</code>.</p>
+      </details>
+      <details class="box">
+        <summary>Where a booking stops being protected by the grid</summary>
+        <p>A slot request holds its slot for as long as the conversation runs, and the hold is renewed at every move — yours and the client's. What happens to it depends on what you propose:</p>
+        <table>
+          <thead><tr><th>You propose</th><th>The held slot</th></tr></thead>
+          <tbody>
+            <tr><td>The time the client already picked</td><td>Stays held for them</td></tr>
+            <tr><td>A note with no time</td><td>Stays held — you have moved away from nothing</td></tr>
+            <tr><td>Any other time</td><td>Goes back on the picker; you have moved away from it</td></tr>
+          </tbody>
+        </table>
+        <p>A client countering with another time does not release it either. Suggesting an alternative is not giving up on the slot they picked, and you may still approve that slot.</p>
+        <p>On <strong>Approve</strong>, the slot is booked only when it <em>is</em> the confirmed time. Settle on another time and it goes back for somebody else rather than being marked booked for a session that is not at it — and if the time you agreed happens to match a free slot of yours, that one comes off the picker instead.</p>
+        <p class="callout warn"><strong>A time you invent is guarded only if a free slot exists at that moment.</strong> If it does not, nothing stops you confirming a second client into the same hour later. The calendar cannot catch that for you, so check the <strong>schedule</strong> view before proposing a time that is not in your grid.</p>
+        <p>A negotiation where neither side has ever named a time cannot be approved with the field blank. The request may still hold the slot the client originally picked, but confirming that would tell them a time they never agreed to — so type the time you settled on.</p>
       </details>
     </section>
 
     <section class="card" id="waitlist">
       <h2>6. Waitlist</h2>
-      <p>People land here when accepting new bookings is off, or when you are in slot mode with no free slots and fallback-to-negotiation is off.</p>
+      <p>People land here three ways:</p>
+      <ul>
+        <li>Accepting new bookings is off.</li>
+        <li>Slot mode, no free slots, and fallback-to-negotiation off.</li>
+        <li>They could not make a time you proposed and had no other way to say so — no free slots and free text off. Declining and joining the list is one move, and the entry carries what they wrote and their contact note, so it does not arrive anonymous.</li>
+      </ul>
       <table>
         <thead><tr><th>Action</th><th>Meaning</th></tr></thead>
         <tbody>
@@ -464,6 +499,7 @@
           <tr><td>On</td><td>negotiation</td><td>—</td><td>Free-text time</td></tr>
         </tbody>
       </table>
+      <p><strong>Fallback to negotiation</strong> gates the same thing one step later: it decides whether a client answering your proposal may name a time of their own. The Telegram picker sits behind the same switch — it is the free-text half in another shape, and turning words off must not leave the way in open. With it off and no free slots, their only replies are accept, decline, or join the waitlist.</p>
       <h3>Practice &amp; timing</h3>
       <ul>
         <li><strong>Timezone</strong> must be IANA, e.g. <code>Asia/Yerevan</code> — never <code>UTC+4</code>.</li>
@@ -531,7 +567,14 @@
 
     <section class="card" id="clients">
       <h2>14. Clients and privacy</h2>
-      <p>A client is the person. They may have Telegram and/or email identities.</p>
+      <p>A client is the person. They may have Telegram and/or email identities — the client row <em>is</em> that grouping. Two pages read it, for two different jobs.</p>
+      <h3>Clients — <code>/admin/clients</code></h3>
+      <p>The practice's people: everyone who has requested a consultation, most recent activity first, with how to reach them, how many requests they have made, and their last and next session. The name and the count both open that person's page — every request they have made, drawn as the same row the queue draws, and their waitlist entries.</p>
+      <p>Somebody who only ever asked for a sign-in link and never booked is not here. Neither is anybody erased. Both are on Privacy, whose list has to be complete.</p>
+      <p>Two identities that were never linked are still two rows. The service does not know they are one human; only the client can say so, by following the Telegram link their sign-in email already carries.</p>
+      <p>No problem text on either page. It stays one click away, on the request.</p>
+      <h3>Privacy — <code>/admin/privacy</code></h3>
+      <p>Every client row there has ever been, unfiltered on purpose: “send me my data” and “forget me” can only be answered against the whole population, and a privacy page that filters is one with a hole in it. A client's page links to their row here.</p>
       <p><strong>Export</strong> downloads everything held about them, including what they wrote.</p>
       <p><strong>Erase</strong> is irreversible. Type the word <code>erase</code>, then confirm. Identities and tokens go; free text is cleared; confirmed sessions are cancelled so reminders stop; booking rows stay marked erased for statistics.</p>
       <p>A retention job later clears problem text, negotiation bodies, and contact notes. Rows remain.</p>
@@ -559,7 +602,19 @@
         <span class="pill">Availability on/off</span>
         <span class="pill">Refresh</span>
       </div>
-      <p><code>/admin availability</code> also toggles availability. On a request: Approve, Propose (bot asks for a time), Reject, Cancel. Sending <code>/admin</code> again drops a half-typed answer.</p>
+      <p><code>/admin availability</code> also toggles availability. A request card carries the client's name and how to reach them — the same identities the web page shows, an email marked verified or not.</p>
+      <p>Its buttons are derived from the request's status, from the same table the web page reads, so the panel never offers a move the service would refuse. Approve works on a request under negotiation too. Sending <code>/admin</code> again drops a half-typed answer.</p>
+      <h3>Proposing a time from your phone</h3>
+      <p>Propose opens on <strong>your own free times</strong> for that request; one tap sends it. If none of them suit — or you have none published — <strong>Another time</strong> opens a picker: month, then day, then hour. Times are in the practice timezone, and the message afterwards names what you sent, so a mis-tap is visible at once rather than after the client has answered it.</p>
+      <ul>
+        <li>All twenty-four hours are offered. Working hours are not stored anywhere, and a guess at them would hide hours you can actually work.</li>
+        <li>An hour marked <code>✕</code> cannot be tapped: a confirmed or completed session starts in it, or a slot you blocked off or booked out. It stays in place rather than disappearing, so the mark reads as “there is something there” instead of as a gap.</li>
+        <li>A <em>held</em> slot is not marked. A hold lapses on its own, and it belongs to a client who has not finished a form.</li>
+        <li>A week that is wholly past is dropped from the day grid.</li>
+        <li><strong>Type it</strong> is still there, for <code>18:30</code> and for a proposal of words only.</li>
+      </ul>
+      <p>Only <strong>Type it</strong> parks anything. Every picker button carries the whole answer so far, so a screen left in your chat overnight still means what it said and there is no half-finished picker to abandon.</p>
+      <p>A client's own words reach you here in full — a note they added, or the time and wording they countered with — rather than as “open the request to read it”. A long one arrives split across messages.</p>
       <div class="callout">Content, translations, settings, session types, timezones, and creating slots are web-only. The bot sends a link instead.</div>
     </section>
 
@@ -570,6 +625,14 @@
         <li><strong>Telegram</strong> — <code>/start</code>, topic menu, the same booking flow, action buttons on notifications.</li>
         <li><strong>Email</strong> — login links and “open your request page”. No meeting URL in the body.</li>
       </ul>
+      <h3>Booking</h3>
+      <p>Picking a slot does not reserve it. The page asks them to finish inside the slot-hold window and says plainly that the time is not held until they submit — two people can be looking at the same slot until one of them does.</p>
+      <p>A signed-in client gets their name filled in, and the contact note from their last request offered back. Typing an address into the form signs nobody in: the session and the Telegram link both wait for the emailed link, which only the owner of that address can read. The booking itself goes through either way, and a sign-in link is emailed with it.</p>
+      <h3>Answering your proposal</h3>
+      <p>On the request page and in the bot: Accept, Decline, and a way to suggest another time — your own free slots as buttons first, in their timezone, filtered exactly as the booking picker is. One tap gives you something you can approve in one click. Beneath them, where free text is allowed, a date picker and a note.</p>
+      <p>In the bot it is the same three screens — month, day, hour — in their language and their own timezone, behind the free slots. It shows <em>nothing</em> about your diary: marking your filled hours would tell a client when other people have sessions, and quietly omitting them would say the same thing by the gap it left. So a client can suggest an hour you already have something in; you decline or propose again, which is an ordinary round trip. Two months ahead rather than three, because a time four months out is not one you can act on.</p>
+      <p>A counter reserves nothing. The slot is checked again when they submit, so a page left open for an hour cannot hand you a time you no longer offer.</p>
+      <p>Free text is capped at 4096 characters, shown on the field as they type. Over-long text is refused rather than quietly shortened.</p>
       <p>A web client can later tap a Telegram deep link in email to attach Telegram to the same person.</p>
     </section>
 
@@ -608,7 +671,12 @@
           <tr><td>Empty slot picker</td><td>Create future <code>available</code> slots.</td></tr>
           <tr><td>Wrong clock</td><td>Practice timezone must be IANA; clients pick from Timezones.</td></tr>
           <tr><td>No message received</td><td>Delivery: <code>sent</code> vs <code>failed</code>/<code>dead</code>. Email needs SMTP. Telegram users must <code>/start</code> the bot.</td></tr>
-          <tr><td>Approve flashes <code>refused</code></td><td>Already confirmed, expired, or cancelled. Refresh.</td></tr>
+          <tr><td>An action flashes <code>refused</code></td><td>The status moved while the page was open — already confirmed, expired, or cancelled. Refresh.</td></tr>
+          <tr><td>An action flashes <code>bad-time</code></td><td>The time field could not be read. Nothing was sent and nothing changed. Retype it and submit again.</td></tr>
+          <tr><td>An action is greyed out</td><td>This status does not allow it; the reason is printed in its place. Cancel is for confirmed sessions only — reject the rest.</td></tr>
+          <tr><td>Approve is refused on a negotiation</td><td>Neither side has ever named a time, so there is nothing to confirm. Type the time you agreed on rather than leaving the field blank.</td></tr>
+          <tr><td>A request shows no name</td><td>Booked from the web without one. Use Contact in the same row, or open Clients.</td></tr>
+          <tr><td>A client never answers email</td><td>Open the request. An <code>unverified</code> address is sent nothing at all.</td></tr>
           <tr><td>Telegram truncates a page</td><td>Split content into more blocks.</td></tr>
           <tr><td>Need old bookings back</td><td>Database restore, not config import. Ask the host.</td></tr>
         </tbody>
@@ -645,6 +713,12 @@ docker compose up -d --build</code></pre>
 
     <footer>
       Shipped with the service. This page is served from your own installation at <code>/admin/help</code>, so it always matches the version you are running.
+      <br><br>
+      <strong>Written against commit <code>1b3b0ee</code>, 2026-08-28.</strong>
+      That is the last state of the service this guide was checked against. After
+      updating the server, whoever ran the update can list what has changed since with
+      <code>git log 1b3b0ee..HEAD -- app/ locales/</code> — anything in that list a
+      therapist would notice belongs in here, and the stamp moves with it.
     </footer>
   </main>
 </div>
@@ -755,6 +829,7 @@ docker compose up -d --build</code></pre>
     "Content published in the languages you use",
     "Missing translations reviewed",
     "Telegram /admin works with your user ID",
+    "Opened the schedule view and seen this week",
     "Sent a test request from the public site and approved it",
     "Checked Delivery for that test",
     "Exported configuration JSON and stored it somewhere safe",

@@ -10,6 +10,7 @@ needs.
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterator
 
 import pytest
@@ -121,3 +122,76 @@ def test_the_russian_guide_is_actually_in_russian() -> None:
 
     for word in ("Заявки", "Лист ожидания", "Слоты", "Настройки"):
         assert word in text
+
+
+# --- The revision stamp -----------------------------------------------------
+
+#: Set in the head of both guides and repeated in the footer.
+REVISION = re.compile(r'<meta name="guide-revision" content="([0-9a-f]{7,40})">')
+
+
+@pytest.mark.parametrize("lang", HELP_LANGUAGES)
+def test_a_guide_says_which_commit_it_was_written_against(lang: str) -> None:
+    """The guide is prose beside code that moves, and nothing makes the two move
+    together. The stamp turns "is this still true?" into a diff: everything in
+    `git log <stamp>..HEAD -- app/ locales/` is a change nobody has yet checked
+    this page against.
+    """
+    assert REVISION.search(help_guide(lang)), f"{lang} guide carries no revision stamp"
+
+
+def test_the_guides_were_written_against_the_same_commit() -> None:
+    """Two languages of one page. Stamps that disagree mean one was brought up
+    to date and the other forgotten -- which is the failure the stamp exists to
+    catch, one level up.
+    """
+    stamps = {}
+    for lang in HELP_LANGUAGES:
+        found = REVISION.search(help_guide(lang))
+        assert found is not None
+        stamps[lang] = found.group(1)
+
+    assert len(set(stamps.values())) == 1, stamps
+
+
+@pytest.mark.parametrize("lang", HELP_LANGUAGES)
+def test_the_stamp_is_where_a_reader_can_act_on_it(lang: str) -> None:
+    """A stamp only in a meta tag is one nobody acts on: whoever has to re-check
+    the guide after an update reads it in a browser, not in the source. The
+    footer carries the command that lists what has changed since.
+    """
+    text = help_guide(lang)
+    found = REVISION.search(text)
+    assert found is not None
+    stamp = found.group(1)
+
+    footer = text[text.index("<footer>") :]
+    assert stamp in footer, "the stamp is not visible on the page"
+    assert f"git log {stamp}..HEAD" in footer
+
+
+@pytest.mark.parametrize("lang", HELP_LANGUAGES)
+def test_a_guide_names_every_admin_page(lang: str) -> None:
+    """§12.2's surfaces, as `admin/base.html` lists them. A page the guide never
+    mentions is one the therapist has to work out unaided -- and adding an admin
+    page without a line about it here is exactly the drift this file guards.
+    """
+    text = help_guide(lang)
+
+    for path in (
+        "/admin/requests",
+        "/admin/waitlist",
+        "/admin/slots",
+        "/admin/content",
+        "/admin/translations",
+        "/admin/session-types",
+        "/admin/timezones",
+        "/admin/delivery",
+        "/admin/maintenance",
+        "/admin/clients",
+        "/admin/privacy",
+        "/admin/settings",
+        "/admin/status",
+        "/admin/help",
+    ):
+        assert path in text, f"{lang} guide never mentions {path}"

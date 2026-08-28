@@ -192,6 +192,30 @@ A change is complete when all of these hold:
 - No `datetime.utcnow`, no `am`, no direct sends, no forbidden imports
 - The milestone's acceptance criteria in §19 are demonstrably met
 
+## The admin guide
+
+`app/channels/web/guides/admin-guide.{en,ru}.html` is the therapist's manual,
+served at `/admin/help`. It is prose sitting beside code that moves, and nothing
+makes the two move together — so both files record the commit they were last
+checked against, in a `<meta name="guide-revision">` tag and again, visibly, in
+the footer.
+
+What the guide has not been checked against yet:
+
+```bash
+git log $(grep -o 'guide-revision" content="[0-9a-f]*' app/channels/web/guides/admin-guide.en.html | cut -d'"' -f3)..HEAD --oneline -- app/ locales/
+```
+
+Anything in that list a therapist would **notice** — a new admin page, a changed
+rule about slots or statuses, a control that appears or stops appearing, wording
+she has to recognise — belongs in the guide. Update both languages in the same
+change and move the stamp to the commit you checked against. Refactors and fixes
+with no visible effect move nothing.
+
+`tests/e2e/test_help.py` fails if the two stamps disagree, or if a page in the
+admin nav is named in neither guide. It cannot tell you the prose is still true;
+that is what the stamp is for.
+
 ## Out of scope
 
 Do not build these, even where they'd fit naturally: payments,
