@@ -264,6 +264,12 @@ async def test_an_unknown_translation_key_is_skipped_not_written(db: AsyncSessio
     """A key no renderer reads is dead weight, and usually means the file came
     from a newer build (§16.7)."""
     payload = await export_config(db)
+    # Scoped to the key this test injects. The suite shares one database, and
+    # any `translation` row whose key has since left locales/*.yaml is skipped
+    # for exactly this reason -- a database-wide count grows with every one of
+    # them. Import merges and never deletes (DESIGN.md §21.3), so naming one
+    # language here leaves the rest of the catalogue alone.
+    payload["translations"] = {"ru": {}}
     payload["translations"]["ru"]["feature.from.the.future"] = "Что-то"
 
     report = await import_config(db, payload, apply=True)
@@ -279,6 +285,9 @@ async def test_the_admin_namespace_is_not_imported_into_another_language(
 ) -> None:
     """DESIGN.md §11: the admin surface is English only."""
     payload = await export_config(db)
+    # Scoped for the reason above: only the row this test names counts towards
+    # `skipped`.
+    payload["translations"] = {}
     payload["translations"]["hy"] = {"admin.nav.requests": "Հարցումներ"}
 
     report = await import_config(db, payload, apply=True)
