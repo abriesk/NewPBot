@@ -124,6 +124,26 @@ async def web_slot(committed: AsyncSession) -> AsyncIterator[int]:
         # has no ON DELETE -- so a client who took it cannot be removed until
         # the entry is. Without this the *next* test finds two clients on the
         # shared address and fails somewhere unrelated.
+        entry_ids = (
+            (
+                await committed.execute(
+                    select(WaitlistEntry.id).where(WaitlistEntry.client_id.in_(client_ids))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # The admin's copy of the join goes to TELEGRAM_ADMIN_IDS, so it carries
+        # neither `client_id` nor `request_id` -- every other delete here filters
+        # on one of those and misses it. Left behind, it is a `dead` row against
+        # a chat id that exists only in conftest: the health page turns red and
+        # the worker tells the real therapist a message could not be delivered.
+        for entry_id in entry_ids:
+            await committed.execute(
+                delete(OutboxMessage).where(
+                    OutboxMessage.dedupe_key.like(f"waitlist-admin:{entry_id}:%")
+                )
+            )
         await committed.execute(
             delete(WaitlistEntry).where(WaitlistEntry.client_id.in_(client_ids))
         )
