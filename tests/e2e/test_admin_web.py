@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import NullPool, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+from app.channels.web.admin import BAD_PRICE, _price_amount, _price_display
 from app.channels.web.security import ADMIN_COOKIE, CSRF_COOKIE
 from app.config import get_settings
 from app.core.enums import Channel, Modality, RequestStatus, SlotStatus
@@ -1812,7 +1813,6 @@ async def test_an_unknown_client_page_is_a_404_not_a_crash(
     await committed.rollback()
     await committed.execute(delete(AdminSession))
     await committed.commit()
-    await committed.commit()
 
 
 async def test_deleting_a_slot_a_finished_request_asked_for_is_refused_not_a_500(
@@ -1887,3 +1887,117 @@ async def test_deleting_a_slot_a_finished_request_asked_for_is_refused_not_a_500
     await committed.execute(delete(AdminSession))
     await committed.commit()
 
+
+# --- Session type prices ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("typed", "amount"),
+    [
+        ("15000", 15000),  # 15,000 dram, stored as written
+        ("15 000", 15000),  # a thousands separator
+        (f"15{chr(0xA0)}000", 15000),  # and the non-breaking one a paste carries
+        ("0", 0),
+        ("", None),
+        ("   ", None),
+    ],
+)
+def test_a_price_is_read_as_it_is_written(typed: str, amount: int | None) -> None:
+    assert _price_amount(typed) == amount
+
+
+@pytest.mark.parametrize(
+    "typed",
+    [
+        "free",
+        "15000.50",  # a price here is whole units, and rounding it silently is worse
+        "15000,50",
+        "15 000 AMD",
+        "-500",
+        "²",  # `str.isdigit` alone says this is a digit; `int` disagrees
+    ],
+)
+def test_a_price_that_is_not_a_whole_number_is_refused_rather_than_guessed(typed: str) -> None:
+    with pytest.raises(ValueError):
+        _price_amount(typed)
+
+
+def test_the_form_shows_the_price_it_would_accept_back() -> None:
+    """The field round-trips: what it renders is what it parses."""
+    assert _price_display(15000) == "15000"
+    assert _price_display(None) == ""
+    assert _price_amount(_price_display(15000)) == 15000
+
+
+async def test_a_price_with_a_thousands_separator_is_saved_rather_than_500ing(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """Reported in use: the price field answered with an internal server error.
+
+    `int()` on whatever she typed is what did it, and the field was labelled
+    "minor units", which is what made her type something else.
+    """
+    _sign_in(web)
+
+    response = web.post(
+        "/admin/session-types",
+        data={
+            "csrf_token": _csrf(web),
+            "code": "individual",
+            "duration_min": "60",
+            "price_amount_minor": "15 000",
+            "price_currency": "amd",
+            "is_active": "1",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert BAD_PRICE not in response.headers["location"]
+
+    await _fresh(committed)
+    row = (
+        await committed.execute(select(SessionType).where(SessionType.code == "individual"))
+    ).scalar_one()
+    assert row.price_amount_minor == 15000, "whole dram, as she wrote it"
+    assert row.price_currency == "AMD", "ISO 4217 is upper case"
+
+    # And the page offers it back in the shape she would type it again.
+    page = web.get("/admin/session-types")
+    assert 'value="15000"' in page.text
+
+    row.price_amount_minor = None
+    row.price_currency = None
+    await committed.commit()
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
+async def test_a_price_that_is_not_a_number_says_so_instead_of_crashing(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    _sign_in(web)
+
+    response = web.post(
+        "/admin/session-types",
+        data={
+            "csrf_token": _csrf(web),
+            "code": "individual",
+            "duration_min": "60",
+            "price_amount_minor": "15000.50",
+            "price_currency": "",
+            "is_active": "1",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "flash=" in response.headers["location"]
+
+    await _fresh(committed)
+    row = (
+        await committed.execute(select(SessionType).where(SessionType.code == "individual"))
+    ).scalar_one()
+    assert row.price_amount_minor is None, "a refused save must change nothing"
+
+    await committed.rollback()
+    await committed.execute(delete(AdminSession))
+    await committed.commit()

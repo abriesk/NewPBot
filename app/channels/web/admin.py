@@ -138,6 +138,48 @@ SLOT_REFERENCED = (
     "and it stops being offered."
 )
 
+BAD_PRICE = (
+    "A price is a whole number, like 15000 for 15,000 dram. No decimal point, "
+    "and no currency sign. Leave it empty for no price."
+)
+
+#: Written as a code point rather than as itself: it is a space on screen, and a
+#: literal one here is invisible to the next person reading this line.
+NBSP = chr(0xA0)
+
+
+def _price_amount(value: str) -> int | None:
+    """The price as the therapist writes it, which is what the column holds.
+
+    A price here is a **whole unit of the currency named beside it** -- 15000 is
+    15,000 dram -- and it is stored exactly as typed. The column is called
+    `price_amount_minor` and its comment says 5000 means 50.00, which is the
+    ordinary convention and is *not* what this practice means by it: the
+    therapist prices in whole dram, and asking her to write 1500000 for a
+    15,000 dram session is asking her to do currency arithmetic in a text box.
+    Whoever eventually renders a price to a client has to read this rather than
+    the column name (DESIGN.md §20.3).
+
+    Passing the field to `int()` is what this replaces: a decimal point in the
+    box raised `ValueError` out of the route and reached the therapist as a 500.
+    A decimal is now refused with a sentence instead, rather than rounded --
+    quietly changing somebody's price is worse than asking again. Spaces go
+    because a thousands separator is a normal thing to type, the non-breaking
+    one included: that is what a figure pasted from a spreadsheet carries, and
+    it is invisible in the field.
+    """
+    text = value.strip().replace(" ", "").replace(NBSP, "")
+    if not text:
+        return None
+    if not (text.isascii() and text.isdigit()):
+        raise ValueError(f"{value!r} is not a whole-number price")
+    return int(text)
+
+
+def _price_display(amount: int | None) -> str:
+    """The inverse, for the form field. An empty field means no price."""
+    return "" if amount is None else str(amount)
+
 
 async def _labels(session: AsyncSession) -> dict[str, str]:
     """Only the labels the catalogue actually covers."""
@@ -909,7 +951,16 @@ def build_router() -> APIRouter:
             )
             return _render(
                 "admin/session_types.html",
-                await _context(session, request, admin, rows=rows),
+                await _context(
+                    session,
+                    request,
+                    admin,
+                    rows=rows,
+                    # Rendered here rather than in the template, so that the one
+                    # place deciding what a price means is `_price_amount` and
+                    # its inverse rather than a Jinja expression beside them.
+                    prices={row.id: _price_display(row.price_amount_minor) for row in rows},
+                ),
             )
 
     @router.post("/session-types", include_in_schema=False)
@@ -939,9 +990,19 @@ def build_router() -> APIRouter:
                 row = SessionType(practice_id=practice.id, code=code)
                 session.add(row)
 
+            try:
+                amount = _price_amount(price_amount_minor)
+            except ValueError:
+                # Surfaced rather than swallowed, and rather than raised: this
+                # was `int()` on whatever she typed, and a decimal point in a
+                # price field is a reasonable thing to type.
+                return _back("/admin/session-types", BAD_PRICE)
+
             row.duration_min = duration_min
-            row.price_amount_minor = int(price_amount_minor) if price_amount_minor else None
-            row.price_currency = price_currency or None
+            row.price_amount_minor = amount
+            # ISO 4217 is upper case, and "amd" beside "AMD" is two currencies
+            # as far as anything comparing them is concerned.
+            row.price_currency = price_currency.strip().upper() or None
             row.is_active = bool(is_active)
             await session.flush()
             return _back("/admin/session-types", "saved")
