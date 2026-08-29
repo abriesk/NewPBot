@@ -197,6 +197,7 @@ CREATE TABLE practice (
     default_language        TEXT NOT NULL DEFAULT 'ru',
     timezone                TEXT NOT NULL DEFAULT 'Asia/Yerevan',   -- IANA
     clinic_onsite_url       TEXT,
+    online_only             BOOLEAN NOT NULL DEFAULT FALSE,
     online_meeting_url      TEXT,                                    -- default room for online sessions
     availability_on         BOOLEAN NOT NULL DEFAULT TRUE,
     booking_mode            booking_mode NOT NULL DEFAULT 'slots',
@@ -255,6 +256,8 @@ CREATE TABLE auth_token (
 ```
 
 Raw tokens **MUST NOT** be stored. A token is valid only if `used_at IS NULL AND expires_at > now()`, and consuming it sets `used_at` in the same transaction as the action it authorises.
+
+A token may also be **read without being spent**, for the one case where something has to be asked before it is used: §13.1's merge draws a confirmation naming what is about to be joined, and burning the token to draw that screen would leave a client who answers "Not me" — or who never answers — holding a dead link. Reading applies exactly the same four conditions as consuming and reports the same nothing for all of them, so it tells the holder of a token what it is for and tells anyone else no more than consuming would. It **MUST NOT** be used as a way to check a token before an action that then consumes a *different* one.
 
 ### 6.3 Admin
 
@@ -567,10 +570,21 @@ error_event
 | `negotiating` | `admin_approve` | `confirmed` | `scheduled_start` = the time given, else the last instant proposed by *either* side; the held slot is **released** unless it is that instant; book a matching slot if one is free; create reminders; emit `request.confirmed` |
 | `negotiating` | `admin_propose` | `negotiating` | Insert message; emit `request.proposal` |
 | `negotiating` | `client_decline` / `admin_reject` | `rejected` | Release slot; emit `request.rejected` |
-| `confirmed` | `admin_cancel` | `cancelled` | Release slot; cancel scheduled reminders; emit `request.cancelled` |
+| `confirmed` | `admin_cancel` | `cancelled` | Release slot — or **block** it, see below; cancel scheduled reminders; emit `request.cancelled` |
+| `confirmed` | `admin_reschedule` | `confirmed` | Old slot → `blocked`; book a free slot at the new time if one exists; move reminders; insert `negotiation_message(admin, note)`; emit `request.rescheduled` |
 | `confirmed` | `complete` (worker) | `completed` | Release slot booking; no notification |
 
-Any transition not in this table **MUST** raise `InvalidTransition` and change nothing. There is no path from `confirmed` back to `negotiating`.
+Any transition not in this table **MUST** raise `InvalidTransition` and change nothing. There is still no path from `confirmed` back to `negotiating`: a booking under discussion again is a booking nobody can rely on.
+
+**A confirmed session can be moved, and moving it is not cancelling it.** This table used to say a change of time after confirmation was a cancellation plus a new request. That is tidy for reminders and slot bookkeeping and wrong for the person it happens to: it discards the request, its thread and its history, and asks the client to start again for something that happened to the therapist's diary. `admin_reschedule` therefore keeps the booking `confirmed` throughout — it never becomes something the client has to re-agree to, and it never leaves the week schedule.
+
+**The hour it leaves is blocked, not released.** The reason that hour is free is that she cannot work it, so putting it back on the picker offers a stranger the time she is ill in. It stays off the picker until she unblocks it by hand; only she knows when the day is hers again. For the same reason `admin_cancel` takes a `keep_slot` flag, and both surfaces offer it as a second control (§12.2, §13.2) — releasing remains the default, because the *other* reason to cancel is ordinary and then the hour is genuinely free.
+
+**Reminders are moved, not rebuilt.** `UNIQUE(request_id, offset_min)` leaves no room for a second row at the same offset, which is the schema saying a reminder belongs to an offset rather than to an instant. Each existing row takes the new `due_at`; one whose new due time has already passed becomes `skipped`, exactly as `_create_reminders` decides for a new booking; one that already **fired** is put back to `scheduled`, because the client was reminded of a time that is no longer the time. A `cancelled` reminder is not revived — somebody stopped that one on purpose.
+
+**A move into the past MUST be refused**, and a clash **MUST NOT** be. Rescheduling onto an hour that already holds a confirmed session is reported to the therapist and allowed (§12.2): `admin_approve` has always permitted two sessions at one instant, and she may be doing it deliberately.
+
+**The client is told, and nothing waits on their answer.** `request.rescheduled.client` carries both instants and her note; it is not `request.confirmed.client`, which says a session is confirmed and, said about a time nobody discussed, reads as a mistake. A client the new time does not suit answers with the note §7.1 already accepts on a `confirmed` request, which reaches her without the booking evaporating first. There is **no** admin copy: she is the one who moved it.
 
 **A slot is the booking only while it is the time.** Approving names an instant — given, or the last one the conversation put forward — and the held slot is kept only if it *is* that instant. Otherwise it is released: a slot at Tuesday marked `booked` for a Thursday session is off the picker for good and attached to a request that is not at it. And once any proposal exists, the slot stops being the fallback for "no time given": it is what the client *asked for*, while the negotiation is what they *settled on*, and confirming the former would tell the client a time they never agreed to. A negotiation that named no instant at all is therefore refused — only the therapist can turn "thursday evening" into one. A `pending` request is the unchanged case: nothing has been discussed, so the slot is both.
 
@@ -592,7 +606,10 @@ A **client note** is deliberately not in the table, because it is not a transiti
 | `available` | `book(request)` | `booked` | Row lock (admin approving a free-text request onto a slot) |
 | `booked` | `release` | `available` | Request left `confirmed` |
 | `available` | `block` | `blocked` | Admin |
+| `booked` | `block` | `blocked` | Admin; §7.1's `admin_reschedule`, or `admin_cancel` with `keep_slot` |
 | `blocked` | `unblock` | `available` | Admin |
+
+`booked → blocked` is the emergency, and it exists so that calling off or moving a session does not hand the hour to somebody else. It clears the reservation fields the way `release` does — §6.4's CHECK permits neither on a slot that is not `held` or `booked` — so the request keeps pointing at the time it had while the slot belongs to nobody. Only an admin reaches it; nothing in the client path or the worker blocks a slot.
 
 `hold` and `book` **MUST** execute `SELECT … FROM slot WHERE id = :id FOR UPDATE` before checking status. This is the only place where a lost update would double-book.
 
@@ -611,10 +628,14 @@ Signatures are indicative; all are `async`, take a session/unit-of-work, and ret
 resolve_client(channel, external_id, *, language=None) -> Client        # get-or-create
 issue_login_token(email) -> raw_token                                    # email identity
 consume_token(raw_token, purpose) -> TokenResult
+token_target(raw_token, purpose) -> TokenResult | None                   # reads without spending (§6.2)
 link_identity(client_id, channel, external_id, verified) -> Identity
+merge_clients(*, into, absorbing) -> Client                              # two rows, one person (§13.1)
 set_client_language(client_id, lang)
 set_client_timezone(client_id, iana)
 ```
+
+`merge_clients` moves every table in `CLIENT_OWNED_TABLES` — `identity`, `auth_token`, `booking_request`, `waitlist_entry`, `outbox_message`, `flow_state` — and deletes the absorbed row. That list and `erase_client`'s reach are the same set by definition, and a test asserts it against the schema: a seventh table holding client data is a client half-moved or half-forgotten, and neither leaves a trace at runtime. The survivor keeps its own `language`, `display_name` and `timezone`, taking the absorbed row's only where its own is blank. It **MUST** refuse when either row is erased (§16 is a promise, and a link minted before it does not undo it) and while either has a live flow. The audit entry records both ids: `audit_log` has no foreign key to `client`, so entries written before the merge still name a row that is gone, and that entry is the map.
 
 **Content and translations**
 ```
@@ -701,6 +722,7 @@ Each intent has a key, a recipient, a payload schema, and available actions. Tra
 | `request.accepted.admin` | admin | uuid, note | approve, propose, reject |
 | `request.confirmed.client` | client | uuid, scheduled_start, duration_min, session type, modality, join info | open |
 | `request.confirmed.admin` | admin | uuid, scheduled_start, client | — |
+| `request.rescheduled.client` | client | uuid, previous_start, scheduled_start, duration_min, join info, reason | open |
 | `request.rejected.client` | client | uuid, reason | — |
 | `request.declined.admin` | admin | uuid, name | — |
 | `request.expired.client` | client | uuid | — |
@@ -770,6 +792,7 @@ The renderer **MUST** have golden tests including: Russian text containing `.`, 
 | POST | `/book/hold` | Hold a slot; returns hold expiry |
 | GET | `/book/details` | Step 3 — problem, name, contact note |
 | POST | `/book` | Submit; returns confirmation with the request UUID |
+| GET | `/waitlist` | The waitlist form, reached by choice from under the picker |
 | POST | `/waitlist` | Join the waitlist |
 | GET | `/r/{uuid}` | Request status and negotiation thread (auth required) |
 | POST | `/r/{uuid}/accept` \| `/counter` \| `/decline` | Negotiation actions |
@@ -785,6 +808,10 @@ Timezone is detected client-side and posted with the booking; a visible selector
 Both prefills require a **session**, never a typed address: at step 3 an unsigned visitor has not identified themselves — the email arrives at submit — so prefilling from a typed address would confirm to anyone who guessed it that the address is known here and whom it belongs to (DESIGN.md §5.1).
 
 The name field is prefilled rather than hidden, which is the opposite of the email field's treatment on the same form. An email is a credential: the session establishes it and changing it goes through verification. A name is a label, and no client-facing route lets a client edit one anywhere else — hiding it once set would make a client's own name uncorrectable by them for good.
+
+**The empty slot list MUST say which emptiness it is.** With nothing free for the chosen modality but times available for the other, the partial offers a **switch** — a labelled control naming the other modality, which re-runs the same request — rather than quietly listing times of a kind the client did not ask for (§13.1 has the reasoning; the rule is the same on both channels). The timezone selector is hidden for an on-site booking, since the client is coming to the room; it is hidden rather than removed, so the form still posts a zone and the list still has one to render in.
+
+**The waitlist MUST be offered beside the picker, not only instead of it.** `resolve_booking_mode` sends a client to the waitlist when the practice has nothing to offer (§6), which leaves the client who *can* see four times and cannot make any of them with no way to say so — the picker offers times, the menu offers topics, and the only remaining move is to close the page. `/book/slots` therefore carries a link to `GET /waitlist` in both its states, empty and full, and it is the same form `/book` renders on §6's waitlist path. It **MUST NOT** open on the same sentence: telling somebody there is nothing free while they are looking at a list of free times reads as a broken page, so the form takes `waitlist.intro_by_choice` when it is reached by choice and `waitlist.intro` when there is genuinely nothing. Joining this way creates a plain `waitlist_entry` and no request — there is no booking to decline, which is what separates it from `POST /r/{uuid}/waitlist` below.
 
 A message *about a request* **MUST** link to `/r/{uuid}` carrying a `view_request` token (§6.2), so following it opens the request rather than a sign-in form. Consuming that token starts a client session, which is what makes the link still work when it is opened a second time — the token itself is single-use, as §6.2 requires of every token.
 
@@ -810,7 +837,7 @@ The waitlist path is a decline and would fire that notification too. It **MUST**
 
 All under `/admin`, session-authenticated, CSRF-protected.
 
-`/admin/login`, `/admin/requests` (+ `?view=`, `?start=`), `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients`, `/admin/clients/{id}`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/privacy`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`), `/admin/help`, `/admin/status`.
+`/admin/login`, `/admin/requests` (+ `?view=`, `?start=`), `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`, `reschedule`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients`, `/admin/clients/{id}`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/privacy`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`), `/admin/help`, `/admin/status`.
 
 **A time the therapist types and the form cannot read MUST be refused, not dropped.** `/admin/requests/{uuid}/approve` and `/propose` parse `scheduled_start` as `YYYY-MM-DDTHH:MM` in the practice timezone; anything else answers with a flash naming the format and changes nothing. Silently reading it as "no time given" turned a mistyped proposal into a timeless one, which the therapist had no way to notice — she had said when, and the client was told nothing. A proposal of words only is still available by leaving the field empty (§7.1).
 
@@ -913,11 +940,23 @@ Uploads **MUST** be capped (5 MB) and rejected above it before parsing.
 ### 13.1 Client
 
 1. `/start` — resolve or create the client and Telegram identity. If a `link_<token>` payload is present, consume it and attach this Telegram identity to the existing client instead.
+
+   **When this chat already has a client of its own, the link MUST offer a merge rather than be ignored.** That is the case it exists for: anyone who pressed `/start` before booking by email has a client row here, and `link_identity` refuses to reassign an identity that belongs to somebody else — correctly, since moving one silently is not recoverable. So the two *rows* are joined instead, and only the client may say they are one person. The bot **MUST** ask first, and the confirmation **MUST NOT** name the address: it is drawn before anyone has proved they can read that mailbox, and naming it would tell whoever is holding the phone whose it is. The token is **peeked, not consumed**, to draw that screen (§6.2) and is spent only if the merge runs — so "Not me", an unanswered question, or a refusal all leave the emailed link working.
+
+   The token's client survives and this chat's row is absorbed (`merge_clients`, §8). Not a preference: a web session is a cookie carrying a raw `client.id`, so the row the emailed link names is the one whose browser session must keep working, while Telegram is reached through `identity.external_id`, which the merge moves. A merge **MUST** be refused while either side has a live flow — `flow_state` is unique per `(client, channel)`, so joining would drop half of something somebody is typing — and the client is told to finish it and come back. "Live" means a step other than `idle` touched within `slot_hold_minutes`; nothing sweeps `flow_state`, so without that bound an abandoned booking would block the link for good.
 2. Language selection (`Русский` / `Հայերեն`) on first contact only; stored on the client.
 3. Persistent main keyboard: one button per menu topic, plus Consultation and My appointments.
 4. Topic button → send that topic's published blocks in order, as separate messages.
-5. Consultation → `resolve_booking_mode()` and follow the resolved path (slots picker / free-text / waitlist).
-6. Slot picker: inline keyboard grouped by day, times in the client's timezone; timezone chosen from `timezone_option` if unknown.
+   With `practice.online_only` set, the modality question is **skipped rather than asked**: there is one answer, and asking for it would be a question whose other answer the flow then has to refuse. The modality is recorded as `online` and the picker filters to it, so in-person slots already created stop being offered — they are **not** deleted, and come back when the setting is cleared. Deliberately its own column rather than "`clinic_onsite_url` is empty": she may keep the address while not working there this month, and a blank address means "not filled in", not "in-person bookings are off". Where nothing is free, no switch is offered either — pointing at times nobody is being shown would be an invitation the flow would have to refuse.
+
+5. Consultation → `resolve_booking_mode()`, then **ask how before asking when**. Modality first, then session type, on both the slot path and the free-text one. Which path was resolved **MUST** be remembered on the flow rather than re-derived after those two questions: `resolve_booking_mode` reads the slot inventory, and a slot appearing while somebody answers would otherwise move them onto a picker they never asked for. The waitlist path is unchanged and goes straight to its own questions.
+
+   The order used to be slot → type → modality, which is wrong twice. The picker cannot filter by answers it has not collected, so `slot.modality` and `slot_session_type` were both dead on this channel — every slot was offered to everybody. And the client learned only after committing to a time whether it was ever an online time, which is the reported fault.
+6. Slot picker: inline keyboard grouped by day, times in the client's timezone, **filtered by the modality and session type already chosen**; timezone chosen from `timezone_option` if unknown.
+
+   **An on-site client is not asked for a timezone.** They are coming to the room, so the room's clock is theirs and the question is noise. `client.timezone` is left **unset** rather than filled with the practice's: a stored zone is never asked for again (§13.1 asks only when it is null), so writing a guess here would silently answer the question for a later *online* booking made from anywhere else. Nothing is lost by waiting — §16.9's delivery path already falls back to the practice zone for a client who has not said, which is the right answer for somebody sitting in it. The request still records `client_timezone`, so the booking itself is unambiguous.
+
+   **Nothing free this way, something the other way, is offered as a switch** — a labelled button naming the other modality — and **not** by listing the other kind of time. A client who asked for online and is shown in-person times has to work out what happened; a button saying "switch to in person" says it. Choosing it goes straight back to the picker rather than re-asking the session type, which is already answered. Where neither modality has anything the waitlist is offered directly (§12.1's rule, same reason). A day offering a **single** time is one button carrying the day and the time together: the day heading is a dead button, and where it sits directly above one time it is the wider half of what reads as a single control, so it is what gets tapped. Beneath the picker, a row offering the **waitlist** — §12.1's rule, and for the same reason: times can all be wrong for a client without being absent, and `resolve_booking_mode` only routes to the waitlist when there are none. It carries its own callback action rather than the negotiation's, which closes a request that already exists; this one belongs to a client who has not made one.
 7. After the slot is held: session type, modality, problem text, optional name, then the contact step (each skippable where optional). The contact step is a choice, not free text, because "email" is a natural answer to an open question and the service cannot act on it:
    - **Telegram** — the identity already exists, so nothing is stored and delivery keeps following §13.3.
    - **Email** — ask for an address and reject anything not shaped like one. The address is **not** trusted on arrival: `auth.login_link.client` is sent to it, and following that link is what sets `verified_at` (§6.2). Once verified, §13.3 delivers confirmations and reminders to both channels. Verification is never a precondition for booking — the request is submitted either way.
@@ -959,6 +998,7 @@ Requirements:
 - Every screen **MUST** offer a way back. No reply may end in text with nothing to press — including the outcome of an action, which **MUST** be the re-rendered request screen rather than a bare "Confirmed …".
 - A request's action buttons **MUST** be derived from §7.1's transition table, so the panel never offers what the core would refuse. `negotiating` therefore offers propose and reject but not approve.
 - `cancel` needs typing, so it parks the request id in `flow_state` (§13.1's store, not aiogram FSM) and answers with a prompt carrying `✕` to abandon and `Skip` beside it; the reason reaches the client in `request.cancelled.client`, so it is asked for rather than invented. Approve uses the practice's default meeting link; a per-request `meeting_url` stays web-only.
+- **Cancel is two buttons here**: one frees the hour, one blocks it (§7.1's `keep_slot`). Two controls rather than a follow-up question, because this is the surface for answering in a hurry and the difference between them is a single tap. Which one she pressed is parked alongside the request id, so skipping the reason cannot quietly turn "keep the hour" into "give it away". **Rescheduling to a new time stays web-only** (§12.2): it needs a time typed into a field, and from a phone in an emergency `Cancel & block` is the move that matters.
 
 **`propose` MUST be answerable without typing.** It asked for `YYYY-MM-DD HH:MM` in the practice timezone, on the one surface that exists for answering away from a desk — a full ISO timestamp thumbed into a phone. The screen now offers, in order: the practice's own free slots for that request as one-tap buttons, a **month → day → hour** picker for a time it has not published, and typing kept as the escape hatch for anything neither covers (`18:30`, or words, which §7.1 still allows as a proposal).
 
@@ -1008,6 +1048,7 @@ A confirmation delivered by email carries one iCalendar file, so a client who ke
 - The file **MUST** be built from the payload *after* §13.4's scrub, never from `booking_request` directly, so the attachment cannot become a second way around the scrub.
 - Encoding follows RFC 5545: CRLF line endings, lines folded at 75 octets, and `\`, `;`, `,` and newlines escaped in text values.
 - A cancelled session is **not** withdrawn from the client's calendar: no `METHOD:CANCEL` counterpart is sent, since that would require the invitation form ruled out above. `request.cancelled.client` **MUST** therefore say in words that a calendar entry added earlier needs removing by hand.
+- A **moved** session is not updated in it either, and for a subtler reason: `SEQUENCE` is hardcoded to `0`, and that number is how iCalendar marks a revision of an event with the same `UID`. A second attachment at `SEQUENCE:0` would be treated as a duplicate of the first and very likely ignored, leaving the old time in the client's calendar and the new one only in the message. Sending no attachment at all is the honest option until the sequence is real, so `request.rescheduled.client` carries none — see DESIGN.md §20.3.
 
 ---
 
@@ -1367,6 +1408,7 @@ Normative. A check not in this table does not exist; thresholds are not tuning k
 | `disk_space` | <5% or <500 MB free on `BACKUP_PATH` | <15% or <2 GB | The slow failure that takes everything with it |
 | `schema_version` | Alembic version in the database ≠ code head | — | A half-applied or skipped migration |
 | `practice_row` | not exactly one `practice` row | — | A seed that did not run, or a bad restore |
+| `unreachable_clients` | — | ≥1 client with no identity and no `erased_at` | A `client` row nothing can contact. Zero by construction: erasure removes identities on purpose and is excluded, and `merge_clients` (§8) moves them. It exists for that merge — one transaction and the absent `ON DELETE` on `booking_request` make a half-finished merge impossible to commit, so what is left to catch is a later change moving five tables instead of six |
 
 Rules that apply to all of them:
 

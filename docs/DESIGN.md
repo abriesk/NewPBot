@@ -157,6 +157,14 @@ The unsolicited-mail concern is handled where it belongs: §13.3 addresses nothi
 
 **Merging.** Every notification email includes a Telegram deep link of the form `https://t.me/<bot>?start=link_<token>`. Tapping it hands the token to the bot as the `/start` payload; the bot resolves the token and attaches a `telegram` identity to the client who already exists. This is the identity-merge path, and it costs the client one tap rather than a "please type your email into the bot" flow. The same mechanism works in reverse: a Telegram-first client who supplies an email later gets a verification link.
 
+That describes the easy half, and for a long time it was the only half that worked. **When the chat already has a client of its own there is no identity to attach** — it exists and belongs to someone, and `link_identity` refuses to reassign it, because moving an identity between people silently is not a recoverable mistake. That refusal is right and the conclusion drawn from it was wrong: the answer is not to move an identity but to join the two *rows*, which is a different operation and needs its own permission. Found in use in August 2026, and it was failing for precisely the client it exists for — anyone who had pressed `/start` before booking by email watched the bot open on its ordinary menu with nothing joined.
+
+So the bot asks. Only the client can say that two records are one human, and the `link_channel` token is how they say it: it reaches one mailbox, and following it from a Telegram account claims both. The confirmation names no address — it is drawn before anyone has proved they can read that mailbox, so naming it would tell whoever is holding the phone whose it is — and the token is read without being spent, so a wrong tap, a shared phone or an unanswered question all leave the link working.
+
+**The token's row survives.** That is not a preference between an older record and a newer one: a web session is a cookie carrying a raw `client.id`, so the row the emailed link names is the one whose browser session has to keep working, while Telegram is reached by looking up `identity.external_id`, which the merge moves. The losing row is deleted rather than flagged, and the audit entry naming both ids is what maps the one to the other afterwards — `audit_log` has no foreign key to `client`, so entries written before the merge still name a row that is gone.
+
+An **admin-side** merge is a different question and stays out (§20.2). Here the client is joining their own two records behind a token only they could have received; there the service would be guessing that two people are one, and a wrong guess is irreversible.
+
 Tokens are single-use, short-lived, and stored hashed. Login tokens expire in 30 minutes; channel-link tokens in 24 hours.
 
 ### 5.2 Therapist
@@ -179,6 +187,10 @@ Three settings compose into the behaviour a client sees. Keeping them orthogonal
 | `true` | `negotiation` | — | Free-text time request directly |
 
 `auto_confirm_slots` (default off) allows a picked slot to confirm without therapist approval. It exists because it is one line of policy, but the default keeps the therapist in the loop, which is the point of the product.
+
+**`online_only` is a fourth, and it cuts across the table rather than extending it.** It does not change which of the four rows applies; it changes what the client is *asked*. With it set, the "how would you like to meet?" question disappears — there is one answer, and asking for it would be a question whose other answer the flow then has to refuse — and the picker offers online times only. In-person slots already created are kept and come back when it is cleared, because a therapist working online for a month is not a therapist who has stopped working in the room.
+
+It is a setting of its own rather than "`clinic_onsite_url` is empty", which would have been free. The two mean different things: an address she keeps while not working there is not an address she has not filled in, and deriving the mode from the field would flip the whole flow the moment she pasted one in to save it for later.
 
 ---
 
@@ -324,9 +336,15 @@ The worker's sweep is the only mechanism; there is no in-memory scheduler holdin
 
 ---
 
-## 14. Cancellation
+## 14. Cancellation, and moving a session
 
 Therapist-initiated cancellation ships in this version and is not optional: without it, a confirmed booking has no exit that releases its slot, and the therapist has no recourse when she is ill. Cancelling sets a reason, releases the slot, cancels pending reminders, and notifies the client on every channel they have.
+
+**Releasing the slot was the only behaviour, and it is the wrong one for the commonest reason to cancel.** She calls off Thursday because she is ill; the hour goes straight back on the picker, and a stranger can book the time she is ill in before she has put the phone down. So cancelling asks which it is: the hour is freed, or it is **blocked**. Releasing stays the default, because the other reason to cancel is ordinary — a session that will not happen for a reason that has nothing to do with her day, where the hour is genuinely free and somebody else may have it. Blocking is not automatic and not undone automatically either: only she knows when the day is hers again, and a slot that quietly reappeared on the picker while she was still unwell would be the same bug with a delay.
+
+**Cancelling is not how a session moves.** The state machine used to say that a change of time after confirmation was a cancellation plus a new request, which is tidy for reminders and slot bookkeeping and wrong for the person it happens to: it throws away the request, its thread and its history, and asks the client to start again for something that happened to *her* diary. Moving a session keeps the booking confirmed throughout — it never becomes something the client has to re-agree to, and it never leaves the week schedule. The hour it leaves is blocked for the reason above; the client is told both times and reads why in her own words, or in the standing sentence §15 keeps for the day she has no time to write one.
+
+Nothing waits on the client's answer, and that is deliberate rather than an oversight. Making a moved session provisional until they accept would punish her for an emergency by dissolving the booking, and leave a session that *was* agreed sitting in limbo if they never reply. A client the new time does not suit answers with the note their request page already offers, which reaches her without the booking evaporating first.
 
 Client-initiated cancellation is deferred. The data model accommodates it — `cancelled_by` already distinguishes actor types — so enabling it later is a UI surface plus a policy check against `cancel_window_hours`, not a migration.
 
@@ -336,7 +354,7 @@ Client-initiated cancellation is deferred. The data model accommodates it — `c
 
 The web UI is the primary admin surface:
 
-- **Requests** — filter by status, view the full negotiation thread, approve, propose, reject, cancel; and the same requests as a **week schedule** (below)
+- **Requests** — filter by status, view the full negotiation thread, approve, propose, reject, cancel, move to another time; and the same requests as a **week schedule** (below)
 - **Slots** — create in bulk (a weekly pattern over a date range) and individually, block, delete
 - **Waitlist** — mark contacted, convert to a request, close
 - **Content** — edit blocks per topic and language, reorder, preview per channel, view and restore revisions
@@ -602,21 +620,228 @@ whose Telegram and email were never linked is two `client` rows with two
 histories, because the service does not know they are one human. The clients
 list shows both, correctly — it cannot show otherwise without guessing.
 
-The safe join already exists and belongs to the client: the `link_channel` token
-in the login email, which only the owner of that address can follow (§5.1). What
-is missing is a way for the therapist to *notice* the case and prompt it. A
-"these may be the same person" hint is the cheap half and is guesswork — a
-shared display name is weak evidence and a wrong guess puts two strangers' names
-beside each other on a page about them.
+The safe join belongs to the client: the `link_channel` token in the login
+email, which only the owner of that address can follow (§5.1). **That now works
+in both directions** — when this paragraph was written it did not, and the case
+it silently walked past was the common one. `merge_clients` joins the two rows
+behind a confirmation in the bot; §20.3 records what was wrong and §5.1 what was
+decided. What is still missing is a way for the therapist to *notice* the case
+and prompt it, for the person who never follows the link at all. A "these may be
+the same person" hint is the cheap half and is guesswork — a shared display name
+is weak evidence and a wrong guess puts two strangers' names beside each other
+on a page about them.
 
-An admin-side **merge** is the expensive half and is what would actually fix it:
-moving identities, requests, waitlist entries, tokens and flow state from one
-client to another, irreversibly. `link_identity` already refuses to reassign an
-identity that belongs to somebody else, on the grounds that silently moving one
-between people is not a recoverable mistake, and an admin merge is that mistake
-with a button. It wants an audit entry, a confirmation that names both people,
-and a decision about what happens to the losing row — none of which is worth
-designing before the duplicate case has actually been hit. Revisit when it has.
+An admin-side **merge** is the expensive half and stays out. The machinery is
+now built and pointing it at a button on `/admin/clients` would be a small
+change, which is exactly why the reason for not doing it should be written down
+rather than assumed. The client merging their own two records is acting on
+knowledge only they have, proved by a token only they could receive. The
+therapist doing it is *guessing* that two people are one, from a shared name or
+a similar address, and `merge_clients` is irreversible by construction — the
+absorbed row is deleted, and `link_identity` refuses to reassign an identity
+between people for the same reason. A button that joins two strangers'
+histories on a hunch is worse than two rows that are correctly two. Revisit only
+with a way for her to be *sure*, which is likely to be asking the client rather
+than looking at a list.
+
+### 20.3 Reported defects and refinements, second round
+
+Found in use, late August 2026, in the first session with the therapist working
+through both channels as a client would. The rules are §20.2's: smallest first,
+each entry says what is actually wrong and what closing it takes, and an entry
+leaves this list when it is fixed rather than being marked done in it.
+
+Six are gone and are not below — a slot the therapist could not delete without a
+500, a price field that answered a decimal point with one, a login link that
+landed on the front page instead of the request it was sent about, a session
+type offered to clients as `booking.type.superme`, the Telegram day heading a
+client kept tapping on a one-slot day, and the client who could see four times,
+could make none of them, and had nowhere to say so — the waitlist is now offered
+beside the picker on both channels rather than only instead of it, which §12.1
+and §13.1 now require.
+
+A seventh is gone with them, and it is the one whose diff was smallest and whose
+point was largest. **A rejection had no room for a referral.** Her answer to a
+request she cannot take is more often "not me, try her" than "no", and every
+part of the machinery for that already existed — `admin_reject` has taken a
+reason since it was written, the notification carries it, the web form offered
+the field. Two things made it unusable. The Telegram button passed `None`, so on
+the surface built for answering away from a desk the only rejection available
+was a silent one; it now asks first, with Skip for the silent case, which meant
+teaching Skip to tell the two prompts apart. And the client's copy read
+`Reason: {reason}`, which turns "my colleague Anna works with exactly this" into
+the justification of a refusal. The label is gone and her words stand as their
+own paragraph. A *cancellation* keeps its label, because a session called off
+does have a reason — the two looked like one string and were not.
+
+That last change also found the trap under any copy correction: seeding inserts
+missing keys and never overwrites (§15, so that her edits win), so editing a
+value in `en.yaml` changes nothing on an install that has already been seeded.
+The three rows were still the seeded defaults and were updated in place. Anything
+similar has to be, or the fix ships without arriving.
+
+The tenth and last of the reported ten is gone: **the booking flow asked when
+before it asked how.** §13.1 now walks modality → session type → slots, so the
+picker filters by both — `slot.modality` and `slot_session_type` were dead on
+that channel, offered to everybody, because the questions came after the list.
+An on-site client is no longer asked for a timezone, and `client.timezone` is
+left unset rather than filled with the practice's: a stored zone is never asked
+for again, so a guess here would silently answer the question for a later online
+booking made from anywhere else. Nothing free one way with times the other way
+is a labelled switch rather than the other list, which was the sharper of the
+two answers and came from the report. `practice.online_only` is the first new
+column since the schema was written, and is a setting rather than "the clinic
+address is empty" — keeping an address while not working there is not the same
+as never having filled one in.
+
+A ninth is gone: **a confirmed session could not be moved.** §7.1 now has
+`confirmed → admin_reschedule → confirmed`, §7.2 has `booked → blocked`, and
+§14 carries the reasoning. Two things it settled are worth keeping here. The
+old slot is blocked rather than freed — and so, now, is the hour of a
+cancellation she marks as her own day, because releasing was the only behaviour
+and it offered a stranger the time she is ill in. And nothing waits on the
+client's answer: making a moved session provisional would punish her for an
+emergency by dissolving the booking, and leave one that *was* agreed in limbo if
+they never replied. A client the new time does not suit answers with the note
+§7.1 already accepts on a confirmed request.
+
+An eighth is gone: **the connect-Telegram link did nothing for a client the bot
+already knew**, which was the client it exists for. §5.1 carries what was
+decided and why, §20.2's merge paragraph is corrected, and the admin-side merge
+stays out for a reason now written down rather than assumed. Two things came out
+of building it. `flow_state` is written on every menu render, so "is this client
+mid-something" had to mean a step other than `idle` — the first version refused
+every merge. And the new `unreachable_clients` check went amber immediately: the
+two concurrency tests in `tests/core/test_slots.py` deleted their probe identity
+and left the `client` row behind, two per run, 171 of them by the time anyone
+looked. That is the invariant doing precisely what it was added for, on its
+first day, against a bug that had nothing to do with merging.
+
+Two of those turned out to be more than they looked. The day heading was the
+wider half of what reads as one control, which `slot_keyboard` now solves by
+making a single-time day a single button — and beside it, `NOOP` was not in
+`ADMIN_ACTIONS`, so a mis-tapped dead cell in the therapist's own picker fell
+through to `/start` and asked her to pick a language. And the session type's
+name could not live in the locale files at all, because a type is a row (§6.4)
+and the catalogue is a file: the fix is a name per language written through
+`set_text` from the admin form, which puts it on `/admin/translations` as well,
+plus `session_type_name` ending §15's fallback chain at the code rather than at
+the key. Only the first half of each was reported.
+
+What is left is deliberately not one piece of work. The last three each open a
+design question before they open an editor, and are meant to be taken one at a
+time.
+
+**Nobody has decided whether a price is client-facing, and the therapist has
+been filling one in regardless.** This is what is left of the session-types
+report once the two faults on that page were fixed, and it starts with what
+fixing the second of them settled. The field was labelled "minor units" — a
+developer's phrase sitting in a therapist's field — and it now takes **whole
+units of the currency named beside
+it**, stored exactly as typed: `15000` is a 15,000 dram session, and a decimal
+point is refused rather than rounded. That is what this practice means by a
+price, and the alternative was asking her to write 1500000 in a text box. The
+cost is that the column is still called `price_amount_minor` and its comment
+still says 5000 means 50.00, which is the ordinary convention and not this one.
+Nothing reads it today, so nothing is wrong today — but **whoever renders a
+price to a client has to read `_price_amount` rather than the column name**, and
+that is the trap this paragraph exists to set off.
+
+And the question neither fix answered: no client has ever seen a price at all.
+`booking.type.with_price` exists in all three locale files and neither channel
+has ever used it — both call `booking.type.without_price`. So there is a field
+on the admin page, now with a guide entry explaining how to fill it in, whose
+value nothing reads.
+
+**That question is now answered: a price is client-facing, per session type.**
+So the work is to use `booking.type.with_price` where a price is set and
+`without_price` where it is not — both pickers already call the second, and the
+first has existed unused in all three locale files since the catalogue was
+written. Which makes this smaller than it looks and leaves exactly one trap in
+it: the amount is stored in whole currency units, in a column called
+`price_amount_minor`, so the renderer has to read `_price_amount` rather than
+the column name. Currency is per type and may be unset, which is the case to
+decide on — a bare number beside a duration is worse than no price at all, so a
+type with an amount and no currency should probably render as though it had
+none.
+
+**A reminder for an on-site session can arrive in the wrong clock.** Every
+outbound message renders in `client.timezone`, falling back to the practice's
+(`_recipient_timezone`). It never reads `booking_request.client_timezone`, which
+is written at booking time and used only by the request page and the admin UI.
+So a client who once booked online has a zone stored — say `Europe/Moscow` — and
+their later *on-site* booking is reminded in Moscow time, for a session in a
+room in Yerevan. An hour out, on a message whose whole job is to get somebody to
+a place at a time.
+
+Not new, and not what §13.1's timezone change was about: that stopped an
+on-site-only client from acquiring a wrong stored zone, and this is the client
+who already has a right one for a different session. The fix is for the renderer
+to prefer the request's zone where the request has one — the request knows it is
+an on-site session and the client row does not. Small, and deliberately not done
+inside the flow slice: it changes how *every* notification picks a zone. There
+is also a real counter-argument to weigh first, which is why this is an entry
+rather than a commit: somebody travelling to Yerevan next week may well prefer
+times in the zone their phone is in until they land.
+
+**The web cannot make a free-text time request at all.** `book.html` is handed
+a `negotiation` flag and never reads it, and the only submit path the web has is
+`submit_slot_request` — `submit_free_time_request` has no web caller. So a
+practice in `booking_mode = negotiation`, or one falling back to it with no
+slots free, serves a browser the ordinary picker with nothing in it and no way
+to say what time would suit, while Telegram has asked that question since M6.
+Found while reordering the booking flow, and left out of it deliberately: that
+was a wrong order, this is a missing path, and folding them together would have
+made one change impossible to review. §12.1 has to gain the step §13.1 already
+has, and the form is the one the client's counter already uses on `/r/{uuid}`.
+
+**A moved session leaves the old time in the client's calendar.** `session_ics`
+hardcodes `SEQUENCE:0`, and that number is precisely how iCalendar marks a
+revision of an event carrying the same `UID`. A second attachment at `0` is a
+duplicate of the first as far as a calendar client is concerned, and is very
+likely ignored — so sending one would leave the old time in their calendar, the
+new time in the message, and no way for them to tell which the service believes.
+`request.rescheduled.client` therefore carries no attachment at all, which is
+honest and not helpful. Closing it means a real sequence — a counter on the
+request, bumped every time the instant changes, so the second file supersedes
+the first. Then a cancellation could carry `METHOD:CANCEL` for the same reason
+and stop asking the client to tidy up by hand (§13.5). Worth doing together,
+and worth doing only when somebody will test it against a real phone: the failure
+mode here is silent and lands in a stranger's calendar rather than in a log.
+
+**An abandoned booking keeps what the client typed, indefinitely.** `flow.data`
+is scratch that can hold `problem_text`, and its own docstring says it "is
+cleared as soon as the flow finishes" — which is true, and a flow nobody comes
+back to never finishes. Nothing sweeps `flow_state`: the retention sweep covers
+requests (§16), and this table was not thought of as holding anything worth
+retaining. So a description of somebody's problem, typed into the bot and
+abandoned at step 3, sits in the database until they return and start again.
+Found while writing the merge, which needed to know whether a flow was live and
+so had to notice that some of them never stop being rows. Closing it is a sweep
+beside the others in `app/worker/jobs/sweeps.py` and a number to sweep at —
+`pending_expiry_hours` is the closest thing already settled, and is generous for
+a form somebody walked away from. It is small; it is here rather than done
+because §16 should say what the retention rule is before code enforces one.
+
+**Not a client-facing defect, but the reason the rest are hard to verify:** the
+suite shares one database with whatever instance it is run beside.
+`docker compose exec web pytest`, as documented in CLAUDE.md, runs against
+`DATABASE_URL` — the same database the stack is serving from. The end-to-end
+tests drive the app through `TestClient`, so their writes go through
+`unit_of_work()` and commit; only the `db` fixture's outer transaction rolls
+back, and it is not in that path. So the database fills up with test rows, and
+the suite starts failing on rows nobody wrote deliberately: a session type added
+through the admin UI breaks a seeded-count assertion, and slots created by hand
+leak into tests that ask what is free. Six tests failed that way in August 2026
+and none of them was a bug — against a clean database the same commit was green,
+which is a slow and misleading way to find that out.
+
+Two things follow. Tests want their own database, named by the command that runs
+them, so a green suite means the code and not the fixtures. And the assertions
+that count rows want scoping to the rows they name, the way the translation
+import tests already were — a count of everything is a test of the environment.
+Neither is difficult; both are here rather than done because the first changes
+the documented workflow, and the workflow is in CLAUDE.md.
 
 ---
 

@@ -55,6 +55,23 @@ COUNTER_SLOT = "cslot"
 #: §12.1's way out where a counter may not be words.
 COUNTER_WAITLIST = "cwait"
 
+#: §13.1: joining this Telegram account to a client the bot already knows
+#: separately. The raw `link_channel` token rides in the callback argument --
+#: `token_urlsafe(32)` is 43 characters, so `mrg:<token>` is 47 bytes and stays
+#: inside §9's budget. It is not a new exposure: the same token is already in
+#: the chat, in the `/start link_…` message that produced this screen. Carrying
+#: it rather than parking it keeps the confirmation stateless, the way every
+#: picker screen is.
+MERGE = "mrg"
+MERGE_NO = "mrgno"
+
+#: The same way out, offered under the booking picker. Its own action rather
+#: than `COUNTER_WAITLIST`: that one closes a request that already exists, while
+#: this one belongs to somebody who has not made one -- times can all be wrong
+#: for a client without being absent, and until this existed the only answer to
+#: that was to close the app.
+WAITLIST = "wait"
+
 #: §12.1's picker, the client's half of §13.2's. Same three screens, their own
 #: language, their own timezone, and never a word about the therapist's diary.
 COUNTER_MONTHS = "cm"
@@ -67,6 +84,12 @@ APPROVE = "approve"
 PROPOSE = "propose"
 REJECT = "reject"
 CANCEL_REQUEST = "cancelreq"
+#: The same cancellation, keeping the hour off the picker. Its own action rather
+#: than a flag, because the two are one tap each on a phone and the difference
+#: between them is the whole point: `CANCEL_REQUEST` frees the time for somebody
+#: else, and this one does not, because the reason it is free is her own day
+#: (DESIGN.md §14).
+CANCEL_KEEP = "cancelkeep"
 
 #: §13.2's propose picker: month -> day -> hour, and the slots offered above it.
 #: Every screen's callback carries the whole answer so far, so the picker holds
@@ -123,6 +146,7 @@ ADMIN_ACTIONS = frozenset(
         PROPOSE_TYPE,
         REJECT,
         CANCEL_REQUEST,
+        CANCEL_KEEP,
         PANEL,
         PANEL_REQUESTS,
         PANEL_OPEN,
@@ -400,6 +424,15 @@ def slot_keyboard(
     slot, and suggesting one in answer to a proposal. `extra` appends rows
     beneath -- the waitlist button, where §12.1's gate leaves nothing else to
     offer.
+
+    **A day offering one time is one button**, carrying the day and the time
+    together, rather than a heading with a single time under it. Reported in
+    use: the heading is a `NOOP` -- there to be read -- and on a one-slot day it
+    is the wider, upper half of what looks like one control, so it is what gets
+    tapped, and tapping it does nothing at all. That reads as a broken bot
+    rather than as a label. A toast on the heading was the other candidate and
+    is not needed here: where the ambiguity exists there is now no heading to
+    tap, and where a heading remains the times are visibly plural beneath it.
     """
     zone = ZoneInfo(tz)
     by_day: dict[str, list[SlotView]] = defaultdict(list)
@@ -408,10 +441,25 @@ def slot_keyboard(
 
     rows: list[list[InlineKeyboardButton]] = []
     for day in sorted(by_day):
-        rows.append(
-            [InlineKeyboardButton(text=day_labels.get(day, day), callback_data="noop")]
-        )
         times = by_day[day]
+        heading = day_labels.get(day, day)
+
+        if len(times) == 1:
+            only = times[0]
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=(
+                            f"{heading} · "
+                            f"{only.starts_at_utc.astimezone(zone).strftime('%H:%M')}"
+                        ),
+                        callback_data=f"{action}:{prefix}{only.id}",
+                    )
+                ]
+            )
+            continue
+
+        rows.append([_dead(heading)])
         # Three times per row keeps the buttons readable on a phone.
         for start in range(0, len(times), 3):
             rows.append(
@@ -428,13 +476,32 @@ def slot_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def choice_keyboard(action: str, options: list[tuple[str, str]]) -> InlineKeyboardMarkup:
-    """`(value, label)` pairs as one button per row."""
+def choice_keyboard(
+    action: str,
+    options: list[tuple[str, str]],
+    *,
+    extra: list[tuple[str, str]] | None = None,
+) -> InlineKeyboardMarkup:
+    """`(value, label)` pairs as one button per row.
+
+    `extra` appends `(label, callback_data)` rows beneath, for a button that is
+    not one of the choices -- the way out of the question rather than an answer
+    to it. Same shape and same purpose as `slot_keyboard`'s.
+    """
+    rows = [
+        [InlineKeyboardButton(text=label, callback_data=f"{action}:{value}")]
+        for value, label in options
+    ]
+    rows.extend(
+        [InlineKeyboardButton(text=label, callback_data=data)] for label, data in extra or ()
+    )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def one_button(label: str, data: str) -> InlineKeyboardMarkup:
+    """A single button, where the whole answer is whether they press it."""
     return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=label, callback_data=f"{action}:{value}")]
-            for value, label in options
-        ]
+        inline_keyboard=[[InlineKeyboardButton(text=label, callback_data=data)]]
     )
 
 

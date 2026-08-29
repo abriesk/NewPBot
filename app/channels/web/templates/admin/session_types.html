@@ -9,19 +9,38 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="code" value="{{ row.code }}">
     <h3>{{ row.code }}</h3>
+    {# The code is yours; the name is what a client is offered. Without a name
+       the picker shows `booking.type.<code>` (DESIGN.md §20.3), so these come
+       first on the card. #}
+    <div class="row">
+      {% for lang in languages %}
+        <label>Name ({{ lang }})
+          <input type="text" name="name_{{ lang }}" value="{{ names[row.id][lang] }}"
+                 placeholder="{{ row.code }}">
+        </label>
+      {% endfor %}
+    </div>
+    <p class="muted">What clients see when they choose a session. Leave a
+       language empty and it falls back to another one, then to
+       <code>{{ row.code }}</code>.</p>
     <div class="row">
       <label>Duration (min)
         <input type="number" name="duration_min" value="{{ row.duration_min }}">
       </label>
-      <label>Price (minor units)
-        <input type="number" name="price_amount_minor"
-               value="{{ row.price_amount_minor if row.price_amount_minor is not none else '' }}">
+      {# A whole unit of the currency beside it, stored as typed. The column is
+         named for minor units and this practice does not mean it that way --
+         see `_price_amount` and DESIGN.md §20.3. #}
+      <label>Price
+        <input type="text" name="price_amount_minor" inputmode="numeric"
+               value="{{ prices[row.id] }}" placeholder="15000">
       </label>
       <label>Currency
         <input type="text" name="price_currency" value="{{ row.price_currency or '' }}"
                maxlength="3" placeholder="AMD">
       </label>
     </div>
+    <p class="muted">A whole number, as you would say it — <code>15000</code> for
+       15,000 dram. No decimal point, no currency sign. Empty means no price.</p>
     <label class="choice">
       <input type="checkbox" name="is_active" value="1" {% if row.is_active %}checked{% endif %}>
       active
@@ -34,6 +53,15 @@
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
   <h3>New session type</h3>
   <label>Code <input type="text" name="code" required placeholder="supervision"></label>
+  <div class="row">
+    {% for lang in languages %}
+      <label>Name ({{ lang }})
+        <input type="text" name="name_{{ lang }}">
+      </label>
+    {% endfor %}
+  </div>
+  <p class="muted">Name it here and clients see the name. Leave them all empty
+     and they see the code.</p>
   <label>Duration (min) <input type="number" name="duration_min" value="60"></label>
   <label class="choice"><input type="checkbox" name="is_active" value="1" checked> active</label>
   <button type="submit">Add</button>

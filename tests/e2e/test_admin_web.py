@@ -18,6 +18,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import NullPool, delete, select, update
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 
+from app.channels.web.admin import BAD_PRICE, _price_amount, _price_display
 from app.channels.web.security import ADMIN_COOKIE, CSRF_COOKIE
 from app.config import get_settings
 from app.core.enums import Channel, Modality, RequestStatus, SlotStatus
@@ -36,7 +37,9 @@ from app.core.models import (
     Slot,
     Translation,
 )
+from app.core.services.translations import invalidate_cache
 from app.main import create_app
+from app.render.labels import session_type_name
 
 # The seed hashes whatever ADMIN_USERNAME/ADMIN_PASSWORD the deployment was
 # installed with (§20), so the test signs in with those rather than a literal.
@@ -1471,7 +1474,9 @@ def test_each_status_offers_what_7_1_allows_and_greys_the_rest() -> None:
         # agreeing is an approval -- but nothing here is confirmed yet, and
         # cancel is for a confirmed session. This is the reported case.
         RequestStatus.negotiating: {"admin_approve", "admin_propose", "admin_reject"},
-        RequestStatus.confirmed: {"admin_cancel"},
+        # Moving it keeps the booking; cancelling ends it. Both, and only
+        # from here (§7.1).
+        RequestStatus.confirmed: {"admin_cancel", "admin_reschedule"},
         RequestStatus.rejected: set(),
         RequestStatus.expired: set(),
         RequestStatus.cancelled: set(),
@@ -1810,5 +1815,323 @@ async def test_an_unknown_client_page_is_a_404_not_a_crash(
     assert web.get("/admin/clients/00000000-0000-0000-0000-000000000000").status_code == 404
 
     await committed.rollback()
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
+async def test_deleting_a_slot_a_finished_request_asked_for_is_refused_not_a_500(
+    web: TestClient, scratch: dict[str, object], committed: AsyncSession
+) -> None:
+    """Reported in use: delete answered with an internal server error.
+
+    A request that ended released the slot but kept pointing at the time it
+    asked for (§7.1), so the row was `available` -- the one status the page
+    offers delete for -- and the foreign key refused the delete inside the
+    flush. The page now withholds the button and the route answers the race
+    with a redirect.
+    """
+    _sign_in(web)
+
+    await _fresh(committed)
+    practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
+    slot = Slot(
+        practice_id=practice.id,
+        starts_at=datetime.now(UTC) + timedelta(days=21),
+        duration_min=60,
+        status=SlotStatus.available,
+    )
+    committed.add(slot)
+    await committed.flush()
+    request = BookingRequest(
+        practice_id=practice.id,
+        client_id=scratch["client_id"],
+        session_type_id=scratch["session_type_id"],
+        modality=Modality.online,
+        status=RequestStatus.rejected,
+        source_channel=Channel.web,
+        slot_id=slot.id,
+    )
+    committed.add(request)
+    await committed.commit()
+    slot_id = int(slot.id)
+
+    page = web.get("/admin/slots")
+    assert page.status_code == 200
+    assert f'/admin/slots/{slot_id}/delete' not in page.text, "the button must not be offered"
+
+    response = web.post(
+        f"/admin/slots/{slot_id}/delete",
+        data={"csrf_token": _csrf(web)},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "flash=" in response.headers["location"]
+
+    await _fresh(committed)
+    survivor = (
+        await committed.execute(select(Slot).where(Slot.id == slot_id))
+    ).scalar_one_or_none()
+    assert survivor is not None, "the slot the request points at has to stay"
+
+    # Blocking is what the refusal points at, and the page offers it.
+    blocked = web.post(
+        f"/admin/slots/{slot_id}/block",
+        data={"csrf_token": _csrf(web)},
+        follow_redirects=False,
+    )
+    assert blocked.status_code == 303
+    await _fresh(committed)
+    assert (
+        await committed.execute(select(Slot.status).where(Slot.id == slot_id))
+    ).scalar_one() is SlotStatus.blocked
+
+    await committed.rollback()
+    await committed.execute(delete(BookingRequest).where(BookingRequest.id == request.id))
+    await committed.execute(delete(Slot).where(Slot.id == slot_id))
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
+# --- Session type prices ----------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("typed", "amount"),
+    [
+        ("15000", 15000),  # 15,000 dram, stored as written
+        ("15 000", 15000),  # a thousands separator
+        (f"15{chr(0xA0)}000", 15000),  # and the non-breaking one a paste carries
+        ("0", 0),
+        ("", None),
+        ("   ", None),
+    ],
+)
+def test_a_price_is_read_as_it_is_written(typed: str, amount: int | None) -> None:
+    assert _price_amount(typed) == amount
+
+
+@pytest.mark.parametrize(
+    "typed",
+    [
+        "free",
+        "15000.50",  # a price here is whole units, and rounding it silently is worse
+        "15000,50",
+        "15 000 AMD",
+        "-500",
+        "²",  # `str.isdigit` alone says this is a digit; `int` disagrees
+    ],
+)
+def test_a_price_that_is_not_a_whole_number_is_refused_rather_than_guessed(typed: str) -> None:
+    with pytest.raises(ValueError):
+        _price_amount(typed)
+
+
+def test_the_form_shows_the_price_it_would_accept_back() -> None:
+    """The field round-trips: what it renders is what it parses."""
+    assert _price_display(15000) == "15000"
+    assert _price_display(None) == ""
+    assert _price_amount(_price_display(15000)) == 15000
+
+
+async def test_a_price_with_a_thousands_separator_is_saved_rather_than_500ing(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """Reported in use: the price field answered with an internal server error.
+
+    `int()` on whatever she typed is what did it, and the field was labelled
+    "minor units", which is what made her type something else.
+    """
+    _sign_in(web)
+
+    response = web.post(
+        "/admin/session-types",
+        data={
+            "csrf_token": _csrf(web),
+            "code": "individual",
+            "duration_min": "60",
+            "price_amount_minor": "15 000",
+            "price_currency": "amd",
+            "is_active": "1",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert BAD_PRICE not in response.headers["location"]
+
+    await _fresh(committed)
+    row = (
+        await committed.execute(select(SessionType).where(SessionType.code == "individual"))
+    ).scalar_one()
+    assert row.price_amount_minor == 15000, "whole dram, as she wrote it"
+    assert row.price_currency == "AMD", "ISO 4217 is upper case"
+
+    # And the page offers it back in the shape she would type it again.
+    page = web.get("/admin/session-types")
+    assert 'value="15000"' in page.text
+
+    row.price_amount_minor = None
+    row.price_currency = None
+    await committed.commit()
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
+async def test_a_price_that_is_not_a_number_says_so_instead_of_crashing(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    _sign_in(web)
+
+    response = web.post(
+        "/admin/session-types",
+        data={
+            "csrf_token": _csrf(web),
+            "code": "individual",
+            "duration_min": "60",
+            "price_amount_minor": "15000.50",
+            "price_currency": "",
+            "is_active": "1",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "flash=" in response.headers["location"]
+
+    await _fresh(committed)
+    row = (
+        await committed.execute(select(SessionType).where(SessionType.code == "individual"))
+    ).scalar_one()
+    assert row.price_amount_minor is None, "a refused save must change nothing"
+
+    await committed.rollback()
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
+# --- Session type names -----------------------------------------------------
+
+
+async def test_a_session_type_with_no_name_falls_back_to_its_code(
+    committed: AsyncSession,
+) -> None:
+    """§15 returns the key itself when nothing is written for it.
+
+    A type the therapist adds has a `booking.type.<code>` nobody has written,
+    so clients were offered `booking.type.superme`.
+    """
+    practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
+    row = SessionType(practice_id=practice.id, code="unnamedtype", duration_min=60)
+    committed.add(row)
+    await committed.commit()
+
+    try:
+        assert await session_type_name(committed, "ru", "unnamedtype") == "unnamedtype"
+    finally:
+        await committed.execute(delete(SessionType).where(SessionType.id == row.id))
+        await committed.commit()
+
+
+async def test_naming_a_session_type_reaches_both_client_channels(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """The name is a `translation` row, so it is one edit for every surface."""
+    _sign_in(web)
+
+    response = web.post(
+        "/admin/session-types",
+        data={
+            "csrf_token": _csrf(web),
+            "code": "supervision",
+            "duration_min": "60",
+            "price_amount_minor": "",
+            "price_currency": "",
+            "is_active": "1",
+            "name_ru": "Супервизия",
+            "name_hy": "Սուպերվիզիա",
+            "name_en": "Supervision",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    await _fresh(committed)
+    row = (
+        await committed.execute(select(SessionType).where(SessionType.code == "supervision"))
+    ).scalar_one()
+
+    try:
+        assert await session_type_name(committed, "ru", "supervision") == "Супервизия"
+        assert await session_type_name(committed, "hy", "supervision") == "Սուպերվիզիա"
+        assert await session_type_name(committed, "en", "supervision") == "Supervision"
+
+        # Written through `set_text`, so it is also on the translations page --
+        # `booking.` is the first group there.
+        page = web.get("/admin/translations?lang=ru")
+        assert "booking.type.supervision" in page.text
+
+        # And the form offers back exactly what is stored, not a fallback: a
+        # prefilled Armenian field holding the Russian name would be saved as
+        # though somebody had translated it.
+        types_page = web.get("/admin/session-types")
+        assert 'value="Супервизия"' in types_page.text
+    finally:
+        await committed.execute(
+            delete(Translation).where(Translation.key == "booking.type.supervision")
+        )
+        await committed.execute(delete(SessionType).where(SessionType.id == row.id))
+        await committed.commit()
+        invalidate_cache()
+
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
+async def test_a_language_left_empty_writes_no_row(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """§15's fallback chain beats an empty row, which would render as nothing."""
+    _sign_in(web)
+
+    web.post(
+        "/admin/session-types",
+        data={
+            "csrf_token": _csrf(web),
+            "code": "halfnamed",
+            "duration_min": "60",
+            "price_amount_minor": "",
+            "price_currency": "",
+            "is_active": "1",
+            "name_ru": "Только по-русски",
+            "name_hy": "",
+            "name_en": "",
+        },
+        follow_redirects=False,
+    )
+
+    await _fresh(committed)
+    row = (
+        await committed.execute(select(SessionType).where(SessionType.code == "halfnamed"))
+    ).scalar_one()
+
+    try:
+        keys = (
+            (
+                await committed.execute(
+                    select(Translation.lang).where(
+                        Translation.key == "booking.type.halfnamed"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert set(keys) == {"ru"}
+    finally:
+        await committed.execute(
+            delete(Translation).where(Translation.key == "booking.type.halfnamed")
+        )
+        await committed.execute(delete(SessionType).where(SessionType.id == row.id))
+        await committed.commit()
+        invalidate_cache()
+
     await committed.execute(delete(AdminSession))
     await committed.commit()

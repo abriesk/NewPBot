@@ -15,12 +15,18 @@ place rather than once per channel:
 | negotiating | admin_propose                | negotiating |
 | negotiating | client_decline, admin_reject | rejected    |
 | confirmed   | admin_cancel                 | cancelled   |
+| confirmed   | admin_reschedule             | confirmed   |
 | confirmed   | complete (worker)            | completed   |
 
 Anything not in that table raises `InvalidTransition` and changes nothing.
-There is no path from `confirmed` back to `negotiating`: a change of time after
-confirmation is a cancellation plus a new request, which is what keeps reminders
-and slot bookkeeping honest (DESIGN.md §7).
+There is still no path from `confirmed` back to `negotiating`: a booking under
+discussion again is a booking nobody can rely on, and neither side asked for
+that. What there is now is a way to move it *while it stays booked*
+(`admin_reschedule`). This table used to say a change of time after confirmation
+was "a cancellation plus a new request" -- which was tidy for reminders and slot
+bookkeeping, and wrong for the person it happens to: it throws away the request,
+its thread and its history, and asks the client to start again for something the
+therapist did on the day her diary came apart (DESIGN.md §14).
 """
 
 from __future__ import annotations
@@ -60,6 +66,7 @@ from app.core.events import (
     RequestNote,
     RequestProposal,
     RequestRejected,
+    RequestRescheduled,
     RequestSubmitted,
     collect,
 )
@@ -147,7 +154,11 @@ ALLOWED: dict[RequestStatus, frozenset[str]] = {
             "admin_reject",
         }
     ),
-    RequestStatus.confirmed: frozenset({"admin_cancel", "complete"}),
+    # §7.1: `admin_reschedule` is the exit from `confirmed` that keeps the
+    # booking. Cancelling and rebooking is not the same move -- it loses the
+    # request, its thread and its history, and asks the client to start again
+    # for something the therapist did.
+    RequestStatus.confirmed: frozenset({"admin_cancel", "admin_reschedule", "complete"}),
     RequestStatus.rejected: frozenset(),
     RequestStatus.expired: frozenset(),
     RequestStatus.cancelled: frozenset(),
@@ -940,19 +951,37 @@ async def admin_reject(
 
 
 async def admin_cancel(
-    session: AsyncSession, request_id: int, *, reason: str | None = None
+    session: AsyncSession,
+    request_id: int,
+    *,
+    reason: str | None = None,
+    keep_slot: bool = False,
 ) -> BookingRequest:
     """confirmed -> cancelled.
 
     Not optional and not gated on `cancel_window_hours`: without it a confirmed
     booking has no exit that releases its slot, and the therapist has no
     recourse when she is ill (DESIGN.md §14).
+
+    `keep_slot` blocks that hour instead of releasing it, and exists because
+    releasing was the only behaviour and is the wrong one for the commonest
+    reason to cancel. She calls off Thursday because she is ill; the hour goes
+    straight back on the picker, and a stranger books the time she is ill in
+    before she has put the phone down. Blocking keeps it off the picker until
+    she puts it back by hand -- only she knows when the day is hers again.
+
+    Releasing stays the default because the other reason to cancel is ordinary:
+    a session that will not happen for a reason that has nothing to do with her
+    day, where the hour is genuinely free and somebody else may have it.
     """
     request = await _get(session, request_id)
     _guard(request, "admin_cancel")
 
     scheduled_start = request.scheduled_start
-    await _release_slot(session, request)
+    if keep_slot and request.slot_id is not None:
+        await slot_service.block_slot(session, request.slot_id)
+    else:
+        await _release_slot(session, request)
     await _cancel_reminders(session, request)
 
     request.status = RequestStatus.cancelled
@@ -1243,4 +1272,158 @@ async def complete_request(session: AsyncSession, request_id: int) -> BookingReq
     await session.flush()
 
     await _audit(session, request, ActorType.system, "request.complete")
+    return request
+
+
+async def clashes_at(
+    session: AsyncSession, instant: datetime, *, ignoring: int | None = None
+) -> BookingRequest | None:
+    """A confirmed session already starting at `instant`, if there is one.
+
+    Advisory, never a guard. `admin_approve` has always allowed two sessions at
+    one instant and there are reasons to want that -- but rescheduling in a
+    hurry onto an hour she has already promised is a mistake she would discover
+    on the day, so §12.2 says so in the flash and lets her proceed.
+    """
+    stmt = (
+        select(BookingRequest)
+        .where(
+            BookingRequest.status == RequestStatus.confirmed,
+            BookingRequest.scheduled_start == instant,
+        )
+        .limit(1)
+    )
+    if ignoring is not None:
+        stmt = stmt.where(BookingRequest.id != ignoring)
+    return (await session.execute(stmt)).scalar_one_or_none()
+
+
+async def _move_reminders(session: AsyncSession, request: BookingRequest) -> None:
+    """Point this request's reminders at its new time (§13).
+
+    Moved rather than cancelled and rebuilt, because `UNIQUE(request_id,
+    offset_min)` leaves no room for a second row at the same offset -- which is
+    the schema saying a reminder belongs to an offset, not to an instant. The
+    `reminder` docstring has claimed since it was written that rows "survive a
+    reschedule cleanly"; this is what makes that true.
+
+    A reminder that already **fired** for the old time is put back to
+    `scheduled`: the client was told about a time that is no longer the time,
+    so they are owed the reminder again. One whose new due time has already
+    passed becomes `skipped` rather than firing late, exactly as
+    `_create_reminders` decides it for a new booking.
+    """
+    practice = await get_practice(session)
+    assert request.scheduled_start is not None  # guaranteed by the caller
+
+    existing = (
+        (await session.execute(select(Reminder).where(Reminder.request_id == request.id)))
+        .scalars()
+        .all()
+    )
+    by_offset = {reminder.offset_min: reminder for reminder in existing}
+
+    for offset, due_at, already_past in reminder_schedule(practice, request.scheduled_start):
+        reminder = by_offset.pop(offset, None)
+        state = ReminderState.skipped if already_past else ReminderState.scheduled
+        if reminder is None:
+            session.add(
+                Reminder(
+                    request_id=request.id, offset_min=offset, due_at=due_at, state=state
+                )
+            )
+            continue
+        reminder.due_at = due_at
+        # `cancelled` is not revived: that is a reminder somebody stopped on
+        # purpose, and a reschedule is not the moment to reverse the decision.
+        if reminder.state is not ReminderState.cancelled:
+            reminder.state = state
+
+    # An offset the practice no longer configures has no time to be moved to.
+    for orphan in by_offset.values():
+        if orphan.state is ReminderState.scheduled:
+            orphan.state = ReminderState.cancelled
+
+    await session.flush()
+
+
+async def admin_reschedule(
+    session: AsyncSession,
+    request_id: int,
+    *,
+    new_start: datetime,
+    note: str | None = None,
+) -> BookingRequest:
+    """confirmed -> confirmed, at another time (§7.1, DESIGN.md §14).
+
+    The only exit §7.1 used to offer from `confirmed` was `admin_cancel`, which
+    throws the booking away. What the therapist needs when her day comes apart
+    is to *move* the session and have the client told, and cancelling and
+    rebooking is not the same thing: it loses the request, its thread and its
+    history, and asks the client to start again for something she did.
+
+    **The old slot is blocked, not released.** The reason the hour is free is
+    that she cannot work it, so putting it back on the picker would offer a
+    stranger the time she is ill in. It stays off the picker until she puts it
+    back by hand -- only she knows when the day is hers again.
+
+    Nothing here becomes un-confirmed. The client is told, with her note; a
+    client the new time does not suit answers with the note their request page
+    already offers, which reaches her without the booking evaporating first.
+    """
+    request = await _get(session, request_id)
+    _guard(request, "admin_reschedule")
+
+    previous_start = request.scheduled_start
+    assert previous_start is not None  # §6.5's CHECK on `confirmed`
+
+    if new_start <= now_utc():
+        # The completion sweep is about to close it, and a session that has
+        # already started is moved by saying so out loud, not by this form.
+        raise InvalidTransition("booking_request", request.status.value, "admin_reschedule")
+
+    if request.slot_id is not None:
+        await slot_service.block_slot(session, request.slot_id)
+        request.slot_id = None
+
+    # The new time may happen to be one she publishes; if so it comes off the
+    # picker, the same way `admin_approve` takes it.
+    matching = await _matching_slot(session, new_start)
+    if matching is not None:
+        await slot_service.book_slot(session, matching, request.id)
+        request.slot_id = matching
+
+    request.scheduled_start = new_start
+    request.updated_at = now_utc()
+    await session.flush()
+
+    await _move_reminders(session, request)
+
+    # The thread is where the client reads what happened, and a session that
+    # moved with no explanation is the thing this note exists to prevent. Kind
+    # `note` rather than `proposal`: §6.6 derives whose turn it is from the last
+    # message, and a proposal would say the client owes an answer when the
+    # session is booked.
+    session.add(
+        NegotiationMessage(
+            request_id=request.id,
+            sender=SenderType.admin,
+            kind=NegotiationKind.note,
+            proposed_start=new_start,
+            body_text=note,
+        )
+    )
+    await session.flush()
+
+    await _audit(session, request, ActorType.admin, "request.reschedule")
+    collect(
+        session,
+        RequestRescheduled(
+            request_id=request.id,
+            request_uuid=request.uuid,
+            previous_start=previous_start,
+            scheduled_start=new_start,
+            note=note,
+        ),
+    )
     return request

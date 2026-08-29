@@ -67,6 +67,7 @@ from app.core.services.slots import list_available_slots
 from app.core.services.translations import get_text
 from app.db import unit_of_work
 from app.render.dates import day_label
+from app.render.labels import session_type_name
 from app.render.markdown import to_web_html
 
 logger = logging.getLogger(__name__)
@@ -90,7 +91,13 @@ LANGUAGES = ("ru", "hy", "en")
 # --- Page context -----------------------------------------------------------
 
 
-async def _queue_login_link(session: AsyncSession, *, client_id: UUID, email: str) -> None:
+async def _queue_login_link(
+    session: AsyncSession,
+    *,
+    client_id: UUID,
+    email: str,
+    request_uuid: UUID | None = None,
+) -> None:
     """Queue `auth.login_link.client` to an address that has not proved itself.
 
     §13.3 makes this the one intent allowed to reach an unverified address,
@@ -98,10 +105,20 @@ async def _queue_login_link(session: AsyncSession, *, client_id: UUID, email: st
     deep link too: the merge has to be behind the same proof, or attaching a
     Telegram account to somebody else's client record costs nothing but knowing
     their email (DESIGN.md §5.1).
+
+    `request_uuid` is where the link lands once it has signed the client in.
+    Sent from the booking flow it is the request they have just made -- the mail
+    says "open your booking", and it used to open the front page, leaving the
+    client to find their way back to a request whose only address is a UUID they
+    were shown once. The same link sent from `/auth/email` has no request behind
+    it and still lands on the front page, which is the right answer there.
     """
     settings = get_settings()
+    payload: dict[str, str] = {"email": email}
+    if request_uuid is not None:
+        payload["request"] = str(request_uuid)
     raw = await issue_token(
-        session, TokenPurpose.login, client_id=client_id, payload={"email": email}
+        session, TokenPurpose.login, client_id=client_id, payload=payload
     )
     link_raw = await issue_token(session, TokenPurpose.link_channel, client_id=client_id)
     await notifications.enqueue(
@@ -155,6 +172,11 @@ async def _labels(session: AsyncSession, lang: str) -> dict[str, str]:
         "submitted": "booking.submitted",
         "unavailable": "booking.unavailable",
         "waitlist_intro": "waitlist.intro",
+        # The same form reached by choice rather than because there is nothing
+        # free (§12.1), so it opens on a different sentence and offers itself
+        # from under the picker.
+        "waitlist_intro_by_choice": "waitlist.intro_by_choice",
+        "waitlist_from_picker": "waitlist.from_picker",
         "waitlist_problem": "waitlist.ask_problem",
         "waitlist_contact": "waitlist.ask_contact",
         "waitlist_submitted": "waitlist.submitted",
@@ -357,11 +379,13 @@ def build_router() -> APIRouter:
             resolved = resolve_booking_mode(practice, slots_exist=bool(slots))
 
             if resolved.path is BookingPath.waitlist:
-                return _render("waitlist.html", context)
+                # Not by choice: there is nothing to choose from, which is what
+                # `waitlist.intro` says.
+                return _render("waitlist.html", {**context, "by_choice": False})
 
             session_types = []
             for st in await _active_session_types(session):
-                name = await get_text(session, context["lang"], f"booking.type.{st.code}")
+                name = await session_type_name(session, context["lang"], st.code)
                 session_types.append(
                     {
                         "id": st.id,
@@ -434,6 +458,25 @@ def build_router() -> APIRouter:
                 tz=zone,
             )
 
+            # §12.1: nothing this way, something the other. Offered as a
+            # labelled switch rather than by quietly listing the other kind --
+            # a client looking at in-person times after asking for online has
+            # to work out what happened, where a button saying so tells them.
+            chosen = Modality(modality) if modality else None
+            switch_to: Modality | None = None
+            # Nothing to switch to when only one modality is on offer (§6.1).
+            if not slots and chosen is not None and not practice.online_only:
+                other = Modality.online if chosen is Modality.onsite else Modality.onsite
+                if await list_available_slots(
+                    session,
+                    window_from=now_utc(),
+                    window_to=now_utc() + SLOT_WINDOW,
+                    session_type_id=session_type_id,
+                    modality=other,
+                    tz=zone,
+                ):
+                    switch_to = other
+
             # Grouped by the calendar date, not by the heading it will be given:
             # keying a structure on rendered text is how two days quietly become
             # one when the wording changes.
@@ -460,6 +503,17 @@ def build_router() -> APIRouter:
                     "session_type_id": session_type_id or "",
                     "modality": modality or "online",
                     "tz": zone,
+                    "switch_to": switch_to.value if switch_to else None,
+                    "switch_label": (
+                        await get_text(session, lang, f"booking.switch.{switch_to.value}")
+                        if switch_to
+                        else ""
+                    ),
+                    "none_this_way": (
+                        await get_text(session, lang, f"booking.slot.none_{chosen.value}")
+                        if switch_to and chosen
+                        else ""
+                    ),
                 },
             )
 
@@ -651,7 +705,12 @@ def build_router() -> APIRouter:
                 # unverified address (§13.3), which is why the booking otherwise
                 # leaves the client with no route back at all.
                 if settings.email_enabled and await magic_link_allowance_left(session, email) > 0:
-                    await _queue_login_link(session, client_id=client.id, email=email)
+                    await _queue_login_link(
+                        session,
+                        client_id=client.id,
+                        email=email,
+                        request_uuid=booking_request.uuid,
+                    )
                 verify_notice = await get_text(session, context["lang"], "booking.check_email")
 
             await notifications.publish(session)
@@ -678,6 +737,21 @@ def build_router() -> APIRouter:
             return response
 
     # --- Waitlist -----------------------------------------------------------
+
+    @router.get("/waitlist", response_class=HTMLResponse, include_in_schema=False)
+    async def waitlist_page(request: Request) -> Response:
+        """§12.1: the waitlist beside the picker, not only instead of it.
+
+        `/book` renders this same form when `resolve_booking_mode` sends the
+        whole practice to the waitlist -- no times at all, or availability off.
+        This is the other way in, for the client who can see four times and
+        cannot make any of them. Same form, different first sentence: telling
+        somebody there is nothing free while they are looking at a list of free
+        times is worse than saying nothing.
+        """
+        async with unit_of_work() as session:
+            context = await _context(session, request)
+            return _render("waitlist.html", {**context, "by_choice": True})
 
     @router.post("/waitlist", include_in_schema=False)
     async def join_waitlist(
@@ -980,7 +1054,21 @@ def build_router() -> APIRouter:
                         status_code=400,
                     )
 
-            response = RedirectResponse("/", status_code=303)
+            # Where the link was sent from. A login link minted by the booking
+            # flow is about one request and says so, so it lands there rather
+            # than on the front page; one from `/auth/email` names no request
+            # and lands on the front page as before. Parsed rather than
+            # interpolated: this is our own payload, and a redirect built from
+            # a string in the database should still have to be a UUID.
+            target = "/"
+            requested = str(result.payload.get("request", ""))
+            if requested:
+                try:
+                    target = f"/r/{UUID(requested)}"
+                except ValueError:
+                    logger.info("login token carried an unreadable request reference")
+
+            response = RedirectResponse(target, status_code=303)
             issue_client_session(response, result.client_id)
             issue_csrf(response, csrf_token_for(request))
             return response

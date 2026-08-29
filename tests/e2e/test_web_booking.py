@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from app.channels.web.client import LANG_COOKIE
 from app.channels.web.security import CLIENT_COOKIE, CSRF_COOKIE
 from app.config import get_settings
-from app.core.enums import Channel, RequestStatus, SlotStatus, TokenPurpose
+from app.core.enums import Channel, Modality, RequestStatus, SlotStatus, TokenPurpose
 from app.core.models import (
     AuthToken,
     BookingRequest,
@@ -1127,3 +1127,243 @@ async def test_with_free_text_off_the_page_offers_the_waitlist_instead(
         .all()
     )
     assert entries, "they asked to be told when something opens"
+
+
+async def test_the_login_link_from_a_booking_lands_on_that_booking(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """Reported in use: the first email after booking opened the front page.
+
+    The mail says "open your booking", and the client who followed it arrived
+    at the practice home page instead -- with no way back to a request whose
+    only address is a UUID they were shown once, on a page they have left.
+    """
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+    web.get("/book")
+    web.post(
+        "/book/hold",
+        data={
+            "csrf_token": _csrf(web),
+            "slot_id": web_slot,
+            "session_type_id": session_type_id,
+            "modality": "online",
+            "tz": "Europe/Moscow",
+        },
+    )
+    web.post(
+        "/book",
+        data={"csrf_token": _csrf(web), "problem": "", "name": "", "contact": "", "email": EMAIL},
+    )
+
+    await committed.rollback()
+    request = (
+        await committed.execute(select(BookingRequest).order_by(BookingRequest.id.desc()).limit(1))
+    ).scalar_one()
+    identity = (
+        await committed.execute(select(Identity).where(Identity.external_id == EMAIL))
+    ).scalar_one()
+
+    token = (
+        await committed.execute(
+            select(AuthToken)
+            .where(
+                AuthToken.client_id == identity.client_id,
+                AuthToken.purpose == TokenPurpose.login,
+            )
+            .order_by(AuthToken.id.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+    assert token.payload.get("request") == str(request.uuid), "the link knows what it is about"
+
+    # Only the hash is stored, so mint one carrying the same payload and follow
+    # it the way the client would.
+    from app.core.services.clients import issue_token
+
+    raw = await issue_token(
+        committed,
+        TokenPurpose.login,
+        client_id=identity.client_id,
+        payload={"email": EMAIL, "request": str(request.uuid)},
+    )
+    await committed.commit()
+
+    callback = web.get("/auth/callback", params={"token": raw}, follow_redirects=False)
+    assert callback.status_code == 303
+    assert callback.headers["location"] == f"/r/{request.uuid}"
+
+    # And the page it lands on is really theirs.
+    assert web.get(f"/r/{request.uuid}").status_code == 200
+
+
+async def test_a_login_link_with_no_booking_behind_it_still_lands_on_the_front_page(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """`/auth/email` is somebody signing in, not somebody booking."""
+    web.get("/auth/email")
+    web.post("/auth/email", data={"csrf_token": _csrf(web), "email": EMAIL})
+
+    identity = (
+        await committed.execute(select(Identity).where(Identity.external_id == EMAIL))
+    ).scalar_one()
+
+    from app.core.services.clients import issue_token
+
+    raw = await issue_token(
+        committed, TokenPurpose.login, client_id=identity.client_id, payload={"email": EMAIL}
+    )
+    await committed.commit()
+
+    callback = web.get("/auth/callback", params={"token": raw}, follow_redirects=False)
+    assert callback.status_code == 303
+    assert callback.headers["location"] == "/"
+
+    await committed.execute(
+        delete(OutboxMessage).where(OutboxMessage.client_id == identity.client_id)
+    )
+    await committed.execute(delete(AuthToken).where(AuthToken.client_id == identity.client_id))
+    await committed.execute(delete(Identity).where(Identity.id == identity.id))
+    await committed.execute(delete(Client).where(Client.id == identity.client_id))
+    await committed.commit()
+
+
+async def test_the_slot_list_offers_a_way_onto_the_waitlist(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """§12.1: beside the picker, not only instead of it.
+
+    `/book` renders the waitlist form when there is nothing to choose from.
+    Somebody looking at times that are all wrong for them had no way to say so.
+    """
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+
+    partial = web.get(
+        "/book/slots",
+        params={"session_type_id": session_type_id, "modality": "online", "tz": "Europe/Moscow"},
+    )
+    assert partial.status_code == 200
+    assert str(web_slot) in partial.text, "the times are still the point of the page"
+    assert 'href="/waitlist"' in partial.text
+
+
+async def test_the_waitlist_page_reached_by_choice_does_not_claim_there_is_nothing(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """Telling somebody there are no free places while they are looking at a
+    list of them is worse than saying nothing."""
+    from app.core.services.translations import get_text
+
+    page = web.get("/waitlist")
+    assert page.status_code == 200
+
+    by_choice = await get_text(committed, "ru", "waitlist.intro_by_choice")
+    nothing_free = await get_text(committed, "ru", "waitlist.intro")
+    assert by_choice in page.text
+    assert nothing_free not in page.text
+
+
+async def test_the_waitlist_page_still_submits(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """The form behind it is the one that was already there."""
+    web.get("/waitlist")
+    response = web.post(
+        "/waitlist",
+        data={
+            "csrf_token": _csrf(web),
+            "problem": "evenings would suit me better",
+            "contact": "",
+            "email": EMAIL,
+        },
+    )
+    assert response.status_code == 200
+
+    await committed.rollback()
+    identity = (
+        await committed.execute(select(Identity).where(Identity.external_id == EMAIL))
+    ).scalar_one()
+    entry = (
+        await committed.execute(
+            select(WaitlistEntry).where(WaitlistEntry.client_id == identity.client_id)
+        )
+    ).scalar_one()
+    assert entry.problem_text == "evenings would suit me better"
+
+    # The admin's copy of the join carries neither `client_id` nor `request_id`,
+    # so a delete filtered on either misses it -- and left behind it is a `dead`
+    # row against a chat id that exists only in conftest. Scoped by `dedupe_key`
+    # for the same reason as the `web_slot` teardown above.
+    await committed.execute(
+        delete(OutboxMessage).where(
+            OutboxMessage.dedupe_key.like(f"waitlist-admin:{entry.id}:%")
+        )
+    )
+    await committed.execute(delete(WaitlistEntry).where(WaitlistEntry.id == entry.id))
+    await committed.execute(
+        delete(OutboxMessage).where(OutboxMessage.client_id == identity.client_id)
+    )
+    await committed.execute(delete(Identity).where(Identity.id == identity.id))
+    await committed.execute(delete(Client).where(Client.id == identity.client_id))
+    await committed.commit()
+
+
+async def test_the_web_offers_a_switch_when_the_other_modality_has_times(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """§12.1, the same rule as the bot: a labelled switch rather than the other
+    kind of time listed without explanation."""
+    from app.core.services.translations import get_text
+
+    practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+    onsite = Slot(
+        practice_id=practice.id,
+        starts_at=datetime.now(UTC) + timedelta(days=25, microseconds=11),
+        duration_min=60,
+        modality=Modality.onsite,
+        status=SlotStatus.available,
+    )
+    # The suite shares a database, so "only this slot is free" has to be
+    # arranged rather than assumed. Restored in `finally` for the same reason
+    # `free_text_off` restores its setting there: these tests commit, so a
+    # failure before cleanup would leave the picker empty for everything after.
+    ambient = (
+        (
+            await committed.execute(
+                select(Slot.id).where(Slot.status == SlotStatus.available)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    await committed.execute(
+        update(Slot).where(Slot.id.in_(ambient)).values(status=SlotStatus.blocked)
+    )
+    committed.add(onsite)
+    await committed.commit()
+
+    try:
+        partial = web.get(
+            "/book/slots",
+            params={
+                "session_type_id": session_type_id,
+                "modality": "online",
+                "tz": "Europe/Moscow",
+            },
+        )
+        assert partial.status_code == 200
+        assert str(onsite.id) not in partial.text, "no times of the other kind"
+        assert await get_text(committed, "ru", "booking.switch.onsite") in partial.text
+    finally:
+        await committed.rollback()
+        await committed.execute(delete(Slot).where(Slot.id == onsite.id))
+        await committed.execute(
+            update(Slot).where(Slot.id.in_(ambient)).values(status=SlotStatus.available)
+        )
+        await committed.commit()

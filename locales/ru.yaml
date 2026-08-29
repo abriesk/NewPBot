@@ -82,6 +82,10 @@ booking:
   timezone.detected: "Определён часовой пояс {timezone}. Всё верно?"   # TODO
   choose_slot: "Выберите удобное время. Время указано в поясе {timezone}."   # TODO
   slot.none_available: "Свободного времени сейчас нет."                       # TODO
+  slot.none_online: "Свободных онлайн-времён сейчас нет. Очные есть."          # TODO: review
+  slot.none_onsite: "Свободных очных времён сейчас нет. Онлайн есть."          # TODO: review
+  switch.online: "Перейти к онлайн"                                            # TODO: review
+  switch.onsite: "Перейти к очным"                                             # TODO: review
   slot.held: "Пожалуйста, завершите за {minutes} минут. Время не удерживается за вами, пока вы не отправите заявку, поэтому его ещё может выбрать кто-то другой."   # TODO
   slot.taken: "К сожалению, это время уже занято. Пожалуйста, выберите другое."
   slot.hold_expired: "Бронь истекла. Пожалуйста, выберите время заново."       # TODO
@@ -102,8 +106,17 @@ booking:
   cancelled_by_user: "Запись отменена. Вы вернулись в главное меню."
   unavailable: "Сейчас запись закрыта."                                        # TODO
 
+merge:
+  confirm: "У вас здесь есть запись, сделанная по электронной почте. Присоединить её к этому Telegram-аккаунту, чтобы всё было в одном месте?"   # TODO: review
+  confirm.yes: "Да, это я"                                                    # TODO: review
+  confirm.no: "Это не я"                                                      # TODO: review
+  done: "Готово. Теперь все ваши записи в одном месте."                       # TODO: review
+  busy: "У вас здесь осталось незавершённое действие. Пожалуйста, закончите его, а потом снова откройте ссылку из письма."   # TODO: review
+
 waitlist:
   intro: "К сожалению, сейчас нет свободных мест. Вы можете оставить заявку в лист ожидания."
+  from_picker: "Ни одно из этих времён мне не подходит"                        # TODO: review
+  intro_by_choice: "Оставьте заявку, и я напишу вам, когда освободится подходящее время."  # TODO: review
   ask_problem: "Кратко опишите, с чем вы хотели бы обратиться."                 # TODO
   ask_contact: "Пожалуйста, оставьте ваши контакты для связи."
   submitted: "Спасибо. Ваша заявка принята, я свяжусь с вами."                  # TODO
@@ -154,8 +167,11 @@ intent:
   request.confirmed.client.join_online: "Ссылка для подключения: {url}"         # TODO
   request.confirmed.client.join_onsite: "Адрес: {url}"                          # TODO
 
+  request.rescheduled.client.body: "Ваша консультация перенесена. Было: {previous_time}. Стало: {time}."   # TODO: review
+  request.rescheduled.client.reason: "{reason}"
+  request.rescheduled.client.default: "У меня возникли обстоятельства, которые я не смогла обойти. Простите за перенос — надеюсь, новое время вам подойдёт."   # TODO: review
   request.rejected.client.body: "К сожалению, заявку {uuid} не удалось согласовать."
-  request.rejected.client.reason: "Причина: {reason}"                           # TODO
+  request.rejected.client.reason: "{reason}"
   request.expired.client.body: "Заявка {uuid} истекла без ответа. Вы можете оставить новую."   # TODO
   request.cancelled.client.body: "Консультация {time} отменена."                # TODO
   request.cancelled.client.reason: "Причина: {reason}"                          # TODO

@@ -53,6 +53,25 @@ class RequestConfirmed(DomainEvent):
 
 
 @dataclass(frozen=True, slots=True)
+class RequestRescheduled(DomainEvent):
+    """A confirmed session moved to another time (§7.1).
+
+    Its own event rather than a second `RequestConfirmed`: that one says "your
+    session is confirmed", which told at a time nobody discussed reads as a
+    mistake. This one carries **both** instants, because the only thing the
+    client needs is to see what changed, and her note, because a session moved
+    without a word is worse than one moved with a bad reason.
+    """
+
+    request_id: int
+    request_uuid: UUID
+    previous_start: datetime
+    scheduled_start: datetime
+    note: str | None = None
+    intent_key: str = field(init=False, default="request.rescheduled")
+
+
+@dataclass(frozen=True, slots=True)
 class RequestProposal(DomainEvent):
     request_id: int
     request_uuid: UUID

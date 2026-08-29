@@ -56,10 +56,19 @@
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <button type="submit">block</button>
           </form>
-          <form method="post" action="/admin/slots/{{ s.id }}/delete">
-            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit">delete</button>
-          </form>
+          {# A request that ended still points at the time it asked for, and the
+             foreign key will not let that slot go (DESIGN.md §8). Offering
+             delete anyway is what produced a 500 on a button. #}
+          {% if s.deletable %}
+            <form method="post" action="/admin/slots/{{ s.id }}/delete">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+              <button type="submit">delete</button>
+            </form>
+          {% else %}
+            <span class="muted" title="A request asked for this time. Block it instead.">
+              asked for
+            </span>
+          {% endif %}
         {% elif s.status == "blocked" %}
           <form method="post" action="/admin/slots/{{ s.id }}/unblock">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

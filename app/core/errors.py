@@ -43,6 +43,16 @@ class SlotInThePast(DomainError):
     """§7.2 guards holding on `starts_at > now()`."""
 
 
+class SlotReferenced(DomainError):
+    """A request still points at this slot, so it can be blocked but not deleted.
+
+    Distinct from `InvalidTransition` because the answer is different: a held or
+    booked slot becomes deletable once the request that holds it ends, while a
+    slot some past request asked for never does. The therapist needs to be told
+    to block it rather than to wait.
+    """
+
+
 class BookingClosed(DomainError):
     """`availability_on` is off; the client gets the waitlist instead (§6)."""
 
@@ -57,6 +67,21 @@ class TokenInvalid(DomainError):
     Deliberately one exception for all four: telling a caller which of them
     applies leaks whether a token existed.
     """
+
+
+class MergeRefused(DomainError):
+    """Two client rows cannot be joined right now.
+
+    Not a failure of the merge but a reason not to attempt one: a half-finished
+    booking on either side, a client who has been erased (§16 -- a forgotten
+    person is not resurrected by a stale link), or the same row twice. The
+    caller says which, because the client can act on the first and not on the
+    others.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
 
 
 class TextTooLong(DomainError):

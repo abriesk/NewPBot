@@ -86,6 +86,17 @@ CATALOGUE: dict[str, IntentSpec] = {
         body_key="admin.intent.request.confirmed.admin.body",
         email_subject_key="email.subject.request_confirmed",
     ),
+    #: §7.1's reschedule. Its own intent rather than a second
+    #: `request.confirmed.client`: that one says the session is confirmed, and
+    #: said about a time nobody discussed it reads as a mistake. This carries
+    #: both instants, because what the client needs is to see what changed.
+    "request.rescheduled.client": IntentSpec(
+        key="request.rescheduled.client",
+        body_key="intent.request.rescheduled.client.body",
+        optional_parts=(("reason", "intent.request.rescheduled.client.reason"),),
+        actions=("open",),
+        email_subject_key="email.subject.request_update",
+    ),
     "request.rejected.client": IntentSpec(
         key="request.rejected.client",
         body_key="intent.request.rejected.client.body",

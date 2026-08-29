@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.channels.telegram import keyboards as kb
 from app.config import get_settings
 from app.core.enums import Channel, Modality, RequestStatus, SenderType, SlotStatus, TokenPurpose
-from app.core.errors import DomainError, SlotUnavailable, TokenInvalid
+from app.core.errors import DomainError, MergeRefused, SlotUnavailable, TokenInvalid
 from app.core.models import (
     BookingRequest,
     Client,
@@ -41,9 +41,11 @@ from app.core.services.clients import (
     link_identity,
     looks_like_email,
     magic_link_allowance_left,
+    merge_clients,
     resolve_client,
     set_client_language,
     set_client_timezone,
+    token_target,
 )
 from app.core.services.flow import Step
 from app.core.services.notifications import Envelope, Recipient
@@ -51,6 +53,7 @@ from app.core.services.settings import get_practice
 from app.core.services.slots import list_available_slots
 from app.core.services.translations import get_text
 from app.render.dates import day_label
+from app.render.labels import session_type_name
 from app.render.markdown import escape_telegram
 
 logger = logging.getLogger(__name__)
@@ -124,6 +127,18 @@ async def handle(session: AsyncSession, update: Update) -> Reply | None:
     # /start because she pressed Approve would be absurd.
     if update.callback_data:
         action, argument = kb.parse_callback(update.callback_data)
+        if action == kb.NOOP:
+            # A button that is there to be read: a day heading, a weekday
+            # letter, a padding cell in the month grid, an hour §13.2 marks as
+            # taken. The webhook answers the query, so the tap resolves and
+            # nothing is sent.
+            #
+            # This MUST come before the client lookup for the same reason the
+            # admin block does. `NOOP` is not an admin action, so the
+            # therapist -- who has no client record -- fell through to `_start`
+            # and was asked to choose a language, mid-proposal, for tapping one
+            # of the dead cells her own picker is full of.
+            return None
         if action in kb.ADMIN_ACTIONS:
             return await _admin_action(session, update.chat_id, action, argument)
 
@@ -205,6 +220,16 @@ async def _start(session: AsyncSession, update: Update) -> Reply:
 
     existing = await _known_client(session, update.chat_id)
 
+    if payload.startswith(LINK_PREFIX) and existing is not None:
+        # The case this link exists for, and the one it used to walk past.
+        # Anyone who pressed /start before booking by email already has a client
+        # row here, so `link_identity` would refuse to reassign the identity --
+        # correctly, since silently moving one between people is not
+        # recoverable. The answer is not to reassign an identity but to join the
+        # two rows, and only the client can say they are one person. So this
+        # asks, and merges on the answer (DESIGN.md §5.1).
+        return await _offer_merge(session, existing, payload[len(LINK_PREFIX) :])
+
     if payload.startswith(LINK_PREFIX) and existing is None:
         raw = payload[len(LINK_PREFIX) :]
         try:
@@ -247,6 +272,65 @@ async def _start(session: AsyncSession, update: Update) -> Reply:
         await get_text(session, practice.default_language, "lang.select"),
         keyboard=kb.language_keyboard(),
     )
+
+
+async def _offer_merge(session: AsyncSession, existing: Client, raw: str) -> Reply:
+    """§13.1 step 1: ask before joining two records that may be one person.
+
+    The token is *peeked* rather than consumed. A client who taps "Not me", or
+    who never answers, must be left with the link they were sent still working
+    -- and burning it to draw this screen would spend it on a question.
+
+    The wording names no address. Whoever is holding this phone has proved they
+    can read the mailbox only if they are the person the mail was sent to, and
+    the screen is drawn before that is settled.
+    """
+    target = await token_target(session, raw, TokenPurpose.link_channel)
+    if target is None or target.client_id is None:
+        return Reply(await get_text(session, existing.language, "common.error.expired_link"))
+
+    if target.client_id == existing.id:
+        # Already one person: the link is doing nothing, which is not an error.
+        await consume_token(session, raw, TokenPurpose.link_channel)
+        return await _menu(session, existing, greeting_key="common.welcome_back")
+
+    return Reply(
+        await get_text(session, existing.language, "merge.confirm"),
+        keyboard=kb.choice_keyboard(
+            kb.MERGE,
+            [(raw, await get_text(session, existing.language, "merge.confirm.yes"))],
+            extra=[(await get_text(session, existing.language, "merge.confirm.no"), kb.MERGE_NO)],
+        ),
+    )
+
+
+async def _confirm_merge(session: AsyncSession, client: Client, raw: str) -> Reply:
+    """The answer to `_offer_merge`. Consumes the token only if the merge runs.
+
+    `into` is the token's client and this chat's row is absorbed: §5.1's reason
+    is that a web session is a cookie carrying a raw client id, so the row the
+    emailed link names is the one whose browser session has to keep working.
+    The Telegram identity moves with everything else, so the next update from
+    this chat finds the survivor.
+    """
+    target = await token_target(session, raw, TokenPurpose.link_channel)
+    if target is None or target.client_id is None:
+        return Reply(await get_text(session, client.language, "common.error.expired_link"))
+
+    language = client.language
+    try:
+        survivor = await merge_clients(session, into=target.client_id, absorbing=client.id)
+    except MergeRefused as refused:
+        if refused.reason == "busy":
+            # Their words are half-typed into `flow_state`, and a merge would
+            # have to drop one of two rows to satisfy its unique constraint.
+            # The token is not spent, so the same link works once they are done.
+            return Reply(await get_text(session, language, "merge.busy"))
+        logger.info("merge refused: %s", refused.reason)
+        return Reply(await get_text(session, language, "common.error.generic"))
+
+    await consume_token(session, raw, TokenPurpose.link_channel)
+    return await _menu(session, survivor, greeting_key="merge.done")
 
 
 async def _menu(
@@ -319,12 +403,13 @@ async def _text(session: AsyncSession, client: Client, update: Update) -> Reply 
         return await _contact_email(session, client, text)
 
     if step is Step.entering_desired_time:
-        # §13.1 asks the slot path for the session type and modality *after* the
-        # time, so the free-text path asks in the same order. Going straight to
-        # the problem text here left `session_type_id` unset, and the submit
-        # below needs it: booking_request.session_type_id is NOT NULL.
+        # §13.1 asks how and what before when, and the free-text path asks in
+        # the same order for the same reason -- modality and session type are
+        # answered before this, so what is left after the time is the problem.
+        # `session_type_id` is set by then, which the submit below needs:
+        # booking_request.session_type_id is NOT NULL.
         await flow.remember(session, client.id, Channel.telegram, desired_time=text)
-        return await _ask_session_type(session, client)
+        return await _ask_problem(session, client)
 
     if step is Step.entering_counter:
         return await _submit_counter(session, client, text)
@@ -334,6 +419,9 @@ async def _text(session: AsyncSession, client: Client, update: Update) -> Reply 
 
     if step is Step.admin_entering_cancel_reason:
         return await _submit_cancel_reason(session, client, update.chat_id, text)
+
+    if step is Step.admin_entering_reject_note:
+        return await _submit_reject_note(session, client, update.chat_id, text)
 
     if step is Step.waitlist_problem:
         await flow.remember(session, client.id, Channel.telegram, problem=text)
@@ -394,10 +482,10 @@ async def _my_appointments(session: AsyncSession, client: Client) -> Reply:
 
     for request in requests:
         when = await booking.requested_start(session, request)
-        session_type = await get_text(
+        session_type = await session_type_name(
             session,
             client.language,
-            f"booking.type.{await _session_type_code(session, request.session_type_id)}",
+            await _session_type_code(session, request.session_type_id),
         )
         lines.append(
             await get_text(
@@ -502,47 +590,72 @@ async def _begin_consultation(session: AsyncSession, client: Client) -> Reply:
             extra=[await get_text(session, client.language, "waitlist.ask_problem")],
         )
 
-    if resolved.path is BookingPath.negotiation:
-        await flow.set_step(
-            session, client.id, Channel.telegram, Step.entering_desired_time, replace={}
-        )
-        return Reply(await get_text(session, client.language, "booking.ask_desired_time"))
+    # §13.1: how before when. Choosing a time first and learning afterwards
+    # whether it was ever an online time is the wrong order twice over -- the
+    # picker cannot filter by an answer it does not have, and the client
+    # discovers the mismatch only after committing to a slot.
+    #
+    # Both paths start here. Which one this is has to be *remembered* rather
+    # than re-derived after the questions: `resolve_booking_mode` reads the slot
+    # inventory, and a slot appearing while somebody answers two questions would
+    # otherwise move them onto a picker they never asked for.
+    await flow.set_step(
+        session,
+        client.id,
+        Channel.telegram,
+        Step.choosing_modality,
+        replace={"path": resolved.path.value},
+    )
+    return await _ask_modality(session, client)
 
-    if client.timezone is None:
-        await flow.set_step(
-            session, client.id, Channel.telegram, Step.choosing_timezone, replace={}
-        )
-        options = (
-            (
-                await session.execute(
-                    select(TimezoneOption)
-                    .where(TimezoneOption.is_active.is_(True))
-                    .order_by(TimezoneOption.sort_order, TimezoneOption.id)
-                )
+
+async def _ask_timezone(session: AsyncSession, client: Client) -> Reply:
+    """§13.1 step 6, and only for a session the client attends from elsewhere.
+
+    An on-site client is in the room, so the room's clock is theirs and the
+    question is noise. Their `client.timezone` is deliberately left unset rather
+    than filled with the practice's: a stored zone is never asked for again, so
+    guessing here would silently answer the question for a later *online*
+    booking made from anywhere else. Nothing is lost by waiting -- §16.9's
+    delivery path already falls back to the practice zone for a client who has
+    not said, which is exactly the right answer for somebody sitting in it.
+    """
+    await flow.set_step(session, client.id, Channel.telegram, Step.choosing_timezone)
+    options = (
+        (
+            await session.execute(
+                select(TimezoneOption)
+                .where(TimezoneOption.is_active.is_(True))
+                .order_by(TimezoneOption.sort_order, TimezoneOption.id)
             )
-            .scalars()
-            .all()
         )
-        return Reply(
-            await get_text(session, client.language, "booking.choose_timezone"),
-            keyboard=kb.timezone_keyboard([(o.iana_name, o.display_name) for o in options]),
-        )
-
-    return await _show_slots(session, client)
+        .scalars()
+        .all()
+    )
+    return Reply(
+        await get_text(session, client.language, "booking.choose_timezone"),
+        keyboard=kb.timezone_keyboard([(o.iana_name, o.display_name) for o in options]),
+    )
 
 
 async def _show_slots(session: AsyncSession, client: Client) -> Reply:
     """§13.1 step 6: grouped by day, in the client's timezone."""
     practice = await get_practice(session)
     tz = client.timezone or practice.timezone
+    chosen = await _chosen_modality(session, client)
+    scratch = await flow.data(session, client.id, Channel.telegram)
+    session_type_id = int(scratch["session_type_id"]) if scratch.get("session_type_id") else None
+
     slots = await list_available_slots(
         session,
         window_from=now_utc(),
         window_to=now_utc() + SLOT_WINDOW,
+        session_type_id=session_type_id,
+        modality=chosen,
         tz=tz,
     )
     if not slots:
-        return Reply(await get_text(session, client.language, "booking.slot.none_available"))
+        return await _no_slots_for(session, client, chosen, session_type_id, tz)
 
     await flow.set_step(session, client.id, Channel.telegram, Step.choosing_slot)
     # The picker's day headings are written here, where there is a session and a
@@ -556,7 +669,90 @@ async def _show_slots(session: AsyncSession, client: Client) -> Reply:
 
     return Reply(
         await get_text(session, client.language, "booking.choose_slot", timezone=tz),
-        keyboard=kb.slot_keyboard(slots, tz, labels),
+        keyboard=kb.slot_keyboard(
+            slots,
+            tz,
+            labels,
+            # §13.1: the waitlist is offered beside the picker, not only
+            # instead of it. `resolve_booking_mode` sends a client here when
+            # times exist, and four times that are all wrong for them left no
+            # move but closing the app.
+            extra=[
+                [
+                    (
+                        await get_text(session, client.language, "waitlist.from_picker"),
+                        kb.WAITLIST,
+                    )
+                ]
+            ],
+        ),
+    )
+
+
+async def _chosen_modality(session: AsyncSession, client: Client) -> Modality | None:
+    """What they answered to "how would you like to meet?", if anything yet."""
+    scratch = await flow.data(session, client.id, Channel.telegram)
+    raw = scratch.get("modality")
+    return Modality(str(raw)) if raw else None
+
+
+async def _no_slots_for(
+    session: AsyncSession,
+    client: Client,
+    chosen: Modality | None,
+    session_type_id: int | None,
+    tz: str,
+) -> Reply:
+    """Nothing free the way they asked to meet (§13.1).
+
+    The other modality is offered as a **switch**, not as a list of times: a
+    client shown on-site times after asking for online has to work out what
+    happened, where a button saying "switch to in person" says it. Where
+    neither side has anything, the waitlist is the only honest answer and is
+    offered directly rather than left to be found.
+    """
+    waitlist_label = await get_text(session, client.language, "waitlist.from_picker")
+    practice = await get_practice(session)
+
+    # Nothing to switch to when only one modality is on offer: the other side's
+    # slots are not being shown to anybody, so pointing at them would be an
+    # invitation the flow would then have to refuse.
+    if practice.online_only:
+        return Reply(
+            await get_text(session, client.language, "booking.slot.none_available"),
+            keyboard=kb.one_button(waitlist_label, kb.WAITLIST),
+        )
+
+    if chosen is not None:
+        other = Modality.online if chosen is Modality.onsite else Modality.onsite
+        alternatives = await list_available_slots(
+            session,
+            window_from=now_utc(),
+            window_to=now_utc() + SLOT_WINDOW,
+            session_type_id=session_type_id,
+            modality=other,
+            tz=tz,
+        )
+        if alternatives:
+            return Reply(
+                await get_text(session, client.language, f"booking.slot.none_{chosen.value}"),
+                keyboard=kb.choice_keyboard(
+                    kb.MODE,
+                    [
+                        (
+                            other.value,
+                            await get_text(
+                                session, client.language, f"booking.switch.{other.value}"
+                            ),
+                        )
+                    ],
+                    extra=[(waitlist_label, kb.WAITLIST)],
+                ),
+            )
+
+    return Reply(
+        await get_text(session, client.language, "booking.slot.none_available"),
+        keyboard=kb.one_button(waitlist_label, kb.WAITLIST),
     )
 
 
@@ -574,7 +770,7 @@ async def _ask_session_type(session: AsyncSession, client: Client) -> Reply:
     )
     options = []
     for session_type in types:
-        name = await get_text(session, client.language, f"booking.type.{session_type.code}")
+        name = await session_type_name(session, client.language, session_type.code)
         label = await get_text(
             session,
             client.language,
@@ -592,6 +788,19 @@ async def _ask_session_type(session: AsyncSession, client: Client) -> Reply:
 
 
 async def _ask_modality(session: AsyncSession, client: Client) -> Reply:
+    """§13.1's first question -- unless there is nothing to choose.
+
+    With the practice working online only there is one answer, so asking for it
+    would be a question whose wrong answer the service would have to refuse.
+    It is recorded and the flow moves on.
+    """
+    practice = await get_practice(session)
+    if practice.online_only:
+        await flow.remember(
+            session, client.id, Channel.telegram, modality=Modality.online.value
+        )
+        return await _ask_session_type(session, client)
+
     labels = [
         (
             Modality.online.value,
@@ -803,6 +1012,15 @@ async def _callback(session: AsyncSession, client: Client, update: Update) -> Re
     action, argument = kb.parse_callback(update.callback_data or "")
     step = await flow.current_step(session, client.id, Channel.telegram)
 
+    if action == kb.MERGE:
+        return await _confirm_merge(session, client, argument)
+
+    if action == kb.MERGE_NO:
+        # Nothing happens, and the token is deliberately left unspent: somebody
+        # who taps this by mistake, or whose family shares a phone, must still
+        # be able to follow the link they were sent.
+        return await _menu(session, client, greeting_key="common.welcome_back")
+
     if action == kb.LANG:
         await set_client_language(session, client.id, argument)
         return await _menu(session, client)
@@ -812,19 +1030,63 @@ async def _callback(session: AsyncSession, client: Client, update: Update) -> Re
         return await _show_slots(session, client)
 
     if action == kb.SLOT:
+        # Last question of the picker rather than the first: modality and
+        # session type are already known, so the slot list this came from was
+        # filtered by both and every time on it was bookable (§13.1).
         await flow.remember(session, client.id, Channel.telegram, slot_id=int(argument))
-        return await _ask_session_type(session, client)
+        return await _ask_problem(session, client)
+
+    if action == kb.WAITLIST:
+        # The picker's way out. `replace={}` drops whatever was chosen on the
+        # way here: a waitlist entry has no slot and no session type, so
+        # carrying them forward would only leave them to be cleared later.
+        await flow.set_step(
+            session, client.id, Channel.telegram, Step.waitlist_problem, replace={}
+        )
+        return Reply(
+            await get_text(session, client.language, "waitlist.intro_by_choice"),
+            extra=[await get_text(session, client.language, "waitlist.ask_problem")],
+        )
 
     if action == kb.STYPE:
         await flow.remember(session, client.id, Channel.telegram, session_type_id=int(argument))
-        return await _ask_modality(session, client)
+        scratch = await flow.data(session, client.id, Channel.telegram)
+
+        if scratch.get("path") == BookingPath.negotiation.value:
+            # No picker to filter and no timezone to ask for: the client is
+            # about to describe a time in their own words (§9).
+            await flow.set_step(
+                session, client.id, Channel.telegram, Step.entering_desired_time
+            )
+            return Reply(await get_text(session, client.language, "booking.ask_desired_time"))
+
+        # An on-site client is in the room, so the room's clock is theirs.
+        if await _chosen_modality(session, client) is Modality.onsite:
+            return await _show_slots(session, client)
+        if client.timezone is None:
+            return await _ask_timezone(session, client)
+        return await _show_slots(session, client)
 
     if action == kb.MODE:
+        already_typed = bool(
+            (await flow.data(session, client.id, Channel.telegram)).get("session_type_id")
+        )
         await flow.remember(session, client.id, Channel.telegram, modality=argument)
+        if already_typed:
+            # Not the first answer but the switch offered when their side had
+            # nothing free. The type is chosen, so this goes straight back to
+            # the picker rather than walking them through a question they have
+            # already answered.
+            if argument == Modality.onsite.value or client.timezone is not None:
+                return await _show_slots(session, client)
+            return await _ask_timezone(session, client)
+
+        reply = await _ask_session_type(session, client)
         if argument == Modality.onsite.value:
             practice = await get_practice(session)
             if practice.clinic_onsite_url:
-                reply = await _ask_problem(session, client)
+                # §12.1: choosing on-site MUST show where on-site is. Said here,
+                # where the choice is made, rather than four questions later.
                 reply.extra.insert(
                     0,
                     await get_text(
@@ -834,8 +1096,7 @@ async def _callback(session: AsyncSession, client: Client, update: Update) -> Re
                         url=practice.clinic_onsite_url,
                     ),
                 )
-                return reply
-        return await _ask_problem(session, client)
+        return reply
 
     if action == kb.CONTACT:
         return await _contact_choice(session, client, argument)
@@ -938,13 +1199,54 @@ async def _submit_cancel_reason(
         return _admin_gone()
 
     try:
-        await booking.admin_cancel(session, request.id, reason=text.strip() or None)
+        await booking.admin_cancel(
+            session,
+            request.id,
+            reason=text.strip() or None,
+            keep_slot=bool(scratch.get("keep_slot")),
+        )
     except DomainError as exc:
         return await _admin_request(session, request, toast=f"Not possible: {type(exc).__name__}.")
 
     await notifications.publish(session)
     await session.refresh(request)
     reply = await _admin_request(session, request, toast="Cancelled.")
+    reply.edit = False
+    return reply
+
+
+async def _submit_reject_note(
+    session: AsyncSession, client: Client, chat_id: int, text: str
+) -> Reply:
+    """The note typed after pressing Decline (§13.2).
+
+    It reaches the client in her own words, under a body that already says the
+    request could not be scheduled -- which is why the message carries no
+    "Reason:" label any more. A referral read as the justification for a
+    refusal is worse than no note at all.
+    """
+    settings = get_settings()
+    if chat_id not in settings.admin_telegram_ids:
+        return Reply(await get_text(session, client.language, "common.error.generic"))
+
+    scratch = await flow.data(session, client.id, Channel.telegram)
+    request = (
+        await session.execute(
+            select(BookingRequest).where(BookingRequest.id == int(scratch.get("request_id", 0)))
+        )
+    ).scalar_one_or_none()
+    await flow.clear(session, client.id, Channel.telegram)
+    if request is None:
+        return _admin_gone()
+
+    try:
+        await booking.admin_reject(session, request.id, reason=text.strip() or None)
+    except DomainError as exc:
+        return await _admin_request(session, request, toast=f"Not possible: {type(exc).__name__}.")
+
+    await notifications.publish(session)
+    await session.refresh(request)
+    reply = await _admin_request(session, request, toast="Declined.")
     reply.edit = False
     return reply
 
@@ -1510,11 +1812,42 @@ async def _admin_action(
     if action in _PROPOSE_SCREENS:
         return await _propose_screen(session, chat_id, request, action, rest)
 
-    if action == kb.CANCEL_REQUEST:
-        await _park_admin_input(session, chat_id, Step.admin_entering_cancel_reason, request.id)
+    if action in (kb.CANCEL_REQUEST, kb.CANCEL_KEEP):
+        keep_slot = action == kb.CANCEL_KEEP
+        await _park_admin_input(
+            session,
+            chat_id,
+            Step.admin_entering_cancel_reason,
+            request.id,
+            extra={"keep_slot": keep_slot},
+        )
         return Reply(
-            f"Cancelling {request.uuid}.\n\n"
-            "Why? The client is told the reason. Send a line, or skip it.",
+            f"Cancelling {request.uuid}."
+            + (" The hour stays off the picker." if keep_slot else " The hour goes back on offer.")
+            + "\n\nWhy? The client is told the reason. Send a line, or skip it.",
+            keyboard=kb.panel_keyboard(
+                [
+                    [
+                        ("Skip", f"{kb.PANEL_SKIP}:{request.id}"),
+                        ("✕ Cancel", f"{kb.PANEL_OPEN}:{request.id}"),
+                    ]
+                ]
+            ),
+            edit=True,
+        )
+
+    if action == kb.REJECT:
+        # Asked for rather than assumed. `admin_reject` has taken a reason since
+        # it was written and the web form has always offered the field, but this
+        # button sent `None` -- so from the phone, which is the surface built
+        # for answering away from a desk, the only rejection possible was a
+        # silent one. What she usually wants to say is not "no" but "not me,
+        # try her", and the prompt asks for that rather than for a reason.
+        await _park_admin_input(session, chat_id, Step.admin_entering_reject_note, request.id)
+        return Reply(
+            f"Declining {request.uuid}.\n\n"
+            "Anything to tell them? Another practice, another time to ask, "
+            "or why not. It reaches them in your words. Send a line, or skip it.",
             keyboard=kb.panel_keyboard(
                 [
                     [
@@ -1532,13 +1865,27 @@ async def _admin_action(
             # web-only, because it means typing a URL on a phone.
             await booking.admin_approve(session, request.id)
             toast = "Confirmed."
-        elif action == kb.REJECT:
-            await booking.admin_reject(session, request.id)
-            toast = "Rejected."
         elif action == kb.PANEL_SKIP:
-            await _clear_admin_input(session, chat_id)
-            await booking.admin_cancel(session, request.id, reason=None)
-            toast = "Cancelled."
+            # Two questions end in this button now, so it has to ask which one
+            # it is answering. The parked step is the only thing that knows:
+            # the callback carries the request id and nothing else, and adding
+            # the verb to it would put the answer somewhere a stale message
+            # could still be tapped.
+            parked = await _parked_admin_step(session, chat_id)
+            if parked is Step.admin_entering_reject_note:
+                await _clear_admin_input(session, chat_id)
+                await booking.admin_reject(session, request.id, reason=None)
+                toast = "Declined."
+            else:
+                # Which cancellation she started is parked too, so skipping the
+                # reason does not quietly turn "keep the hour" into "give it
+                # away" -- the difference is the reason she pressed it.
+                keep_slot = await _parked_admin_flag(session, chat_id, "keep_slot")
+                await _clear_admin_input(session, chat_id)
+                await booking.admin_cancel(
+                    session, request.id, reason=None, keep_slot=keep_slot
+                )
+                toast = "Cancelled, hour blocked." if keep_slot else "Cancelled."
         else:
             return None
     except DomainError as exc:
@@ -1576,22 +1923,53 @@ def _admin_nav() -> list[tuple[str, str]]:
 
 
 async def _park_admin_input(
-    session: AsyncSession, chat_id: int, step: Step, request_id: int
+    session: AsyncSession,
+    chat_id: int,
+    step: Step,
+    request_id: int,
+    *,
+    extra: dict[str, Any] | None = None,
 ) -> None:
     """§13.2: a typed answer needs somewhere to remember what it is about.
 
     `flow_state` on the therapist's own client row -- the same store §13.1 uses,
     and for the same reason: a restart mid-sentence loses nothing.
+
+    `extra` carries whatever else the answer needs. Cancelling uses it for
+    whether the hour is kept: the two cancellations ask the same question and
+    differ only in what happens to the slot, so they share a step rather than
+    inventing a second one that would want the same handler.
     """
     admin_client = await resolve_client(session, Channel.telegram, str(chat_id), verified=True)
     await flow.set_step(
-        session, admin_client.id, Channel.telegram, step, replace={"request_id": request_id}
+        session,
+        admin_client.id,
+        Channel.telegram,
+        step,
+        replace={"request_id": request_id, **(extra or {})},
     )
 
 
 async def _clear_admin_input(session: AsyncSession, chat_id: int) -> None:
     admin_client = await resolve_client(session, Channel.telegram, str(chat_id), verified=True)
     await flow.clear(session, admin_client.id, Channel.telegram)
+
+
+async def _parked_admin_step(session: AsyncSession, chat_id: int) -> Step | None:
+    """Which question she is part-way through answering (§13.2).
+
+    Skip is offered by two prompts now -- a cancellation's reason and a
+    rejection's note -- and the callback behind it carries only the request id.
+    """
+    admin_client = await resolve_client(session, Channel.telegram, str(chat_id), verified=True)
+    return await flow.current_step(session, admin_client.id, Channel.telegram)
+
+
+async def _parked_admin_flag(session: AsyncSession, chat_id: int, name: str) -> bool:
+    """One boolean she chose on the screen before this one (§13.2)."""
+    admin_client = await resolve_client(session, Channel.telegram, str(chat_id), verified=True)
+    scratch = await flow.data(session, admin_client.id, Channel.telegram)
+    return bool(scratch.get(name))
 
 
 async def _skip(session: AsyncSession, client: Client, step: Step) -> Reply | None:
@@ -1800,6 +2178,12 @@ async def _admin_request(
             ("admin_propose", "Propose", kb.PROPOSE),
             ("admin_reject", "Reject", kb.REJECT),
             ("admin_cancel", "Cancel", kb.CANCEL_REQUEST),
+            # §13.2: the same cancellation, keeping the hour off the picker.
+            # Two buttons rather than a question, because this is the surface
+            # for answering in a hurry and the difference is one tap.
+            # Rescheduling to a *new* time stays on the web (§12.2): from a
+            # phone, in an emergency, this is the move.
+            ("admin_cancel", "Cancel & block", kb.CANCEL_KEEP),
         )
         if event in allowed
     ]

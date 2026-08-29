@@ -20,18 +20,27 @@
     {% endfor %}
   </fieldset>
 
-  <fieldset>
+  {# §6.1: with the practice online only there is nothing to choose, so the
+     question goes rather than being asked and its wrong answer refused. The
+     radio stays as a hidden input, because the slot list is filtered by
+     whatever this fieldset posts. #}
+  <fieldset {% if practice.online_only %}hidden{% endif %}>
     <legend>{{ t.choose_modality }}</legend>
     <label class="choice">
+      {# §12.1: an on-site client is in the room, so the room's clock is theirs
+         and the timezone selector is noise. Hidden rather than removed, so the
+         form still posts a zone and the slot list still has one to render in. #}
       <input type="radio" name="modality" value="online" checked
              hx-get="/book/slots" hx-target="#slots" hx-include="#booking"
-             onchange="document.getElementById('onsite-info').hidden = true">
+             onchange="document.getElementById('onsite-info').hidden = true;
+                       document.getElementById('tz-field').hidden = false">
       {{ t.modality_online }}
     </label>
     <label class="choice">
       <input type="radio" name="modality" value="onsite"
              hx-get="/book/slots" hx-target="#slots" hx-include="#booking"
-             onchange="document.getElementById('onsite-info').hidden = false">
+             onchange="document.getElementById('onsite-info').hidden = false;
+                       document.getElementById('tz-field').hidden = true">
       {{ t.modality_onsite }}
     </label>
     {# §12.1: on-site selection MUST show clinic_onsite_url. #}
@@ -42,7 +51,7 @@
     </p>
   </fieldset>
 
-  <fieldset>
+  <fieldset id="tz-field">
     <legend>{{ t.choose_timezone }}</legend>
     {# Detected client-side; this selector is the visible override (§12.1). #}
     <select name="tz" hx-get="/book/slots" hx-target="#slots" hx-include="#booking">

@@ -52,7 +52,7 @@ from app.core.enums import (
     OutboxStatus,
     RequestStatus,
 )
-from app.core.errors import DomainError, NotFound
+from app.core.errors import DomainError, NotFound, SlotReferenced
 from app.core.models import (
     AdminUser,
     AuditLog,
@@ -127,7 +127,91 @@ UNAVAILABLE_BECAUSE = {
         "Only a confirmed session can be cancelled. A request that was never "
         "confirmed is rejected instead."
     ),
+    "admin_reschedule": (
+        "Only a confirmed session can be moved. Before that, propose a time "
+        "instead — there is nothing booked to move yet."
+    ),
 }
+
+#: §12.2: moving a session onto an hour she has already promised. Said rather
+#: than refused -- she may be stacking two deliberately, and this is the clash
+#: she would otherwise discover on the day.
+ALREADY_BOOKED = (
+    "Moved. Note that you already had a confirmed session at that time — "
+    "check the week schedule."
+)
+
+NO_NEW_TIME = "Moving a session needs a new time. Nothing was changed."
+
+#: Why a slot the page still lists cannot be deleted, for the same reason and in
+#: the same voice as the entries above. The delete button is withheld from a
+#: referenced slot in the first place, so this is what a therapist sees when the
+#: reference arrived between the page rendering and her clicking it.
+SLOT_REFERENCED = (
+    "A request asked for that time, so the slot has to stay. Block it instead "
+    "and it stops being offered."
+)
+
+BAD_PRICE = (
+    "A price is a whole number, like 15000 for 15,000 dram. No decimal point, "
+    "and no currency sign. Leave it empty for no price."
+)
+
+#: Written as a code point rather than as itself: it is a space on screen, and a
+#: literal one here is invisible to the next person reading this line.
+NBSP = chr(0xA0)
+
+
+def _price_amount(value: str) -> int | None:
+    """The price as the therapist writes it, which is what the column holds.
+
+    A price here is a **whole unit of the currency named beside it** -- 15000 is
+    15,000 dram -- and it is stored exactly as typed. The column is called
+    `price_amount_minor` and its comment says 5000 means 50.00, which is the
+    ordinary convention and is *not* what this practice means by it: the
+    therapist prices in whole dram, and asking her to write 1500000 for a
+    15,000 dram session is asking her to do currency arithmetic in a text box.
+    Whoever eventually renders a price to a client has to read this rather than
+    the column name (DESIGN.md §20.3).
+
+    Passing the field to `int()` is what this replaces: a decimal point in the
+    box raised `ValueError` out of the route and reached the therapist as a 500.
+    A decimal is now refused with a sentence instead, rather than rounded --
+    quietly changing somebody's price is worse than asking again. Spaces go
+    because a thousands separator is a normal thing to type, the non-breaking
+    one included: that is what a figure pasted from a spreadsheet carries, and
+    it is invisible in the field.
+    """
+    text = value.strip().replace(" ", "").replace(NBSP, "")
+    if not text:
+        return None
+    if not (text.isascii() and text.isdigit()):
+        raise ValueError(f"{value!r} is not a whole-number price")
+    return int(text)
+
+
+def _price_display(amount: int | None) -> str:
+    """The inverse, for the form field. An empty field means no price."""
+    return "" if amount is None else str(amount)
+
+
+async def _stored_text(session: AsyncSession, lang: str, key: str) -> str:
+    """The row behind a key, or "" when there is none.
+
+    Deliberately not `get_text`: that falls back through the default language
+    and then English (§15), which is right when rendering and wrong when
+    prefilling a form. A field showing the Russian name on the Armenian tab
+    invites her to press Save, and Save would write the fallback in as though
+    it were a translation.
+    """
+    value = (
+        await session.execute(
+            select(Translation.value).where(
+                Translation.lang == lang, Translation.key == key
+            )
+        )
+    ).scalar_one_or_none()
+    return str(value) if value else ""
 
 
 async def _labels(session: AsyncSession) -> dict[str, str]:
@@ -374,9 +458,10 @@ def build_router() -> APIRouter:
         meeting_url: str = Form(""),
         body: str = Form(""),
         reason: str = Form(""),
+        keep_slot: str = Form(""),
         csrf_token: str = Form("", alias=CSRF_FIELD),
     ) -> Response:
-        """§12.2: approve, propose, reject, cancel."""
+        """§12.2: approve, propose, reject, cancel, reschedule."""
         if not csrf_ok(request, csrf_token):
             return Response(status_code=403)
 
@@ -416,8 +501,32 @@ def build_router() -> APIRouter:
                     await booking.admin_reject(session, booking_request.id, reason=reason or None)
                 elif action == "cancel":
                     await booking.admin_cancel(
-                        session, booking_request.id, reason=reason or None
+                        session,
+                        booking_request.id,
+                        reason=reason or None,
+                        keep_slot=bool(keep_slot),
                     )
+                elif action == "reschedule":
+                    if when is None:
+                        # The one action with nothing to fall back on: approve
+                        # can take the held slot's time and propose may be words,
+                        # but a move with no time to move to is not a move.
+                        return _back(f"/admin/requests/{uuid}", NO_NEW_TIME)
+                    clash = await booking.clashes_at(
+                        session, when, ignoring=booking_request.id
+                    )
+                    await booking.admin_reschedule(
+                        session,
+                        booking_request.id,
+                        new_start=when,
+                        note=reason.strip() or None,
+                    )
+                    if clash is not None:
+                        # Said, not refused (§12.2): she may be stacking two on
+                        # purpose, and this is the hour she would otherwise find
+                        # out about on the day.
+                        await notifications.publish(session)
+                        return _back(f"/admin/requests/{uuid}", ALREADY_BOOKED)
                 else:
                     return Response(status_code=404)
             except DomainError as exc:
@@ -508,6 +617,24 @@ def build_router() -> APIRouter:
                 .scalars()
                 .all()
             )
+            # Which of these a request still points at. An `available` slot can
+            # carry such a reference -- every terminal transition releases the
+            # slot and leaves the request remembering the time it asked for
+            # (§7.1) -- and deleting one is refused, so the button is not
+            # offered for it. One query for the whole page rather than one per
+            # row.
+            referenced = set(
+                (
+                    await session.execute(
+                        select(BookingRequest.slot_id).where(
+                            BookingRequest.slot_id.in_([s.id for s in rows])
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
             return _render(
                 "admin/slots.html",
                 await _context(
@@ -521,6 +648,7 @@ def build_router() -> APIRouter:
                             "status": s.status.value,
                             "modality": s.modality.value if s.modality else "either",
                             "duration": s.duration_min,
+                            "deletable": s.id not in referenced,
                         }
                         for s in rows
                     ],
@@ -592,6 +720,8 @@ def build_router() -> APIRouter:
                     await slot_service.delete_slot(session, slot_id)
                 else:
                     return Response(status_code=404)
+            except SlotReferenced:
+                return _back("/admin/slots", SLOT_REFERENCED)
             except DomainError:
                 # A held or booked slot is blocked, not deleted (DESIGN.md §8).
                 return _back("/admin/slots", "refused")
@@ -877,9 +1007,32 @@ def build_router() -> APIRouter:
                 .scalars()
                 .all()
             )
+            # What each type is called in each client-facing language. A type is
+            # a row, so its name cannot live in the locale files (§6.4) -- these
+            # are `translation` rows under `booking.type.<code>`, and without
+            # them a client is offered the key (DESIGN.md §20.3).
+            names = {
+                row.id: {
+                    lang: await _stored_text(session, lang, f"booking.type.{row.code}")
+                    for lang in LANGUAGES
+                }
+                for row in rows
+            }
+
             return _render(
                 "admin/session_types.html",
-                await _context(session, request, admin, rows=rows),
+                await _context(
+                    session,
+                    request,
+                    admin,
+                    rows=rows,
+                    languages=LANGUAGES,
+                    names=names,
+                    # Rendered here rather than in the template, so that the one
+                    # place deciding what a price means is `_price_amount` and
+                    # its inverse rather than a Jinja expression beside them.
+                    prices={row.id: _price_display(row.price_amount_minor) for row in rows},
+                ),
             )
 
     @router.post("/session-types", include_in_schema=False)
@@ -890,6 +1043,9 @@ def build_router() -> APIRouter:
         price_amount_minor: str = Form(""),
         price_currency: str = Form(""),
         is_active: str = Form(""),
+        name_ru: str = Form(""),
+        name_hy: str = Form(""),
+        name_en: str = Form(""),
         csrf_token: str = Form("", alias=CSRF_FIELD),
     ) -> Response:
         """Adding "supervision" is an insert, not a migration (§6.4)."""
@@ -909,11 +1065,32 @@ def build_router() -> APIRouter:
                 row = SessionType(practice_id=practice.id, code=code)
                 session.add(row)
 
+            try:
+                amount = _price_amount(price_amount_minor)
+            except ValueError:
+                # Surfaced rather than swallowed, and rather than raised: this
+                # was `int()` on whatever she typed, and a decimal point in a
+                # price field is a reasonable thing to type.
+                return _back("/admin/session-types", BAD_PRICE)
+
             row.duration_min = duration_min
-            row.price_amount_minor = int(price_amount_minor) if price_amount_minor else None
-            row.price_currency = price_currency or None
+            row.price_amount_minor = amount
+            # ISO 4217 is upper case, and "amd" beside "AMD" is two currencies
+            # as far as anything comparing them is concerned.
+            row.price_currency = price_currency.strip().upper() or None
             row.is_active = bool(is_active)
             await session.flush()
+
+            # The name a client is offered. Written through `set_text` like any
+            # other translation, so it appears on /admin/translations under
+            # `booking.` too and she has two ways to reach it. A blank field
+            # writes nothing rather than an empty row: §15's fallback chain is a
+            # better answer than a button with no label, and `session_type_name`
+            # ends it at the code.
+            for lang, value in (("ru", name_ru), ("hy", name_hy), ("en", name_en)):
+                if value.strip():
+                    await set_text(session, lang, f"booking.type.{code}", value.strip())
+
             return _back("/admin/session-types", "saved")
 
     @router.get("/timezones", response_class=HTMLResponse, include_in_schema=False)
@@ -1717,6 +1894,7 @@ _BOOLEAN_SETTINGS = (
     "fallback_to_negotiation",
     "negotiation_enabled",
     "auto_confirm_slots",
+    "online_only",
 )
 
 _INT_SETTINGS = (

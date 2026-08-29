@@ -30,8 +30,14 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import Modality, SlotStatus
-from app.core.errors import InvalidTransition, NotFound, SlotInThePast, SlotUnavailable
-from app.core.models import Slot, SlotSessionType
+from app.core.errors import (
+    InvalidTransition,
+    NotFound,
+    SlotInThePast,
+    SlotReferenced,
+    SlotUnavailable,
+)
+from app.core.models import BookingRequest, Slot, SlotSessionType
 from app.core.policies import hold_expiry, now_utc
 from app.core.services.settings import get_practice
 
@@ -201,15 +207,26 @@ async def release_slot(session: AsyncSession, slot_id: int) -> Slot:
 
 
 async def block_slot(session: AsyncSession, slot_id: int) -> Slot:
-    """available -> blocked.
+    """available|booked -> blocked (§7.2).
 
     Blocking rather than deleting is what lets a request keep referencing a slot
     the therapist has withdrawn (DESIGN.md §8).
+
+    From `booked` it is the emergency: she has moved or called off a session and
+    the hour must not go back on the picker, because the reason it is free is
+    that her day came apart (DESIGN.md §14). Releasing would have offered a
+    stranger the very hour she is ill in. The reservation fields are cleared the
+    way `release_slot` clears them -- §6.4's CHECK allows neither on a slot that
+    is not held or booked -- so the request keeps pointing at the time it had
+    and the slot belongs to nobody.
     """
     slot = await _lock(session, slot_id)
-    if slot.status != SlotStatus.available:
+    if slot.status not in (SlotStatus.available, SlotStatus.booked):
         raise InvalidTransition("slot", slot.status.value, "block")
     slot.status = SlotStatus.blocked
+    slot.hold_expires_at = None
+    slot.held_by_request = None
+    slot.booked_request = None
     await session.flush()
     return slot
 
@@ -233,6 +250,21 @@ async def delete_slot(session: AsyncSession, slot_id: int) -> None:
     slot = await _lock(session, slot_id)
     if slot.status in (SlotStatus.held, SlotStatus.booked):
         raise InvalidTransition("slot", slot.status.value, "delete")
+
+    # Status alone does not answer "does anything reference this". Every
+    # terminal transition releases the slot back to `available` and leaves
+    # `booking_request.slot_id` pointing at it -- that is how a rejected or
+    # expired request remembers the time it asked for (§7.1). Deleting under
+    # that foreign key raised IntegrityError out of the flush, which reached the
+    # therapist as a 500 on a button the page had offered her.
+    referenced = (
+        await session.execute(
+            select(BookingRequest.id).where(BookingRequest.slot_id == slot_id).limit(1)
+        )
+    ).scalar_one_or_none()
+    if referenced is not None:
+        raise SlotReferenced(f"slot {slot_id} is referenced by a booking request")
+
     await session.delete(slot)
     await session.flush()
 

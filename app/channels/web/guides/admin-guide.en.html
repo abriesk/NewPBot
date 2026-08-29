@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Psychobooking — Admin user guide</title>
 <!-- The commit this guide was last checked against. See the footer. -->
-<meta name="guide-revision" content="1b3b0ee">
-<meta name="guide-revised" content="2026-08-28">
+<meta name="guide-revision" content="1a52325">
+<meta name="guide-revised" content="2026-08-30">
 <style>
   :root {
     --bg: #f6f1ea;
@@ -411,7 +411,10 @@
         <p>Only the actions this status allows are live. The rest stay on the page, greyed, with a line saying why — so someone looking for Cancel learns that it is for confirmed sessions only, instead of hunting for a button that was removed.</p>
         <p><strong>Approve</strong> — from <code>pending</code> and from <code>negotiating</code>. Leave the time blank and it confirms the last time either side put forward; on a <code>pending</code> request, where nothing has been discussed, that is the slot the client picked. Naming a time still wins. Optional per-session meeting URL; otherwise the standing room from Settings is used for online sessions.</p>
         <p><strong>Propose</strong> — a time, a note, or both. A note with no time is a real move, not a mistake: the client is told there is a reply and sent to their request page to read it, and they can accept it there. Nothing can be scheduled out of words, so the request stays <code>negotiating</code> until one of you names a time — you are told when they accept.</p>
-        <p><strong>Reject</strong> / <strong>Cancel</strong> — optional reason. Cancel stops reminders on a confirmed session. Cancel is not an alias for Reject: they send the client different messages.</p>
+        <p><strong>Reject</strong> — a <em>note to the client</em>, optional, and it reaches them in your words with nothing added in front of it. Use it for a referral as readily as for a refusal: “not my area, Anna at the centre takes these” is the answer more often than “no”, and the message no longer labels it as a reason. Cancel stops reminders on a confirmed session. Cancel is not an alias for Reject: they send the client different messages.</p>
+        <p><strong>Move this session</strong> — for the day something happens and you cannot keep an appointment you have already agreed. Give the new time and, if you have a moment, a line for the client. The booking stays booked: they are told the old time and the new one, their reminders follow, and nothing waits on their reply. If the new time does not suit them they will write back on their request page.</p>
+        <p>The hour you are <em>leaving</em> is <strong>blocked</strong>, not put back on offer — the reason it is free is that your day came apart, and the last thing you need is a stranger booking it. Unblock it on Slots when the day is yours again. If you move onto an hour where you already have someone, you are told so and it goes through anyway; check the week schedule.</p>
+        <p><strong>Cancel</strong> has the same choice as a checkbox: <em>keep the hour off the picker</em>. Tick it when the reason is your own day. Leave it when the session simply will not happen and somebody else may as well have the time.</p>
         <p>A time this form cannot read flashes <code>bad-time</code> and changes nothing — nothing is sent, so retype it and submit again. An empty time field still means words only. If the status moved while the page was open, it flashes <code>refused</code>.</p>
       </details>
       <details class="box">
@@ -434,11 +437,12 @@
 
     <section class="card" id="waitlist">
       <h2>6. Waitlist</h2>
-      <p>People land here three ways:</p>
+      <p>People land here four ways:</p>
       <ul>
         <li>Accepting new bookings is off.</li>
         <li>Slot mode, no free slots, and fallback-to-negotiation off.</li>
         <li>They could not make a time you proposed and had no other way to say so — no free slots and free text off. Declining and joining the list is one move, and the entry carries what they wrote and their contact note, so it does not arrive anonymous.</li>
+        <li><strong>They saw your free times and none of them suited.</strong> Both the website and the bot now offer “None of these times suit me” under the picker. This is the one that arrives while you <em>do</em> have openings, so expect entries that are about the hours you offer rather than about having no room — worth reading as a hint about which times to add.</li>
       </ul>
       <table>
         <thead><tr><th>Action</th><th>Meaning</th></tr></thead>
@@ -466,10 +470,12 @@
         <thead><tr><th>Status</th><th>What you can do</th></tr></thead>
         <tbody>
           <tr><td>available</td><td>Block or delete</td></tr>
+          <tr><td>available, marked <em>asked for</em></td><td>Block only</td></tr>
           <tr><td>blocked</td><td>Unblock</td></tr>
           <tr><td>held / booked</td><td>In use — do not delete</td></tr>
         </tbody>
       </table>
+      <div class="callout">A free time can still say <strong>asked for</strong> instead of offering delete. Somebody once asked for that hour, and their request still records it — even if you rejected it, or it expired. Block it and it stops being offered; the old request keeps its history.</div>
       <div class="callout">Slots are not in the configuration export. Recreate next week here.</div>
     </section>
 
@@ -486,8 +492,10 @@
           <tr><td>Fallback to negotiation</td><td>Empty grid in slot mode → free-text form instead of waitlist</td></tr>
           <tr><td>Negotiation enabled</td><td>Propose / counter / accept after a request exists</td></tr>
           <tr><td>Auto-confirm slots</td><td>Skip your approval. Default off.</td></tr>
+          <tr><td>Online only for now</td><td>Clients are not asked how they would like to meet, and only online times are offered</td></tr>
         </tbody>
       </table>
+      <div class="callout"><strong>Online only for now</strong> is for a stretch when you are not seeing anyone in the room. Your in-person slots are kept, not deleted — untick it and they are offered again. It is a separate switch from the clinic address on purpose: keeping the address while not working there is not the same as never having filled one in.</div>
       <h3>What the client actually sees</h3>
       <table>
         <thead><tr><th>Accepting</th><th>Mode</th><th>Free slots?</th><th>Client sees</th></tr></thead>
@@ -515,11 +523,14 @@
       <h2>9. Session types</h2>
       <p>Seeded: <code>individual</code> and <code>couple</code>, both 60 minutes. Add more (e.g. <code>supervision</code>) without a software update.</p>
       <ul>
-        <li><strong>Price (minor units)</strong> — smallest currency unit. AMD: <code>15000</code> = 15,000 dram. EUR/USD: <code>5000</code> = 50.00.</li>
+        <li><strong>Code</strong> — your own short name for it, in Latin letters. Only you see it: it appears here and on request cards, never in front of a client.</li>
+        <li><strong>Name (ru / hy / en)</strong> — what a client is offered when choosing a session. Fill these in when you add a type. Leave a language empty and it falls back to another one, and if all three are empty the client sees the code.</li>
+        <li><strong>Price</strong> — a whole number, written the way you would say it: <code>15000</code> for a 15,000 dram session. No decimal point, no currency sign, no spaces needed (though a space between the thousands is accepted). Leave it empty for no price.</li>
         <li><strong>Currency</strong> — three letters (<code>AMD</code>, <code>EUR</code>…).</li>
         <li>Uncheck <strong>active</strong> to hide a type from new bookings.</li>
       </ul>
       <div class="callout">Do not rename a code later. Add a new type and deactivate the old one.</div>
+      <div class="callout">The names are ordinary translations, so they also appear on <strong>Translations</strong> under “Booking conversation” as <code>booking.type.&lt;code&gt;</code>. Editing them in either place is the same edit.</div>
     </section>
 
     <section class="card" id="tz">
@@ -571,7 +582,8 @@
       <h3>Clients — <code>/admin/clients</code></h3>
       <p>The practice's people: everyone who has requested a consultation, most recent activity first, with how to reach them, how many requests they have made, and their last and next session. The name and the count both open that person's page — every request they have made, drawn as the same row the queue draws, and their waitlist entries.</p>
       <p>Somebody who only ever asked for a sign-in link and never booked is not here. Neither is anybody erased. Both are on Privacy, whose list has to be complete.</p>
-      <p>Two identities that were never linked are still two rows. The service does not know they are one human; only the client can say so, by following the Telegram link their sign-in email already carries.</p>
+      <p>Two identities that were never linked are still two rows. The service does not know they are one human; only the client can say so, by following the Telegram link their sign-in email already carries. That link now works even when the bot already knows them separately: it asks them to confirm, and joins the two rows into one. So a person who appeared twice can become one row on this page, carrying both histories — that is them tidying themselves up, not something going wrong.</p>
+      <p>You cannot join two rows yourself, by design. Following the link is the client saying “both of these are me”; you would be guessing it from a name, and the join cannot be undone.</p>
       <p>No problem text on either page. It stays one click away, on the request.</p>
       <h3>Privacy — <code>/admin/privacy</code></h3>
       <p>Every client row there has ever been, unfiltered on purpose: “send me my data” and “forget me” can only be answered against the whole population, and a privacy page that filters is one with a hole in it. A client's page links to their row here.</p>
@@ -604,6 +616,12 @@
       </div>
       <p><code>/admin availability</code> also toggles availability. A request card carries the client's name and how to reach them — the same identities the web page shows, an email marked verified or not.</p>
       <p>Its buttons are derived from the request's status, from the same table the web page reads, so the panel never offers a move the service would refuse. Approve works on a request under negotiation too. Sending <code>/admin</code> again drops a half-typed answer.</p>
+      <div class="callout warn"><strong>Fill this in before you go live.</strong> On <strong>Translations</strong>, in “Pages the client sees”, the key <code>intent.request.rescheduled.client.default</code> is the message sent when you move a session <em>without</em> writing a note. It ships with a sensible sentence, but it speaks for you on the day your diary came apart and everyone reads it in their own language — so make it sound like you, in all three, while you have time to think about it. Every other translation can wait; this one is written for the moment you have no time to write anything.</div>
+      <h3>Declining from your phone</h3>
+      <p><strong>Reject</strong> asks before it acts: “anything to tell them?” Send a line — another practice, another time to ask, or why not — and it reaches the client in your words. <strong>Skip</strong> declines with nothing attached, which is what the button used to do without asking. Same note as the web form, same message to the client.</p>
+      <h3>Calling a session off from your phone</h3>
+      <p>A confirmed session gives you two buttons. <strong>Cancel</strong> frees the hour for somebody else. <strong>Cancel &amp; block</strong> keeps it off the picker — that is the one for “I am ill”, and it is the difference between an hour going back on offer and staying yours. Both ask for a reason, and both let you skip it.</p>
+      <p>Moving a session to a <em>new</em> time is on the website: it needs a time typed into a field, which is not a thing to do one-handed. From here, <strong>Cancel &amp; block</strong> is the move — it stops the session, keeps the hour, and tells the client.</p>
       <h3>Proposing a time from your phone</h3>
       <p>Propose opens on <strong>your own free times</strong> for that request; one tap sends it. If none of them suit — or you have none published — <strong>Another time</strong> opens a picker: month, then day, then hour. Times are in the practice timezone, and the message afterwards names what you sent, so a mis-tap is visible at once rather than after the client has answered it.</p>
       <ul>
@@ -626,6 +644,9 @@
         <li><strong>Email</strong> — login links and “open your request page”. No meeting URL in the body.</li>
       </ul>
       <h3>Booking</h3>
+      <p>They are asked <strong>how</strong> they would like to meet, then <strong>what kind</strong> of session, and only then shown times — filtered to the two answers, so every time on the list is one they can actually book. It used to ask for the time first, which meant somebody could pick an hour and find out afterwards that it was never an online hour.</p>
+      <p>Someone booking <strong>in person</strong> is not asked for a timezone: they are coming to the room, so the room's clock is theirs. Someone booking online is asked once, and not again.</p>
+      <p>If nothing is free the way they asked, they get a button offering the other way — “switch to in person” — rather than a list of times of a kind they did not ask for. If nothing is free either way, they are offered the waitlist.</p>
       <p>Picking a slot does not reserve it. The page asks them to finish inside the slot-hold window and says plainly that the time is not held until they submit — two people can be looking at the same slot until one of them does.</p>
       <p>A signed-in client gets their name filled in, and the contact note from their last request offered back. Typing an address into the form signs nobody in: the session and the Telegram link both wait for the emailed link, which only the owner of that address can read. The booking itself goes through either way, and a sign-in link is emailed with it.</p>
       <h3>Answering your proposal</h3>
@@ -714,10 +735,10 @@ docker compose up -d --build</code></pre>
     <footer>
       Shipped with the service. This page is served from your own installation at <code>/admin/help</code>, so it always matches the version you are running.
       <br><br>
-      <strong>Written against commit <code>1b3b0ee</code>, 2026-08-28.</strong>
+      <strong>Written against commit <code>1a52325</code>, 2026-08-30.</strong>
       That is the last state of the service this guide was checked against. After
       updating the server, whoever ran the update can list what has changed since with
-      <code>git log 1b3b0ee..HEAD -- app/ locales/</code> — anything in that list a
+      <code>git log 1a52325..HEAD -- app/ locales/</code> — anything in that list a
       therapist would notice belongs in here, and the stamp moves with it.
     </footer>
   </main>

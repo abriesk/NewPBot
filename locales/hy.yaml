@@ -88,6 +88,10 @@ booking:
   timezone.detected: "Հայտնաբերվեց {timezone}։ Ճի՞շտ է։"   # TODO: review
   choose_slot: "Ընտրեք ձեզ հարմար ժամանակը։ Ժամերը ցուցադրված են {timezone} գոտով։"   # TODO: review
   slot.none_available: "Այս պահին ազատ ժամեր չկան։"   # TODO: review
+  slot.none_online: "Այս պահին ազատ առցանց ժամեր չկան։ Առկա ժամեր կան։"       # TODO: review
+  slot.none_onsite: "Այս պահին ազատ առկա ժամեր չկան։ Առցանց ժամեր կան։"       # TODO: review
+  switch.online: "Անցնել առցանցի"                                              # TODO: review
+  switch.onsite: "Անցնել առկայի"                                               # TODO: review
   slot.held: "Խնդրում ենք ավարտել {minutes} րոպեի ընթացքում։ Ժամը ձեզ համար չի պահվում, մինչև հայտը չուղարկեք, ուստի այն դեռ կարող է ընտրել մեկ ուրիշը։"   # TODO: review
   slot.taken: "Ցավոք, այդ ժամանակը արդեն զբաղված է: Խնդրում ենք ընտրել այլ ժամանակ:"
   slot.hold_expired: "Ձեր ամրագրման ժամկետը լրացավ։ Խնդրում ենք նորից ընտրել ժամանակ։"   # TODO: review
@@ -108,8 +112,17 @@ booking:
   cancelled_by_user: "Ամրագրումը չեղարկվեց: Դուք վերադարձել եք գլխավոր մենյու:"
   unavailable: "Այս պահին նոր գրանցումները փակ են։"   # TODO: review
 
+merge:
+  confirm: "Այստեղ ձեր անունով կա էլ. փոստով արված գրանցում։ Միացնե՞մ այն այս Telegram հաշվին, որ ամեն ինչ մեկ տեղում լինի։"   # TODO: review
+  confirm.yes: "Այո, դա ես էի"                                               # TODO: review
+  confirm.no: "Դա ես չեմ"                                                    # TODO: review
+  done: "Պատրաստ է։ Այժմ ձեր բոլոր գրանցումները մեկ տեղում են։"               # TODO: review
+  busy: "Այստեղ ունեք անավարտ գործողություն։ Խնդրում ենք նախ ավարտել այն, ապա նորից բացել նամակի հղումը։"   # TODO: review
+
 waitlist:
   intro: "Ցավոք, այս պահին ազատ տեղեր չկան: Կարող եք գրանցվել սպասման ցուցակում:"
+  from_picker: "Այս ժամերից ոչ մեկն ինձ չի հարմարում"                      # TODO: review
+  intro_by_choice: "Թողեք հայտ, և ես կգրեմ ձեզ, երբ հարմար ժամ ազատվի։"    # TODO: review
   ask_problem: "Համառոտ՝ ի՞նչ հարցով կցանկանաք աշխատել։"   # TODO: review
   ask_contact: "Թողեք ձեր կոնտակտային տվյալները:"
   submitted: "Շնորհակալություն։ Ձեր հայտը ստացված է, կկապվեմ ձեզ հետ։"   # TODO: review
@@ -160,8 +173,11 @@ intent:
   request.confirmed.client.join_online: "Միանալ այստեղ՝ {url}"   # TODO: review
   request.confirmed.client.join_onsite: "Հասցե՝ {url}"   # TODO: review
 
+  request.rescheduled.client.body: "Ձեր հանդիպումը տեղափոխվել է։ Էր՝ {previous_time}։ Այժմ՝ {time}։"   # TODO: review
+  request.rescheduled.client.reason: "{reason}"
+  request.rescheduled.client.default: "Առաջացան հանգամանքներ, որոնք չկարողացա շրջանցել։ Ներողություն տեղափոխության համար, հուսով եմ՝ նոր ժամը ձեզ կհարմարի։"   # TODO: review
   request.rejected.client.body: "Ցավոք, ձեր {uuid} հայտը հնարավոր չեղավ պլանավորել։"   # TODO: review
-  request.rejected.client.reason: "Պատճառը՝ {reason}"   # TODO: review
+  request.rejected.client.reason: "{reason}"
   request.expired.client.body: "Ձեր {uuid} հայտի ժամկետը լրացավ առանց պատասխանի։ Կարող եք նորը ներկայացնել։"   # TODO: review
   request.cancelled.client.body: "{time} ձեր հանդիպումը չեղարկվել է։"   # TODO: review
   request.cancelled.client.reason: "Պատճառը՝ {reason}"   # TODO: review

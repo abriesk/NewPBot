@@ -58,10 +58,14 @@ class Step(StrEnum):
     # because a callback has only 64 bytes and the next message has none.
     entering_counter = "entering_counter"
 
-    # The therapist's reduced Telegram surface (§13.2). Both park the request
-    # the typed answer is about, so a restart mid-sentence loses nothing.
+    # The therapist's reduced Telegram surface (§13.2). All three park the
+    # request the typed answer is about, so a restart mid-sentence loses
+    # nothing.
     admin_entering_proposal = "admin_entering_proposal"
     admin_entering_cancel_reason = "admin_entering_cancel_reason"
+    # Not the same question as a cancellation's. Her answer to a request she
+    # cannot take is often "not me, try her" rather than "no" (§7.1).
+    admin_entering_reject_note = "admin_entering_reject_note"
 
     # Waitlist.
     waitlist_problem = "waitlist_problem"

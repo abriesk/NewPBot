@@ -22,6 +22,7 @@ MUTABLE_FIELDS = frozenset(
         "default_language",
         "timezone",
         "clinic_onsite_url",
+        "online_only",
         "online_meeting_url",
         "availability_on",
         "booking_mode",

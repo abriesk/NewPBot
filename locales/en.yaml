@@ -92,6 +92,13 @@ booking:
   timezone.detected: "We detected {timezone}. Is that right?"
   choose_slot: "Choose a time that suits you. Times are shown in {timezone}."
   slot.none_available: "There are no free times at the moment."
+  # Offered as a labelled switch rather than by quietly showing the other kind:
+  # a client looking at in-person times after asking for online has to work out
+  # what happened, where a button saying so tells them.
+  slot.none_online: "There are no free online times at the moment. There are some in person."
+  slot.none_onsite: "There are no free in-person times at the moment. There are some online."
+  switch.online: "Switch to online"
+  switch.onsite: "Switch to in person"
   slot.held: "Please finish within {minutes} minutes. The time is not held until you submit, so someone else can still choose it."
   slot.taken: "Sorry, that time has just been taken. Please choose another."
   slot.hold_expired: "Your reservation expired. Please choose a time again."
@@ -112,8 +119,23 @@ booking:
   cancelled_by_user: "Booking cancelled. You are back at the main menu."
   unavailable: "New bookings are closed at the moment."
 
+# §13.1 step 1: joining a Telegram account to a booking made by email. The
+# wording names no address on purpose -- the screen is drawn before anyone has
+# proved they can read that mailbox, so naming it would tell whoever is holding
+# the phone whose it is.
+merge:
+  confirm: "You have a booking here made by email. Shall I join it to this Telegram account, so everything is in one place?"
+  confirm.yes: "Yes, that was me"
+  confirm.no: "Not me"
+  done: "Joined. Your bookings are all in one place now."
+  busy: "You have something half-finished here. Please complete it first, then open the link from the email again."
+
 waitlist:
   intro: "There are no free places at the moment. You can leave a request and I will get in touch when something opens up."
+  # Offered beside the picker rather than instead of it: times can all be wrong
+  # for someone without being absent.
+  from_picker: "None of these times suit me"
+  intro_by_choice: "Leave a request and I will get in touch when a time that suits you opens up."
   ask_problem: "Briefly, what would you like to work on?"
   ask_contact: "How can I reach you?"
   submitted: "Thank you. I have your request and will be in touch."
@@ -165,8 +187,21 @@ intent:
   request.confirmed.client.join_online: "Join here: {url}"
   request.confirmed.client.join_onsite: "Address: {url}"
 
+  request.rescheduled.client.body: "Your session has been moved. It was {previous_time}; it is now {time}."
+  request.rescheduled.client.reason: "{reason}"
+  # The standing sentence, used when she moves a session without stopping to
+  # write one. She reaches for this on the day her diary came apart, so it has
+  # to be worth sending unedited -- and it is the only line here a therapist
+  # MUST review before going live, because it speaks for her at her worst
+  # moment. Edit it on the Translations page.
+  request.rescheduled.client.default: "Something has come up that I could not work around. I am sorry for the change, and I hope the new time works for you."
+
   request.rejected.client.body: "Unfortunately your request {uuid} could not be scheduled."
-  request.rejected.client.reason: "Reason: {reason}"
+  # No label: the body above already says the request could not be scheduled,
+  # and her answer is as often a referral as a reason. "Reason:" in front of
+  # "my colleague Anna works with exactly this" reads as a refusal being
+  # justified. Her words stand as their own paragraph.
+  request.rejected.client.reason: "{reason}"
   request.expired.client.body: "Your request {uuid} expired without a reply. You are welcome to make a new one."
   request.cancelled.client.body: "Your session on {time} has been cancelled."
   request.cancelled.client.reason: "Reason: {reason}"

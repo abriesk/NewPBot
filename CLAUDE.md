@@ -45,6 +45,15 @@ heading is what fixing them turned up and we chose not to do yet — the contact
 column's other shapes, and merging one person's two client rows. Both say what
 would settle them; neither is urgent. Read it before proposing new work here.
 
+**§20.3 is the second round, reported 2026-08-29 after the first session with
+the therapist. All ten reported defects are fixed.** The preamble names them and
+what each turned out to be — usually not what the report said. What is left
+under that heading came out of the work rather than from her: showing a price to
+clients (the design question is answered, the work is not done), the web's
+missing free-text time request, the calendar file a moved session cannot update,
+the retention of an abandoned `flow_state`, and the test database. Take them
+**one entry at a time**, in the order written, and read the entry first.
+
 Milestones run M0 → M13 (`IMPLEMENTATION.md` §19). Work them **in order**. Each
 one's acceptance criteria must pass before starting the next. Do not implement
 later milestones early — the ordering exists so the core is fully testable before
