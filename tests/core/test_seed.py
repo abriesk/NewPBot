@@ -38,9 +38,24 @@ async def test_exactly_one_practice_is_seeded(db: AsyncSession) -> None:
 
 
 async def test_session_types_topics_and_timezones_are_seeded(db: AsyncSession) -> None:
-    assert await _count(db, SessionType) == len(SESSION_TYPES)
-    assert await _count(db, ContentTopic) == len(CONTENT_TOPICS)
-    assert await _count(db, TimezoneOption) == len(TIMEZONE_OPTIONS)
+    """Scoped to the rows seeding names, not to a total of the table.
+
+    All three are rows rather than constants so that the therapist can add one
+    without a migration (§6.4), and both the admin form and the config import
+    do. A count therefore counts her work as well as the seed's and fails on a
+    practice in use -- which is every practice this suite runs against, since
+    the tests share the deployment's database (conftest). What M1 asks is that
+    seeding loaded what it ships, and that is a subset, not an equality. Same
+    fix tests/core/test_config_io.py carries for the translation catalogue.
+    """
+    stored_types = set((await db.execute(select(SessionType.code))).scalars())
+    assert {row["code"] for row in SESSION_TYPES} <= stored_types
+
+    stored_topics = set((await db.execute(select(ContentTopic.code))).scalars())
+    assert {row["code"] for row in CONTENT_TOPICS} <= stored_topics
+
+    stored_zones = set((await db.execute(select(TimezoneOption.iana_name))).scalars())
+    assert {row["iana_name"] for row in TIMEZONE_OPTIONS} <= stored_zones
 
 
 async def test_references_topic_is_hidden_from_the_menu(db: AsyncSession) -> None:
