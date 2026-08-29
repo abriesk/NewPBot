@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Psychobooking — Руководство администратора</title>
 <!-- Коммит, на котором это руководство сверялось в последний раз. См. подвал. -->
-<meta name="guide-revision" content="1b3b0ee">
-<meta name="guide-revised" content="2026-08-28">
+<meta name="guide-revision" content="f4569be">
+<meta name="guide-revised" content="2026-08-29">
 <style>
   :root {
     --bg: #f6f1ea;
@@ -469,10 +469,12 @@
         <thead><tr><th>Статус</th><th>Что можно</th></tr></thead>
         <tbody>
           <tr><td>available</td><td>block или delete</td></tr>
+          <tr><td>available с пометкой <em>asked for</em></td><td>только block</td></tr>
           <tr><td>blocked</td><td>unblock</td></tr>
           <tr><td>held / booked</td><td>занят — не удалять</td></tr>
         </tbody>
       </table>
+      <div class="callout">У свободного слота вместо delete может стоять пометка <strong>asked for</strong>. Значит, на этот час когда-то была заявка, и она до сих пор помнит выбранное время — даже если вы её отклонили или она истекла. Нажмите block: слот перестанет предлагаться, а у старой заявки останется её история.</div>
       <div class="callout">Слоты не входят в экспорт конфигурации. Следующую неделю собирайте здесь заново.</div>
     </section>
 
@@ -518,7 +520,7 @@
       <h2>9. Типы сессий (Session types)</h2>
       <p>При установке создаются <code>individual</code> и <code>couple</code> по 60 минут. Можно добавить своё (например <code>supervision</code>) без обновления программы.</p>
       <ul>
-        <li><strong>Price (minor units)</strong> — минимальная единица валюты. AMD: <code>15000</code> = 15 000 драмов. EUR/USD: <code>5000</code> = 50.00.</li>
+        <li><strong>Price</strong> — целое число, ровно так, как вы его произносите: <code>15000</code> — сессия за 15 000 драмов. Без запятой и точки, без знака валюты; пробел между тысячами допустим. Пустое поле — цены нет.</li>
         <li><strong>Currency</strong> — три буквы (<code>AMD</code>, <code>EUR</code>…).</li>
         <li>Снимите <strong>active</strong>, чтобы спрятать тип из новой записи.</li>
       </ul>
@@ -718,10 +720,10 @@ docker compose up -d --build</code></pre>
     <footer>
       Поставляется вместе с сервисом. Страница отдаётся вашей же установкой по адресу <code>/admin/help</code>, поэтому всегда соответствует запущенной версии.
       <br><br>
-      <strong>Написано по коммиту <code>1b3b0ee</code>, 2026-08-28.</strong>
+      <strong>Написано по коммиту <code>f4569be</code>, 2026-08-29.</strong>
       Это последнее состояние сервиса, с которым руководство сверяли. После обновления
       сервера тот, кто его обновлял, может посмотреть, что изменилось с тех пор:
-      <code>git log 1b3b0ee..HEAD -- app/ locales/</code> — всё, что из этого списка
+      <code>git log f4569be..HEAD -- app/ locales/</code> — всё, что из этого списка
       заметит терапевт, должно попасть сюда, а отметка о коммите — сдвинуться вместе с этим.
     </footer>
   </main>

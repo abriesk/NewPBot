@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Psychobooking — Admin user guide</title>
 <!-- The commit this guide was last checked against. See the footer. -->
-<meta name="guide-revision" content="1b3b0ee">
-<meta name="guide-revised" content="2026-08-28">
+<meta name="guide-revision" content="f4569be">
+<meta name="guide-revised" content="2026-08-29">
 <style>
   :root {
     --bg: #f6f1ea;
@@ -466,10 +466,12 @@
         <thead><tr><th>Status</th><th>What you can do</th></tr></thead>
         <tbody>
           <tr><td>available</td><td>Block or delete</td></tr>
+          <tr><td>available, marked <em>asked for</em></td><td>Block only</td></tr>
           <tr><td>blocked</td><td>Unblock</td></tr>
           <tr><td>held / booked</td><td>In use — do not delete</td></tr>
         </tbody>
       </table>
+      <div class="callout">A free time can still say <strong>asked for</strong> instead of offering delete. Somebody once asked for that hour, and their request still records it — even if you rejected it, or it expired. Block it and it stops being offered; the old request keeps its history.</div>
       <div class="callout">Slots are not in the configuration export. Recreate next week here.</div>
     </section>
 
@@ -515,7 +517,7 @@
       <h2>9. Session types</h2>
       <p>Seeded: <code>individual</code> and <code>couple</code>, both 60 minutes. Add more (e.g. <code>supervision</code>) without a software update.</p>
       <ul>
-        <li><strong>Price (minor units)</strong> — smallest currency unit. AMD: <code>15000</code> = 15,000 dram. EUR/USD: <code>5000</code> = 50.00.</li>
+        <li><strong>Price</strong> — a whole number, written the way you would say it: <code>15000</code> for a 15,000 dram session. No decimal point, no currency sign, no spaces needed (though a space between the thousands is accepted). Leave it empty for no price.</li>
         <li><strong>Currency</strong> — three letters (<code>AMD</code>, <code>EUR</code>…).</li>
         <li>Uncheck <strong>active</strong> to hide a type from new bookings.</li>
       </ul>
@@ -714,10 +716,10 @@ docker compose up -d --build</code></pre>
     <footer>
       Shipped with the service. This page is served from your own installation at <code>/admin/help</code>, so it always matches the version you are running.
       <br><br>
-      <strong>Written against commit <code>1b3b0ee</code>, 2026-08-28.</strong>
+      <strong>Written against commit <code>f4569be</code>, 2026-08-29.</strong>
       That is the last state of the service this guide was checked against. After
       updating the server, whoever ran the update can list what has changed since with
-      <code>git log 1b3b0ee..HEAD -- app/ locales/</code> — anything in that list a
+      <code>git log f4569be..HEAD -- app/ locales/</code> — anything in that list a
       therapist would notice belongs in here, and the stamp moves with it.
     </footer>
   </main>
