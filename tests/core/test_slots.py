@@ -21,7 +21,7 @@ from app.core.enums import (
     SenderType,
     SlotStatus,
 )
-from app.core.errors import InvalidTransition, SlotInThePast, SlotUnavailable
+from app.core.errors import InvalidTransition, SlotInThePast, SlotReferenced, SlotUnavailable
 from app.core.models import (
     AuditLog,
     BookingRequest,
@@ -33,6 +33,7 @@ from app.core.models import (
     SessionType,
     Slot,
 )
+from app.core.services import booking
 from app.core.services import slots as slot_service
 from app.core.services.clients import resolve_client
 from app.core.services.settings import get_practice
@@ -178,6 +179,45 @@ async def test_a_booked_slot_cannot_be_deleted(
     await slot_service.book_slot(db, future_slot.id, request_id=request_id)
     with pytest.raises(InvalidTransition):
         await slot_service.delete_slot(db, future_slot.id)
+
+
+async def test_a_slot_a_finished_request_asked_for_cannot_be_deleted(
+    db: AsyncSession, future_slot: Slot, request_id: int
+) -> None:
+    """The slot is back to `available`, and still undeletable.
+
+    Every terminal transition releases the slot and leaves the request pointing
+    at it -- that reference is how a rejected request remembers the time it
+    asked for (§7.1). Status alone therefore does not answer whether a slot can
+    go, and deleting under the foreign key reached the therapist as a 500.
+    """
+    request = (
+        await db.execute(select(BookingRequest).where(BookingRequest.id == request_id))
+    ).scalar_one()
+    request.slot_id = future_slot.id
+    await db.flush()
+    await slot_service.book_slot(db, future_slot.id, request_id=request_id)
+
+    await booking.admin_reject(db, request_id, reason="not this one")
+
+    slot = (await db.execute(select(Slot).where(Slot.id == future_slot.id))).scalar_one()
+    assert slot.status is SlotStatus.available
+
+    with pytest.raises(SlotReferenced):
+        await slot_service.delete_slot(db, future_slot.id)
+
+    # Blocking is the answer the refusal points at, and it still works.
+    blocked = await slot_service.block_slot(db, future_slot.id)
+    assert blocked.status is SlotStatus.blocked
+
+
+async def test_an_unreferenced_slot_is_still_deletable(
+    db: AsyncSession, future_slot: Slot
+) -> None:
+    await slot_service.delete_slot(db, future_slot.id)
+    assert (
+        await db.execute(select(Slot).where(Slot.id == future_slot.id))
+    ).scalar_one_or_none() is None
 
 
 # --- Bulk creation ----------------------------------------------------------

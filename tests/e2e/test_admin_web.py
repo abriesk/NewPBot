@@ -1812,3 +1812,78 @@ async def test_an_unknown_client_page_is_a_404_not_a_crash(
     await committed.rollback()
     await committed.execute(delete(AdminSession))
     await committed.commit()
+    await committed.commit()
+
+
+async def test_deleting_a_slot_a_finished_request_asked_for_is_refused_not_a_500(
+    web: TestClient, scratch: dict[str, object], committed: AsyncSession
+) -> None:
+    """Reported in use: delete answered with an internal server error.
+
+    A request that ended released the slot but kept pointing at the time it
+    asked for (§7.1), so the row was `available` -- the one status the page
+    offers delete for -- and the foreign key refused the delete inside the
+    flush. The page now withholds the button and the route answers the race
+    with a redirect.
+    """
+    _sign_in(web)
+
+    await _fresh(committed)
+    practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
+    slot = Slot(
+        practice_id=practice.id,
+        starts_at=datetime.now(UTC) + timedelta(days=21),
+        duration_min=60,
+        status=SlotStatus.available,
+    )
+    committed.add(slot)
+    await committed.flush()
+    request = BookingRequest(
+        practice_id=practice.id,
+        client_id=scratch["client_id"],
+        session_type_id=scratch["session_type_id"],
+        modality=Modality.online,
+        status=RequestStatus.rejected,
+        source_channel=Channel.web,
+        slot_id=slot.id,
+    )
+    committed.add(request)
+    await committed.commit()
+    slot_id = int(slot.id)
+
+    page = web.get("/admin/slots")
+    assert page.status_code == 200
+    assert f'/admin/slots/{slot_id}/delete' not in page.text, "the button must not be offered"
+
+    response = web.post(
+        f"/admin/slots/{slot_id}/delete",
+        data={"csrf_token": _csrf(web)},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "flash=" in response.headers["location"]
+
+    await _fresh(committed)
+    survivor = (
+        await committed.execute(select(Slot).where(Slot.id == slot_id))
+    ).scalar_one_or_none()
+    assert survivor is not None, "the slot the request points at has to stay"
+
+    # Blocking is what the refusal points at, and the page offers it.
+    blocked = web.post(
+        f"/admin/slots/{slot_id}/block",
+        data={"csrf_token": _csrf(web)},
+        follow_redirects=False,
+    )
+    assert blocked.status_code == 303
+    await _fresh(committed)
+    assert (
+        await committed.execute(select(Slot.status).where(Slot.id == slot_id))
+    ).scalar_one() is SlotStatus.blocked
+
+    await committed.rollback()
+    await committed.execute(delete(BookingRequest).where(BookingRequest.id == request.id))
+    await committed.execute(delete(Slot).where(Slot.id == slot_id))
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+

@@ -43,6 +43,16 @@ class SlotInThePast(DomainError):
     """§7.2 guards holding on `starts_at > now()`."""
 
 
+class SlotReferenced(DomainError):
+    """A request still points at this slot, so it can be blocked but not deleted.
+
+    Distinct from `InvalidTransition` because the answer is different: a held or
+    booked slot becomes deletable once the request that holds it ends, while a
+    slot some past request asked for never does. The therapist needs to be told
+    to block it rather than to wait.
+    """
+
+
 class BookingClosed(DomainError):
     """`availability_on` is off; the client gets the waitlist instead (§6)."""
 

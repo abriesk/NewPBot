@@ -52,7 +52,7 @@ from app.core.enums import (
     OutboxStatus,
     RequestStatus,
 )
-from app.core.errors import DomainError, NotFound
+from app.core.errors import DomainError, NotFound, SlotReferenced
 from app.core.models import (
     AdminUser,
     AuditLog,
@@ -128,6 +128,15 @@ UNAVAILABLE_BECAUSE = {
         "confirmed is rejected instead."
     ),
 }
+
+#: Why a slot the page still lists cannot be deleted, for the same reason and in
+#: the same voice as the entries above. The delete button is withheld from a
+#: referenced slot in the first place, so this is what a therapist sees when the
+#: reference arrived between the page rendering and her clicking it.
+SLOT_REFERENCED = (
+    "A request asked for that time, so the slot has to stay. Block it instead "
+    "and it stops being offered."
+)
 
 
 async def _labels(session: AsyncSession) -> dict[str, str]:
@@ -508,6 +517,24 @@ def build_router() -> APIRouter:
                 .scalars()
                 .all()
             )
+            # Which of these a request still points at. An `available` slot can
+            # carry such a reference -- every terminal transition releases the
+            # slot and leaves the request remembering the time it asked for
+            # (§7.1) -- and deleting one is refused, so the button is not
+            # offered for it. One query for the whole page rather than one per
+            # row.
+            referenced = set(
+                (
+                    await session.execute(
+                        select(BookingRequest.slot_id).where(
+                            BookingRequest.slot_id.in_([s.id for s in rows])
+                        )
+                    )
+                )
+                .scalars()
+                .all()
+            )
+
             return _render(
                 "admin/slots.html",
                 await _context(
@@ -521,6 +548,7 @@ def build_router() -> APIRouter:
                             "status": s.status.value,
                             "modality": s.modality.value if s.modality else "either",
                             "duration": s.duration_min,
+                            "deletable": s.id not in referenced,
                         }
                         for s in rows
                     ],
@@ -592,6 +620,8 @@ def build_router() -> APIRouter:
                     await slot_service.delete_slot(session, slot_id)
                 else:
                     return Response(status_code=404)
+            except SlotReferenced:
+                return _back("/admin/slots", SLOT_REFERENCED)
             except DomainError:
                 # A held or booked slot is blocked, not deleted (DESIGN.md §8).
                 return _back("/admin/slots", "refused")

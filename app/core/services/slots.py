@@ -30,8 +30,14 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import Modality, SlotStatus
-from app.core.errors import InvalidTransition, NotFound, SlotInThePast, SlotUnavailable
-from app.core.models import Slot, SlotSessionType
+from app.core.errors import (
+    InvalidTransition,
+    NotFound,
+    SlotInThePast,
+    SlotReferenced,
+    SlotUnavailable,
+)
+from app.core.models import BookingRequest, Slot, SlotSessionType
 from app.core.policies import hold_expiry, now_utc
 from app.core.services.settings import get_practice
 
@@ -233,6 +239,21 @@ async def delete_slot(session: AsyncSession, slot_id: int) -> None:
     slot = await _lock(session, slot_id)
     if slot.status in (SlotStatus.held, SlotStatus.booked):
         raise InvalidTransition("slot", slot.status.value, "delete")
+
+    # Status alone does not answer "does anything reference this". Every
+    # terminal transition releases the slot back to `available` and leaves
+    # `booking_request.slot_id` pointing at it -- that is how a rejected or
+    # expired request remembers the time it asked for (§7.1). Deleting under
+    # that foreign key raised IntegrityError out of the flush, which reached the
+    # therapist as a 500 on a button the page had offered her.
+    referenced = (
+        await session.execute(
+            select(BookingRequest.id).where(BookingRequest.slot_id == slot_id).limit(1)
+        )
+    ).scalar_one_or_none()
+    if referenced is not None:
+        raise SlotReferenced(f"slot {slot_id} is referenced by a booking request")
+
     await session.delete(slot)
     await session.flush()
 
