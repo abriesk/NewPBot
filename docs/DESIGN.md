@@ -618,6 +618,170 @@ with a button. It wants an audit entry, a confirmation that names both people,
 and a decision about what happens to the losing row — none of which is worth
 designing before the duplicate case has actually been hit. Revisit when it has.
 
+### 20.3 Reported defects and refinements, second round
+
+Found in use, late August 2026, in the first session with the therapist working
+through both channels as a client would. The rules are §20.2's: smallest first,
+each entry says what is actually wrong and what closing it takes, and an entry
+leaves this list when it is fixed rather than being marked done in it.
+
+Three went out immediately and are not below — a slot the therapist could not
+delete without a 500, a price field that answered a decimal point with one, and
+a login link that landed on the front page instead of the request it was sent
+about. What is left is deliberately not one piece of work. The last three each
+open a design question before they open an editor, and are meant to be taken one
+at a time.
+
+**The day heading in the Telegram picker looks like a button, because it is
+one.** `slot_keyboard` renders each day as an `InlineKeyboardButton` carrying
+`callback_data="noop"`, so the picker stays one editable message rather than a
+message per day. Nothing hangs — the webhook answers every callback query — but
+on a day offering a single time the client's eye goes to the heading, taps it,
+and gets nothing at all, which reads as a broken bot rather than as a label.
+Two cheap answers: fold the date into the time button where a day has only one
+(`Mon 3 · 15:00`), or answer `noop` with a toast that says to tap the time
+below. The first is better where it applies and does not apply everywhere, so
+they are complementary rather than alternatives. Contained to
+`app/channels/telegram/keyboards.py` and one router branch; §13.1 does not move.
+
+**A session type the therapist creates reaches the client as a translation
+key.** Adding "supervision" is an insert by design (§6.4), but nothing writes
+the `booking.type.<code>` that both pickers read, and `get_text` falls through
+to returning the bare key — so a type she named herself is offered to a client
+as `booking.type.supervision`. Closing it means the session-type form asking for
+the name in all three languages and writing it through `set_text`, plus a
+fallback that prefers the bare code to the key for any type created before that
+form existed.
+
+The price on that same page was the other half of the report and is fixed, but
+it left a decision behind that belongs here rather than in a commit message.
+The field was labelled "minor units" — a developer's phrase sitting in a
+therapist's field — and it now takes **whole units of the currency named beside
+it**, stored exactly as typed: `15000` is a 15,000 dram session, and a decimal
+point is refused rather than rounded. That is what this practice means by a
+price, and the alternative was asking her to write 1500000 in a text box. The
+cost is that the column is still called `price_amount_minor` and its comment
+still says 5000 means 50.00, which is the ordinary convention and not this one.
+Nothing reads it today, so nothing is wrong today — but **whoever renders a
+price to a client has to read `_price_amount` rather than the column name**, and
+that is the trap this paragraph exists to set off.
+
+Which leaves the question the fix did not answer: no client has ever seen a
+price at all. `booking.type.with_price` exists in all three locale files and
+neither channel has ever used it, so the therapist is filling in a field with no
+reader. Decide whether price is client-facing before building anything else on
+it. If it is not, the field is better removed from the form than explained in
+it, and §6.4 moves to say so.
+
+**A client who does not like the times on offer has nowhere to go.** The
+waitlist is reachable only when `resolve_booking_mode` sends the whole practice
+there — no slots at all, or availability switched off (§6). A client looking at
+four times that are all wrong for them has no way to say so: the picker offers
+times and the menu offers topics, and the only remaining move is to close the
+app. Everything needed already exists — `join_waitlist`, the `POST /waitlist`
+route, `waitlist.html`, the `waitlist_problem` and `waitlist_contact` steps on
+Telegram, and `client_decline_to_waitlist` as the pattern for entering it from
+somewhere that is not the top of the flow. What is missing is the entrance: a
+`GET /waitlist` page with a link to it from the slot list, and a row beneath the
+Telegram picker, which `slot_keyboard` already accepts through `extra`. Copy in
+three languages, and a test on each channel. §12.1 and §13.1 both gain a
+sentence saying the waitlist is offered beside the picker and not only instead
+of it.
+
+**A rejection has no room for a referral.** The therapist's answer to a request
+she cannot take is often not "no" but "not me, try her" — and the surface offers
+her Reject, whose client-facing wording is `Reason: {reason}`. Half the
+machinery is already right: `admin_reject(reason=…)` persists `rejected_reason`,
+the notification carries it, and `intent.request.rejected.client.reason` renders
+it, so the web form's Reason field reaches the client today. Two things are
+wrong. The Telegram Reject button passes no reason at all, so from the phone —
+the surface built for answering away from a desk — she can only reject silently;
+it wants a typed step of its own, which `admin_entering_cancel_reason` is the
+model for. And "Reason" is the wrong word for what she actually writes there: a
+referral read as a justification for a refusal is worse than no note. This one
+is mostly copy, and the copy is the point, so it is not as small as its diff.
+
+**The booking flow asks when before it asks how.** Telegram walks the client
+slot → session type → modality, so somebody who can only meet online picks a
+time first and discovers afterwards whether it was ever an online time. It
+should ask the modality first and filter the picker by it, which the core
+already supports: `list_available_slots` takes a `modality`, and a slot with
+`modality IS NULL` is offered as either (§6.4). The cost is not the filter, it
+is the reordering — the step enum, every callback branch, the back and restart
+behaviour, and where `clinic_onsite_url` is shown all move with it, and §13.1's
+step order is normative. On top of that sits a three-way empty state that does
+not exist on either channel: no online times, so offer the on-site ones; none of
+those either, so offer the waitlist. Settle three things before writing any of
+it. Whether session type still precedes modality or follows it. Whether the
+modality question comes before the timezone question. And whether the fallback
+offer switches the client's answer for them or merely shows the other list and
+lets them choose.
+
+Looking at this turned up something separate on the web. `book.html` is handed a
+`negotiation` flag and never reads it, and the only submit path the web has is
+`submit_slot_request` — `submit_free_time_request` has no web caller at all. So
+a practice in `booking_mode = negotiation`, or one falling back to it with no
+slots free, serves a browser the ordinary picker with nothing in it and no way
+to say what time would suit. Telegram has asked that question since M6. The
+asymmetry belongs with this entry because the empty state is where it shows, but
+it is a missing path rather than a wrong order, and §12.1 has to gain the step
+Telegram already has.
+
+**The connect-Telegram link does nothing for a client the bot already knows.**
+`_start` honours a `link_<token>` payload only when the chat has no client
+behind it — `payload.startswith(LINK_PREFIX) and existing is None`. Anyone who
+has ever pressed Start before booking by email therefore taps Connect Telegram
+in their login email, watches the bot open, and gets the ordinary menu; the
+token is never consumed and the two records stay two. This is the case the link
+exists for, so the branch is not a guard but the bug. It also corrects the
+paragraph above in §20.2: the safe join was described there as already existing
+and belonging to the client, and it does not work for the client most likely to
+use it. Closing it is the merge that paragraph defers — moving identities,
+requests, waitlist entries, tokens and flow state onto one row, deciding which
+display name, language and timezone survive, an audit entry, and a confirmation
+step so that one tap cannot silently absorb somebody else's history. The
+difference is that it is now the client merging their own two records behind a
+token only they could have received, which is a much smaller question than the
+admin-side merge, and worth designing as its own thing rather than as half of
+that one. "Revisit when the duplicate case has actually been hit" — it has.
+
+**A confirmed session cannot be moved.** The therapist falls ill, or the day
+comes apart, and the only exit §7.1 gives her from `confirmed` is `admin_cancel`
+— which throws the booking away and puts the slot back on the picker. What she
+needs is to move the session and have the client told, and the table says
+outright that there is no path back from `confirmed`. So this is a new
+transition, `confirmed → confirmed`, and every part of it is a decision:
+whether the new time is announced or has to be accepted, which makes it either a
+transition or a return to `negotiating`; what happens to the old slot, where the
+report is specific and interesting — it should be held rather than freed,
+because her day is still spoken for even though this client is no longer in it,
+which means `booked → blocked` and a new row in §7.2; and whether the reminders
+already scheduled are cancelled and rebuilt or moved. It also needs an event, an
+intent, a message in three languages, a form on the request page, probably a
+Telegram control, and an audit entry. It is the largest item on this list and
+the one a therapist will use on her worst day, which is an argument for building
+it carefully rather than soon.
+
+**Not a client-facing defect, but the reason the rest are hard to verify:** the
+suite shares one database with whatever instance it is run beside.
+`docker compose exec web pytest`, as documented in CLAUDE.md, runs against
+`DATABASE_URL` — the same database the stack is serving from. The end-to-end
+tests drive the app through `TestClient`, so their writes go through
+`unit_of_work()` and commit; only the `db` fixture's outer transaction rolls
+back, and it is not in that path. So the database fills up with test rows, and
+the suite starts failing on rows nobody wrote deliberately: a session type added
+through the admin UI breaks a seeded-count assertion, and slots created by hand
+leak into tests that ask what is free. Six tests failed that way in August 2026
+and none of them was a bug — against a clean database the same commit was green,
+which is a slow and misleading way to find that out.
+
+Two things follow. Tests want their own database, named by the command that runs
+them, so a green suite means the code and not the fixtures. And the assertions
+that count rows want scoping to the rows they name, the way the translation
+import tests already were — a count of everything is a test of the environment.
+Neither is difficult; both are here rather than done because the first changes
+the documented workflow, and the workflow is in CLAUDE.md.
+
 ---
 
 ## 21. Portable configuration and backups
