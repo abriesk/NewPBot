@@ -1,4 +1,14 @@
-"""Telegram webhook route (IMPLEMENTATION.md §12.3, §16.1)."""
+"""Telegram webhook route (IMPLEMENTATION.md §12.3, §16.1).
+
+The one public POST in the service, and it sits behind no session -- so most
+of these tests are about what it refuses. The secret header is the whole of
+the authentication and the path segment is unguessable so the endpoint cannot
+be enumerated; both are asserted to be checked before any parsing, including
+for a body that could not have been parsed anyway.
+
+The rest is registration. §16.1 forbids handing Telegram a plain-HTTP URL,
+and polling mode must register no webhook at all.
+"""
 
 from __future__ import annotations
 

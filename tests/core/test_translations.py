@@ -1,4 +1,20 @@
-"""UI string lookup (IMPLEMENTATION.md §15)."""
+"""UI string lookup (IMPLEMENTATION.md §15).
+
+Lookup never raises and never blanks. An unknown key comes back as itself,
+an unsatisfied placeholder leaves the text intact, and a language missing a
+key falls back to the practice default -- a missing string should degrade to
+something legible, never to an empty page or a 500. A missing key is logged
+once per process rather than once per call, because the alternative is a log
+nobody can read.
+
+The cache is the real risk. Two processes serve this application, so an
+admin edit made in one must not leave the other serving the old string; the
+tests assert invalidation from outside the process as well as inside it, and
+that an unchanged catalogue does not drop the cache for nothing.
+
+One test pins the YAML `yes` key, which a naive loader turns into a boolean
+long before it is ever a translation.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,22 @@
-"""Clients, identities, and tokens (DESIGN.md §5, IMPLEMENTATION.md §8)."""
+"""Clients, identities, and tokens (DESIGN.md §5, IMPLEMENTATION.md §8).
+
+One person may arrive over Telegram and over email and has to end up as one
+client, which puts the weight on identity. Resolution is get-or-create,
+Telegram vouches for its own ids while an email address starts unverified,
+addresses match case-insensitively, and an identity already pointing at a
+client is never silently reassigned to another.
+
+Tokens carry the same weight from the other side: only a hash is stored, a
+token spends exactly once, and it is refused for the wrong purpose or past
+its lifetime. The login and link lifetimes from DESIGN.md §5.1 are asserted
+as values rather than behaviours, because shortening one silently is easy.
+
+The merge is the largest group here. It must move every client-owned table --
+there is a test that the list of them still matches the schema, so a new
+table cannot be forgotten -- keep the survivor's own fields while filling
+only its blanks, leave a map from the row it deleted, and refuse outright
+while a flow is live or when either side has been erased.
+"""
 
 from __future__ import annotations
 
