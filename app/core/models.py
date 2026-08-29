@@ -93,6 +93,11 @@ class Practice(Base):
     default_language: Mapped[str] = mapped_column(Text, nullable=False, server_default="ru")
     timezone: Mapped[str] = mapped_column(Text, nullable=False, server_default="Asia/Yerevan")
     clinic_onsite_url: Mapped[str | None] = mapped_column(Text)
+    #: §6.1: the practice is working online only for now. Not derived from an
+    #: empty `clinic_onsite_url` -- she may keep the address while not working
+    #: there this month, and a blank address means "not filled in", not
+    #: "in-person bookings are off".
+    online_only: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     online_meeting_url: Mapped[str | None] = mapped_column(Text)
     availability_on: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     booking_mode: Mapped[BookingMode] = mapped_column(

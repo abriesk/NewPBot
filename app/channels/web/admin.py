@@ -1894,6 +1894,7 @@ _BOOLEAN_SETTINGS = (
     "fallback_to_negotiation",
     "negotiation_enabled",
     "auto_confirm_slots",
+    "online_only",
 )
 
 _INT_SETTINGS = (

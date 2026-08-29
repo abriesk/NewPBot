@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Psychobooking — Admin user guide</title>
 <!-- The commit this guide was last checked against. See the footer. -->
-<meta name="guide-revision" content="57cdae1">
-<meta name="guide-revised" content="2026-08-29">
+<meta name="guide-revision" content="1a52325">
+<meta name="guide-revised" content="2026-08-30">
 <style>
   :root {
     --bg: #f6f1ea;
@@ -492,8 +492,10 @@
           <tr><td>Fallback to negotiation</td><td>Empty grid in slot mode → free-text form instead of waitlist</td></tr>
           <tr><td>Negotiation enabled</td><td>Propose / counter / accept after a request exists</td></tr>
           <tr><td>Auto-confirm slots</td><td>Skip your approval. Default off.</td></tr>
+          <tr><td>Online only for now</td><td>Clients are not asked how they would like to meet, and only online times are offered</td></tr>
         </tbody>
       </table>
+      <div class="callout"><strong>Online only for now</strong> is for a stretch when you are not seeing anyone in the room. Your in-person slots are kept, not deleted — untick it and they are offered again. It is a separate switch from the clinic address on purpose: keeping the address while not working there is not the same as never having filled one in.</div>
       <h3>What the client actually sees</h3>
       <table>
         <thead><tr><th>Accepting</th><th>Mode</th><th>Free slots?</th><th>Client sees</th></tr></thead>
@@ -642,6 +644,9 @@
         <li><strong>Email</strong> — login links and “open your request page”. No meeting URL in the body.</li>
       </ul>
       <h3>Booking</h3>
+      <p>They are asked <strong>how</strong> they would like to meet, then <strong>what kind</strong> of session, and only then shown times — filtered to the two answers, so every time on the list is one they can actually book. It used to ask for the time first, which meant somebody could pick an hour and find out afterwards that it was never an online hour.</p>
+      <p>Someone booking <strong>in person</strong> is not asked for a timezone: they are coming to the room, so the room's clock is theirs. Someone booking online is asked once, and not again.</p>
+      <p>If nothing is free the way they asked, they get a button offering the other way — “switch to in person” — rather than a list of times of a kind they did not ask for. If nothing is free either way, they are offered the waitlist.</p>
       <p>Picking a slot does not reserve it. The page asks them to finish inside the slot-hold window and says plainly that the time is not held until they submit — two people can be looking at the same slot until one of them does.</p>
       <p>A signed-in client gets their name filled in, and the contact note from their last request offered back. Typing an address into the form signs nobody in: the session and the Telegram link both wait for the emailed link, which only the owner of that address can read. The booking itself goes through either way, and a sign-in link is emailed with it.</p>
       <h3>Answering your proposal</h3>
@@ -730,10 +735,10 @@ docker compose up -d --build</code></pre>
     <footer>
       Shipped with the service. This page is served from your own installation at <code>/admin/help</code>, so it always matches the version you are running.
       <br><br>
-      <strong>Written against commit <code>57cdae1</code>, 2026-08-29.</strong>
+      <strong>Written against commit <code>1a52325</code>, 2026-08-30.</strong>
       That is the last state of the service this guide was checked against. After
       updating the server, whoever ran the update can list what has changed since with
-      <code>git log 57cdae1..HEAD -- app/ locales/</code> — anything in that list a
+      <code>git log 1a52325..HEAD -- app/ locales/</code> — anything in that list a
       therapist would notice belongs in here, and the stamp moves with it.
     </footer>
   </main>

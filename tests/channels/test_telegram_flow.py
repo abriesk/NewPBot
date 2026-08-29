@@ -1619,3 +1619,49 @@ async def test_nothing_either_way_offers_the_waitlist(
     assert reply is not None and reply.keyboard is not None
     data = [b.callback_data for row in reply.keyboard.inline_keyboard for b in row]
     assert data == [kb.WAITLIST]
+
+
+async def test_online_only_skips_the_question_it_would_only_refuse(
+    db: AsyncSession, practice: Practice, session_type_id: int, future_slot: Slot
+) -> None:
+    """§6.1: with one modality on offer there is nothing to choose."""
+    practice.online_only = True
+    await db.flush()
+
+    client = await _to_the_modality_question(db)
+
+    # Straight past it: the modality is recorded and the flow moves on.
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_session_type
+    scratch = await flow.data(db, client.id, Channel.telegram)
+    assert scratch["modality"] == Modality.online.value
+
+
+async def test_online_only_hides_in_person_times(
+    db: AsyncSession, practice: Practice, session_type_id: int
+) -> None:
+    """The slots are kept, not deleted -- they come back when she unticks it."""
+    await _only_the_slots_this_test_makes(db)
+    onsite = Slot(
+        practice_id=practice.id,
+        starts_at=datetime.now(UTC) + timedelta(days=14),
+        duration_min=60,
+        modality=Modality.onsite,
+        status=SlotStatus.available,
+    )
+    db.add(onsite)
+    practice.online_only = True
+    await db.flush()
+
+    await _to_the_modality_question(db)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.TZ}:Europe/Moscow"))
+
+    assert reply is not None and reply.keyboard is not None
+    data = [b.callback_data for row in reply.keyboard.inline_keyboard for b in row]
+    assert f"{kb.SLOT}:{onsite.id}" not in data
+    # And no switch: there is nothing to switch to that anybody is being offered.
+    assert not any(str(d).startswith(f"{kb.MODE}:") for d in data)
+    assert data == [kb.WAITLIST]
+
+    await db.refresh(onsite)
+    assert onsite.status is SlotStatus.available, "kept, not deleted"

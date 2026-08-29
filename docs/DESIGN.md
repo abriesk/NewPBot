@@ -188,6 +188,10 @@ Three settings compose into the behaviour a client sees. Keeping them orthogonal
 
 `auto_confirm_slots` (default off) allows a picked slot to confirm without therapist approval. It exists because it is one line of policy, but the default keeps the therapist in the loop, which is the point of the product.
 
+**`online_only` is a fourth, and it cuts across the table rather than extending it.** It does not change which of the four rows applies; it changes what the client is *asked*. With it set, the "how would you like to meet?" question disappears — there is one answer, and asking for it would be a question whose other answer the flow then has to refuse — and the picker offers online times only. In-person slots already created are kept and come back when it is cleared, because a therapist working online for a month is not a therapist who has stopped working in the room.
+
+It is a setting of its own rather than "`clinic_onsite_url` is empty", which would have been free. The two mean different things: an address she keeps while not working there is not an address she has not filled in, and deriving the mode from the field would flip the whole flow the moment she pasted one in to save it for later.
+
 ---
 
 ## 7. Request lifecycle
@@ -676,6 +680,20 @@ value in `en.yaml` changes nothing on an install that has already been seeded.
 The three rows were still the seeded defaults and were updated in place. Anything
 similar has to be, or the fix ships without arriving.
 
+The tenth and last of the reported ten is gone: **the booking flow asked when
+before it asked how.** §13.1 now walks modality → session type → slots, so the
+picker filters by both — `slot.modality` and `slot_session_type` were dead on
+that channel, offered to everybody, because the questions came after the list.
+An on-site client is no longer asked for a timezone, and `client.timezone` is
+left unset rather than filled with the practice's: a stored zone is never asked
+for again, so a guess here would silently answer the question for a later online
+booking made from anywhere else. Nothing free one way with times the other way
+is a labelled switch rather than the other list, which was the sharper of the
+two answers and came from the report. `practice.online_only` is the first new
+column since the schema was written, and is a setting rather than "the clinic
+address is empty" — keeping an address while not working there is not the same
+as never having filled one in.
+
 A ninth is gone: **a confirmed session could not be moved.** §7.1 now has
 `confirmed → admin_reschedule → confirmed`, §7.2 has `booked → blocked`, and
 §14 carries the reasoning. Two things it settled are worth keeping here. The
@@ -733,36 +751,30 @@ And the question neither fix answered: no client has ever seen a price at all.
 `booking.type.with_price` exists in all three locale files and neither channel
 has ever used it — both call `booking.type.without_price`. So there is a field
 on the admin page, now with a guide entry explaining how to fill it in, whose
-value nothing reads. Decide whether price is client-facing before building
-anything else on it. If it is, the renderer is small and this is where the
-column-name trap above goes off. If it is not, the field is better removed from
-the form than explained in it, and §6.4 moves to say so.
+value nothing reads.
 
-**The booking flow asks when before it asks how.** Telegram walks the client
-slot → session type → modality, so somebody who can only meet online picks a
-time first and discovers afterwards whether it was ever an online time. It
-should ask the modality first and filter the picker by it, which the core
-already supports: `list_available_slots` takes a `modality`, and a slot with
-`modality IS NULL` is offered as either (§6.4). The cost is not the filter, it
-is the reordering — the step enum, every callback branch, the back and restart
-behaviour, and where `clinic_onsite_url` is shown all move with it, and §13.1's
-step order is normative. On top of that sits a three-way empty state that does
-not exist on either channel: no online times, so offer the on-site ones; none of
-those either, so offer the waitlist. Settle three things before writing any of
-it. Whether session type still precedes modality or follows it. Whether the
-modality question comes before the timezone question. And whether the fallback
-offer switches the client's answer for them or merely shows the other list and
-lets them choose.
+**That question is now answered: a price is client-facing, per session type.**
+So the work is to use `booking.type.with_price` where a price is set and
+`without_price` where it is not — both pickers already call the second, and the
+first has existed unused in all three locale files since the catalogue was
+written. Which makes this smaller than it looks and leaves exactly one trap in
+it: the amount is stored in whole currency units, in a column called
+`price_amount_minor`, so the renderer has to read `_price_amount` rather than
+the column name. Currency is per type and may be unset, which is the case to
+decide on — a bare number beside a duration is worse than no price at all, so a
+type with an amount and no currency should probably render as though it had
+none.
 
-Looking at this turned up something separate on the web. `book.html` is handed a
-`negotiation` flag and never reads it, and the only submit path the web has is
-`submit_slot_request` — `submit_free_time_request` has no web caller at all. So
-a practice in `booking_mode = negotiation`, or one falling back to it with no
+**The web cannot make a free-text time request at all.** `book.html` is handed
+a `negotiation` flag and never reads it, and the only submit path the web has is
+`submit_slot_request` — `submit_free_time_request` has no web caller. So a
+practice in `booking_mode = negotiation`, or one falling back to it with no
 slots free, serves a browser the ordinary picker with nothing in it and no way
-to say what time would suit. Telegram has asked that question since M6. The
-asymmetry belongs with this entry because the empty state is where it shows, but
-it is a missing path rather than a wrong order, and §12.1 has to gain the step
-Telegram already has.
+to say what time would suit, while Telegram has asked that question since M6.
+Found while reordering the booking flow, and left out of it deliberately: that
+was a wrong order, this is a missing path, and folding them together would have
+made one change impossible to review. §12.1 has to gain the step §13.1 already
+has, and the form is the one the client's counter already uses on `/r/{uuid}`.
 
 **A moved session leaves the old time in the client's calendar.** `session_ics`
 hardcodes `SEQUENCE:0`, and that number is precisely how iCalendar marks a

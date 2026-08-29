@@ -712,6 +712,16 @@ async def _no_slots_for(
     offered directly rather than left to be found.
     """
     waitlist_label = await get_text(session, client.language, "waitlist.from_picker")
+    practice = await get_practice(session)
+
+    # Nothing to switch to when only one modality is on offer: the other side's
+    # slots are not being shown to anybody, so pointing at them would be an
+    # invitation the flow would then have to refuse.
+    if practice.online_only:
+        return Reply(
+            await get_text(session, client.language, "booking.slot.none_available"),
+            keyboard=kb.one_button(waitlist_label, kb.WAITLIST),
+        )
 
     if chosen is not None:
         other = Modality.online if chosen is Modality.onsite else Modality.onsite
@@ -778,6 +788,19 @@ async def _ask_session_type(session: AsyncSession, client: Client) -> Reply:
 
 
 async def _ask_modality(session: AsyncSession, client: Client) -> Reply:
+    """§13.1's first question -- unless there is nothing to choose.
+
+    With the practice working online only there is one answer, so asking for it
+    would be a question whose wrong answer the service would have to refuse.
+    It is recorded and the flow moves on.
+    """
+    practice = await get_practice(session)
+    if practice.online_only:
+        await flow.remember(
+            session, client.id, Channel.telegram, modality=Modality.online.value
+        )
+        return await _ask_session_type(session, client)
+
     labels = [
         (
             Modality.online.value,

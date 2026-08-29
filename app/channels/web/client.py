@@ -464,7 +464,8 @@ def build_router() -> APIRouter:
             # to work out what happened, where a button saying so tells them.
             chosen = Modality(modality) if modality else None
             switch_to: Modality | None = None
-            if not slots and chosen is not None:
+            # Nothing to switch to when only one modality is on offer (§6.1).
+            if not slots and chosen is not None and not practice.online_only:
                 other = Modality.online if chosen is Modality.onsite else Modality.onsite
                 if await list_available_slots(
                     session,

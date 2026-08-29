@@ -197,6 +197,7 @@ CREATE TABLE practice (
     default_language        TEXT NOT NULL DEFAULT 'ru',
     timezone                TEXT NOT NULL DEFAULT 'Asia/Yerevan',   -- IANA
     clinic_onsite_url       TEXT,
+    online_only             BOOLEAN NOT NULL DEFAULT FALSE,
     online_meeting_url      TEXT,                                    -- default room for online sessions
     availability_on         BOOLEAN NOT NULL DEFAULT TRUE,
     booking_mode            booking_mode NOT NULL DEFAULT 'slots',
@@ -946,6 +947,8 @@ Uploads **MUST** be capped (5 MB) and rejected above it before parsing.
 2. Language selection (`Русский` / `Հայերեն`) on first contact only; stored on the client.
 3. Persistent main keyboard: one button per menu topic, plus Consultation and My appointments.
 4. Topic button → send that topic's published blocks in order, as separate messages.
+   With `practice.online_only` set, the modality question is **skipped rather than asked**: there is one answer, and asking for it would be a question whose other answer the flow then has to refuse. The modality is recorded as `online` and the picker filters to it, so in-person slots already created stop being offered — they are **not** deleted, and come back when the setting is cleared. Deliberately its own column rather than "`clinic_onsite_url` is empty": she may keep the address while not working there this month, and a blank address means "not filled in", not "in-person bookings are off". Where nothing is free, no switch is offered either — pointing at times nobody is being shown would be an invitation the flow would have to refuse.
+
 5. Consultation → `resolve_booking_mode()`, then **ask how before asking when**. Modality first, then session type, on both the slot path and the free-text one. Which path was resolved **MUST** be remembered on the flow rather than re-derived after those two questions: `resolve_booking_mode` reads the slot inventory, and a slot appearing while somebody answers would otherwise move them onto a picker they never asked for. The waitlist path is unchanged and goes straight to its own questions.
 
    The order used to be slot → type → modality, which is wrong twice. The picker cannot filter by answers it has not collected, so `slot.modality` and `slot_session_type` were both dead on this channel — every slot was offered to everybody. And the client learned only after committing to a time whether it was ever an online time, which is the reported fault.
