@@ -99,6 +99,7 @@ async def test_a_healthy_database_reports_every_check_ok(db: AsyncSession) -> No
         "web_errors",
         "worker_errors",
         "practice_row",
+        "unreachable_clients",
         "schema_version",
     }
     assert all(c.state is CheckState.ok for c in checks.values()), [

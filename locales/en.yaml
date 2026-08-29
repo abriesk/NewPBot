@@ -112,6 +112,17 @@ booking:
   cancelled_by_user: "Booking cancelled. You are back at the main menu."
   unavailable: "New bookings are closed at the moment."
 
+# §13.1 step 1: joining a Telegram account to a booking made by email. The
+# wording names no address on purpose -- the screen is drawn before anyone has
+# proved they can read that mailbox, so naming it would tell whoever is holding
+# the phone whose it is.
+merge:
+  confirm: "You have a booking here made by email. Shall I join it to this Telegram account, so everything is in one place?"
+  confirm.yes: "Yes, that was me"
+  confirm.no: "Not me"
+  done: "Joined. Your bookings are all in one place now."
+  busy: "You have something half-finished here. Please complete it first, then open the link from the email again."
+
 waitlist:
   intro: "There are no free places at the moment. You can leave a request and I will get in touch when something opens up."
   # Offered beside the picker rather than instead of it: times can all be wrong

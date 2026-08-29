@@ -25,6 +25,7 @@ from app.core.errors import InvalidTransition, SlotInThePast, SlotReferenced, Sl
 from app.core.models import (
     AuditLog,
     BookingRequest,
+    Client,
     Identity,
     NegotiationMessage,
     OutboxMessage,
@@ -38,6 +39,28 @@ from app.core.services import slots as slot_service
 from app.core.services.clients import resolve_client
 from app.core.services.settings import get_practice
 from app.core.services.slots import SlotPattern
+
+
+async def _delete_probe(conn: object, external_id: str) -> None:
+    """Remove a committed probe identity **and the client behind it**.
+
+    The two concurrency tests below commit like production, so the rollback
+    fixture does not cover them. Deleting the identity alone left a `client`
+    row with no way to reach it -- junk on a shared database, and exactly what
+    §16.9's `unreachable_clients` counts.
+    """
+    client_ids = (
+        await conn.execute(  # type: ignore[attr-defined]
+            select(Identity.client_id).where(Identity.external_id == external_id)
+        )
+    ).scalars().all()
+    await conn.execute(  # type: ignore[attr-defined]
+        Identity.__table__.delete().where(Identity.__table__.c.external_id == external_id)
+    )
+    if client_ids:
+        await conn.execute(  # type: ignore[attr-defined]
+            Client.__table__.delete().where(Client.__table__.c.id.in_(client_ids))
+        )
 
 
 async def test_hold_moves_available_to_held(
@@ -363,11 +386,11 @@ async def test_two_concurrent_holds_and_exactly_one_wins() -> None:
                         BookingRequest.__table__.c.id.in_(request_ids)
                     )
                 )
-            await conn.execute(
-                Identity.__table__.delete().where(
-                    Identity.__table__.c.external_id == "concurrency-probe"
-                )
-            )
+            # The client behind the identity goes too. Deleting only the
+            # identity leaves a `client` row nothing can reach, which is a real
+            # thing to leave on a shared database -- `unreachable_clients` in
+            # §16.9 counts exactly those, and two of them arrived here per run.
+            await _delete_probe(conn, "concurrency-probe")
         await engine.dispose()
 
 
@@ -514,11 +537,7 @@ async def test_two_concurrent_accepts_do_not_both_claim_the_same_slot() -> None:
                 await conn.execute(
                     Slot.__table__.delete().where(Slot.__table__.c.id == contested_slot_id)
                 )
-            await conn.execute(
-                Identity.__table__.delete().where(
-                    Identity.__table__.c.external_id == "accept-race-probe"
-                )
-            )
+            await _delete_probe(conn, "accept-race-probe")
         await engine.dispose()
 
 

@@ -29,7 +29,7 @@ from app.core.models import (
     Slot,
     WaitlistEntry,
 )
-from app.core.services import booking, content, flow
+from app.core.services import booking, clients, content, flow
 from app.core.services.clients import issue_token, resolve_client
 from app.core.services.flow import Step
 
@@ -1291,3 +1291,135 @@ async def test_skip_after_the_cancel_prompt_still_cancels(
 
     await db.refresh(request)
     assert request.status is RequestStatus.cancelled
+
+
+# --- Joining two records that are one person (§13.1 step 1) ----------------
+
+
+async def _web_client_with_token(db: AsyncSession) -> tuple[Client, str]:
+    web = await resolve_client(db, Channel.email, "joined@example.test")
+    raw = await issue_token(db, TokenPurpose.link_channel, client_id=web.id)
+    return web, raw
+
+
+async def test_the_link_asks_before_joining_a_chat_the_bot_already_knows(
+    db: AsyncSession,
+) -> None:
+    """Reported in use: the bot opened and nothing happened.
+
+    `_start` honoured the payload only when the chat had no client behind it,
+    so anyone who pressed /start before booking by email watched the bot open
+    on its ordinary menu with the two records still separate.
+    """
+    await handle(db, Update(chat_id=CHAT, text="/start"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.LANG}:ru"))
+    web, raw = await _web_client_with_token(db)
+
+    reply = await handle(db, Update(chat_id=CHAT, text=f"/start link_{raw}"))
+
+    assert reply is not None and reply.keyboard is not None
+    data = [b.callback_data for row in reply.keyboard.inline_keyboard for b in row]
+    assert f"{kb.MERGE}:{raw}" in data
+    assert kb.MERGE_NO in data
+
+    # Asked, not done -- and the token is unspent, so the answer still works.
+    assert (
+        await db.execute(select(Client).where(Client.id == web.id))
+    ).scalar_one_or_none() is not None
+    assert await clients.token_target(db, raw, TokenPurpose.link_channel) is not None
+
+
+async def test_confirming_joins_the_two_records(db: AsyncSession) -> None:
+    await handle(db, Update(chat_id=CHAT, text="/start"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.LANG}:ru"))
+    telegram_client = await _client(db)
+    web, raw = await _web_client_with_token(db)
+
+    await handle(db, Update(chat_id=CHAT, text=f"/start link_{raw}"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MERGE}:{raw}"))
+
+    # §5.1: the token's row survives, and this chat now reaches it.
+    identity = (
+        await db.execute(select(Identity).where(Identity.external_id == str(CHAT)))
+    ).scalar_one()
+    assert identity.client_id == web.id
+    assert (
+        await db.execute(select(Client).where(Client.id == telegram_client.id))
+    ).scalar_one_or_none() is None
+
+    # Spent now, and only now.
+    assert await clients.token_target(db, raw, TokenPurpose.link_channel) is None
+
+
+async def test_not_me_joins_nothing_and_keeps_the_link_alive(db: AsyncSession) -> None:
+    """A shared phone or a forwarded email is enough for a wrong tap, and the
+    person it was really sent to must still be able to follow it."""
+    await handle(db, Update(chat_id=CHAT, text="/start"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.LANG}:ru"))
+    telegram_client = await _client(db)
+    _, raw = await _web_client_with_token(db)
+
+    await handle(db, Update(chat_id=CHAT, text=f"/start link_{raw}"))
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=kb.MERGE_NO))
+
+    assert reply is not None
+    identity = (
+        await db.execute(select(Identity).where(Identity.external_id == str(CHAT)))
+    ).scalar_one()
+    assert identity.client_id == telegram_client.id, "nothing moved"
+    assert await clients.token_target(db, raw, TokenPurpose.link_channel) is not None
+
+
+async def test_a_half_finished_booking_postpones_the_merge(
+    db: AsyncSession, future_slot: Slot
+) -> None:
+    """The client is asked to finish rather than have it dropped underneath
+    them, and the link survives so they can come back to it."""
+    from app.core.services.translations import get_text
+
+    await _walk_to_slot_pick(db, future_slot)  # leaves a live flow mid-booking
+    telegram_client = await _client(db)
+    _, raw = await _web_client_with_token(db)
+
+    await handle(db, Update(chat_id=CHAT, text=f"/start link_{raw}"))
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MERGE}:{raw}"))
+
+    assert reply is not None
+    assert reply.text == await get_text(db, "ru", "merge.busy")
+
+    identity = (
+        await db.execute(select(Identity).where(Identity.external_id == str(CHAT)))
+    ).scalar_one()
+    assert identity.client_id == telegram_client.id
+    assert await clients.token_target(db, raw, TokenPurpose.link_channel) is not None
+
+
+async def test_a_link_for_the_client_already_here_just_opens_the_menu(
+    db: AsyncSession,
+) -> None:
+    """Following it twice is not an error -- they are already one person."""
+    await handle(db, Update(chat_id=CHAT, text="/start"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.LANG}:ru"))
+    client = await _client(db)
+    raw = await issue_token(db, TokenPurpose.link_channel, client_id=client.id)
+
+    reply = await handle(db, Update(chat_id=CHAT, text=f"/start link_{raw}"))
+
+    # The main menu, which carries the persistent reply keyboard rather than an
+    # inline one -- so no confirmation was offered.
+    assert reply is not None
+    assert not hasattr(reply.keyboard, "inline_keyboard")
+    # Spent, because it did what it was for: there was nothing to join.
+    assert await clients.token_target(db, raw, TokenPurpose.link_channel) is None
+
+
+async def test_an_expired_link_says_so_rather_than_offering_a_merge(
+    db: AsyncSession,
+) -> None:
+    await handle(db, Update(chat_id=CHAT, text="/start"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.LANG}:ru"))
+
+    reply = await handle(db, Update(chat_id=CHAT, text="/start link_not-a-real-token"))
+
+    assert reply is not None
+    assert reply.keyboard is None

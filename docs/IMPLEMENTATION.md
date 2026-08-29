@@ -256,6 +256,8 @@ CREATE TABLE auth_token (
 
 Raw tokens **MUST NOT** be stored. A token is valid only if `used_at IS NULL AND expires_at > now()`, and consuming it sets `used_at` in the same transaction as the action it authorises.
 
+A token may also be **read without being spent**, for the one case where something has to be asked before it is used: §13.1's merge draws a confirmation naming what is about to be joined, and burning the token to draw that screen would leave a client who answers "Not me" — or who never answers — holding a dead link. Reading applies exactly the same four conditions as consuming and reports the same nothing for all of them, so it tells the holder of a token what it is for and tells anyone else no more than consuming would. It **MUST NOT** be used as a way to check a token before an action that then consumes a *different* one.
+
 ### 6.3 Admin
 
 ```sql
@@ -611,10 +613,14 @@ Signatures are indicative; all are `async`, take a session/unit-of-work, and ret
 resolve_client(channel, external_id, *, language=None) -> Client        # get-or-create
 issue_login_token(email) -> raw_token                                    # email identity
 consume_token(raw_token, purpose) -> TokenResult
+token_target(raw_token, purpose) -> TokenResult | None                   # reads without spending (§6.2)
 link_identity(client_id, channel, external_id, verified) -> Identity
+merge_clients(*, into, absorbing) -> Client                              # two rows, one person (§13.1)
 set_client_language(client_id, lang)
 set_client_timezone(client_id, iana)
 ```
+
+`merge_clients` moves every table in `CLIENT_OWNED_TABLES` — `identity`, `auth_token`, `booking_request`, `waitlist_entry`, `outbox_message`, `flow_state` — and deletes the absorbed row. That list and `erase_client`'s reach are the same set by definition, and a test asserts it against the schema: a seventh table holding client data is a client half-moved or half-forgotten, and neither leaves a trace at runtime. The survivor keeps its own `language`, `display_name` and `timezone`, taking the absorbed row's only where its own is blank. It **MUST** refuse when either row is erased (§16 is a promise, and a link minted before it does not undo it) and while either has a live flow. The audit entry records both ids: `audit_log` has no foreign key to `client`, so entries written before the merge still name a row that is gone, and that entry is the map.
 
 **Content and translations**
 ```
@@ -916,6 +922,10 @@ Uploads **MUST** be capped (5 MB) and rejected above it before parsing.
 ### 13.1 Client
 
 1. `/start` — resolve or create the client and Telegram identity. If a `link_<token>` payload is present, consume it and attach this Telegram identity to the existing client instead.
+
+   **When this chat already has a client of its own, the link MUST offer a merge rather than be ignored.** That is the case it exists for: anyone who pressed `/start` before booking by email has a client row here, and `link_identity` refuses to reassign an identity that belongs to somebody else — correctly, since moving one silently is not recoverable. So the two *rows* are joined instead, and only the client may say they are one person. The bot **MUST** ask first, and the confirmation **MUST NOT** name the address: it is drawn before anyone has proved they can read that mailbox, and naming it would tell whoever is holding the phone whose it is. The token is **peeked, not consumed**, to draw that screen (§6.2) and is spent only if the merge runs — so "Not me", an unanswered question, or a refusal all leave the emailed link working.
+
+   The token's client survives and this chat's row is absorbed (`merge_clients`, §8). Not a preference: a web session is a cookie carrying a raw `client.id`, so the row the emailed link names is the one whose browser session must keep working, while Telegram is reached through `identity.external_id`, which the merge moves. A merge **MUST** be refused while either side has a live flow — `flow_state` is unique per `(client, channel)`, so joining would drop half of something somebody is typing — and the client is told to finish it and come back. "Live" means a step other than `idle` touched within `slot_hold_minutes`; nothing sweeps `flow_state`, so without that bound an abandoned booking would block the link for good.
 2. Language selection (`Русский` / `Հայերեն`) on first contact only; stored on the client.
 3. Persistent main keyboard: one button per menu topic, plus Consultation and My appointments.
 4. Topic button → send that topic's published blocks in order, as separate messages.
@@ -1370,6 +1380,7 @@ Normative. A check not in this table does not exist; thresholds are not tuning k
 | `disk_space` | <5% or <500 MB free on `BACKUP_PATH` | <15% or <2 GB | The slow failure that takes everything with it |
 | `schema_version` | Alembic version in the database ≠ code head | — | A half-applied or skipped migration |
 | `practice_row` | not exactly one `practice` row | — | A seed that did not run, or a bad restore |
+| `unreachable_clients` | — | ≥1 client with no identity and no `erased_at` | A `client` row nothing can contact. Zero by construction: erasure removes identities on purpose and is excluded, and `merge_clients` (§8) moves them. It exists for that merge — one transaction and the absent `ON DELETE` on `booking_request` make a half-finished merge impossible to commit, so what is left to catch is a later change moving five tables instead of six |
 
 Rules that apply to all of them:
 

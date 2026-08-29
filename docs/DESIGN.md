@@ -157,6 +157,14 @@ The unsolicited-mail concern is handled where it belongs: §13.3 addresses nothi
 
 **Merging.** Every notification email includes a Telegram deep link of the form `https://t.me/<bot>?start=link_<token>`. Tapping it hands the token to the bot as the `/start` payload; the bot resolves the token and attaches a `telegram` identity to the client who already exists. This is the identity-merge path, and it costs the client one tap rather than a "please type your email into the bot" flow. The same mechanism works in reverse: a Telegram-first client who supplies an email later gets a verification link.
 
+That describes the easy half, and for a long time it was the only half that worked. **When the chat already has a client of its own there is no identity to attach** — it exists and belongs to someone, and `link_identity` refuses to reassign it, because moving an identity between people silently is not a recoverable mistake. That refusal is right and the conclusion drawn from it was wrong: the answer is not to move an identity but to join the two *rows*, which is a different operation and needs its own permission. Found in use in August 2026, and it was failing for precisely the client it exists for — anyone who had pressed `/start` before booking by email watched the bot open on its ordinary menu with nothing joined.
+
+So the bot asks. Only the client can say that two records are one human, and the `link_channel` token is how they say it: it reaches one mailbox, and following it from a Telegram account claims both. The confirmation names no address — it is drawn before anyone has proved they can read that mailbox, so naming it would tell whoever is holding the phone whose it is — and the token is read without being spent, so a wrong tap, a shared phone or an unanswered question all leave the link working.
+
+**The token's row survives.** That is not a preference between an older record and a newer one: a web session is a cookie carrying a raw `client.id`, so the row the emailed link names is the one whose browser session has to keep working, while Telegram is reached by looking up `identity.external_id`, which the merge moves. The losing row is deleted rather than flagged, and the audit entry naming both ids is what maps the one to the other afterwards — `audit_log` has no foreign key to `client`, so entries written before the merge still name a row that is gone.
+
+An **admin-side** merge is a different question and stays out (§20.2). Here the client is joining their own two records behind a token only they could have received; there the service would be guessing that two people are one, and a wrong guess is irreversible.
+
 Tokens are single-use, short-lived, and stored hashed. Login tokens expire in 30 minutes; channel-link tokens in 24 hours.
 
 ### 5.2 Therapist
@@ -602,21 +610,29 @@ whose Telegram and email were never linked is two `client` rows with two
 histories, because the service does not know they are one human. The clients
 list shows both, correctly — it cannot show otherwise without guessing.
 
-The safe join already exists and belongs to the client: the `link_channel` token
-in the login email, which only the owner of that address can follow (§5.1). What
-is missing is a way for the therapist to *notice* the case and prompt it. A
-"these may be the same person" hint is the cheap half and is guesswork — a
-shared display name is weak evidence and a wrong guess puts two strangers' names
-beside each other on a page about them.
+The safe join belongs to the client: the `link_channel` token in the login
+email, which only the owner of that address can follow (§5.1). **That now works
+in both directions** — when this paragraph was written it did not, and the case
+it silently walked past was the common one. `merge_clients` joins the two rows
+behind a confirmation in the bot; §20.3 records what was wrong and §5.1 what was
+decided. What is still missing is a way for the therapist to *notice* the case
+and prompt it, for the person who never follows the link at all. A "these may be
+the same person" hint is the cheap half and is guesswork — a shared display name
+is weak evidence and a wrong guess puts two strangers' names beside each other
+on a page about them.
 
-An admin-side **merge** is the expensive half and is what would actually fix it:
-moving identities, requests, waitlist entries, tokens and flow state from one
-client to another, irreversibly. `link_identity` already refuses to reassign an
-identity that belongs to somebody else, on the grounds that silently moving one
-between people is not a recoverable mistake, and an admin merge is that mistake
-with a button. It wants an audit entry, a confirmation that names both people,
-and a decision about what happens to the losing row — none of which is worth
-designing before the duplicate case has actually been hit. Revisit when it has.
+An admin-side **merge** is the expensive half and stays out. The machinery is
+now built and pointing it at a button on `/admin/clients` would be a small
+change, which is exactly why the reason for not doing it should be written down
+rather than assumed. The client merging their own two records is acting on
+knowledge only they have, proved by a token only they could receive. The
+therapist doing it is *guessing* that two people are one, from a shared name or
+a similar address, and `merge_clients` is irreversible by construction — the
+absorbed row is deleted, and `link_identity` refuses to reassign an identity
+between people for the same reason. A button that joins two strangers'
+histories on a hunch is worse than two rows that are correctly two. Revisit only
+with a way for her to be *sure*, which is likely to be asking the client rather
+than looking at a list.
 
 ### 20.3 Reported defects and refinements, second round
 
@@ -653,6 +669,18 @@ missing keys and never overwrites (§15, so that her edits win), so editing a
 value in `en.yaml` changes nothing on an install that has already been seeded.
 The three rows were still the seeded defaults and were updated in place. Anything
 similar has to be, or the fix ships without arriving.
+
+An eighth is gone: **the connect-Telegram link did nothing for a client the bot
+already knew**, which was the client it exists for. §5.1 carries what was
+decided and why, §20.2's merge paragraph is corrected, and the admin-side merge
+stays out for a reason now written down rather than assumed. Two things came out
+of building it. `flow_state` is written on every menu render, so "is this client
+mid-something" had to mean a step other than `idle` — the first version refused
+every merge. And the new `unreachable_clients` check went amber immediately: the
+two concurrency tests in `tests/core/test_slots.py` deleted their probe identity
+and left the `client` row behind, two per run, 171 of them by the time anyone
+looked. That is the invariant doing precisely what it was added for, on its
+first day, against a bug that had nothing to do with merging.
 
 Two of those turned out to be more than they looked. The day heading was the
 wider half of what reads as one control, which `slot_keyboard` now solves by
@@ -719,24 +747,6 @@ asymmetry belongs with this entry because the empty state is where it shows, but
 it is a missing path rather than a wrong order, and §12.1 has to gain the step
 Telegram already has.
 
-**The connect-Telegram link does nothing for a client the bot already knows.**
-`_start` honours a `link_<token>` payload only when the chat has no client
-behind it — `payload.startswith(LINK_PREFIX) and existing is None`. Anyone who
-has ever pressed Start before booking by email therefore taps Connect Telegram
-in their login email, watches the bot open, and gets the ordinary menu; the
-token is never consumed and the two records stay two. This is the case the link
-exists for, so the branch is not a guard but the bug. It also corrects the
-paragraph above in §20.2: the safe join was described there as already existing
-and belonging to the client, and it does not work for the client most likely to
-use it. Closing it is the merge that paragraph defers — moving identities,
-requests, waitlist entries, tokens and flow state onto one row, deciding which
-display name, language and timezone survive, an audit entry, and a confirmation
-step so that one tap cannot silently absorb somebody else's history. The
-difference is that it is now the client merging their own two records behind a
-token only they could have received, which is a much smaller question than the
-admin-side merge, and worth designing as its own thing rather than as half of
-that one. "Revisit when the duplicate case has actually been hit" — it has.
-
 **A confirmed session cannot be moved.** The therapist falls ill, or the day
 comes apart, and the only exit §7.1 gives her from `confirmed` is `admin_cancel`
 — which throws the booking away and puts the slot back on the picker. What she
@@ -753,6 +763,20 @@ intent, a message in three languages, a form on the request page, probably a
 Telegram control, and an audit entry. It is the largest item on this list and
 the one a therapist will use on her worst day, which is an argument for building
 it carefully rather than soon.
+
+**An abandoned booking keeps what the client typed, indefinitely.** `flow.data`
+is scratch that can hold `problem_text`, and its own docstring says it "is
+cleared as soon as the flow finishes" — which is true, and a flow nobody comes
+back to never finishes. Nothing sweeps `flow_state`: the retention sweep covers
+requests (§16), and this table was not thought of as holding anything worth
+retaining. So a description of somebody's problem, typed into the bot and
+abandoned at step 3, sits in the database until they return and start again.
+Found while writing the merge, which needed to know whether a flow was live and
+so had to notice that some of them never stop being rows. Closing it is a sweep
+beside the others in `app/worker/jobs/sweeps.py` and a number to sweep at —
+`pending_expiry_hours` is the closest thing already settled, and is generous for
+a form somebody walked away from. It is small; it is here rather than done
+because §16 should say what the retention rule is before code enforces one.
 
 **Not a client-facing defect, but the reason the rest are hard to verify:** the
 suite shares one database with whatever instance it is run beside.

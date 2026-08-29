@@ -16,11 +16,11 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import ActorType, Channel, TokenPurpose
-from app.core.errors import NotFound, TokenInvalid
+from app.core.errors import MergeRefused, NotFound, TokenInvalid
 from app.core.models import AuthToken, Client, Identity
 from app.core.policies import now_utc
 from app.core.services.settings import get_practice
@@ -226,6 +226,39 @@ async def consume_token(
 
     token.used_at = now_utc()
     await session.flush()
+    return TokenResult(
+        client_id=token.client_id, purpose=token.purpose, payload=token.payload or {}
+    )
+
+
+async def token_target(
+    session: AsyncSession, raw_token: str, purpose: TokenPurpose
+) -> TokenResult | None:
+    """Who a token is for, **without spending it**. None if it is not valid.
+
+    §6.2 makes every token single-use, and `consume_token` is how that is
+    enforced. This exists for the one case where something has to be *asked*
+    before the token is spent: the Telegram merge shows a confirmation naming
+    what is about to be joined, and burning the token to draw that screen would
+    leave a client who taps "Not me" -- or who is interrupted -- with a dead
+    link and nothing merged.
+
+    It tells the holder of a token what the token is for, and nothing to anyone
+    else: an unknown, used, expired or wrong-purpose value is None, exactly as
+    `consume_token` refuses all four alike.
+    """
+    token = (
+        await session.execute(select(AuthToken).where(AuthToken.token_hash == _hash(raw_token)))
+    ).scalar_one_or_none()
+
+    if (
+        token is None
+        or token.used_at is not None
+        or token.expires_at <= now_utc()
+        or token.purpose != purpose
+    ):
+        return None
+
     return TokenResult(
         client_id=token.client_id, purpose=token.purpose, payload=token.payload or {}
     )
@@ -627,3 +660,163 @@ async def erase_client(session: AsyncSession, client_id: UUID) -> Client:
     )
     await session.flush()
     return client
+
+
+#: Which tables carry a client's data. `merge_clients` moves every one of them
+#: and `erase_client` empties every one of them, so a table added here without
+#: being added there is a client half-moved or half-forgotten. The completeness
+#: test in tests/core/test_clients.py fails when this list and the schema
+#: disagree, which is the only way either function stays honest.
+CLIENT_OWNED_TABLES = (
+    "identity",
+    "auth_token",
+    "booking_request",
+    "waitlist_entry",
+    "outbox_message",
+    "flow_state",
+)
+
+
+#: The resting state. `flow_state` is written on every menu render, so a row
+#: saying `idle` means the opposite of "half-finished" -- it is where somebody
+#: sits between conversations, and treating it as work in progress would refuse
+#: every merge.
+_IDLE_STEP = "idle"
+
+
+async def _live_flow_channels(session: AsyncSession, client_id: UUID) -> list[str]:
+    """Channels where this client is part-way through something right now.
+
+    Two conditions, and both are needed. The step must not be `idle`, which is
+    where a client rests rather than something they are in the middle of. And
+    the row must have been touched within `slot_hold_minutes`, the window §8
+    already uses for how long a client should take to finish a booking --
+    nothing sweeps `flow_state`, so a booking abandoned last month is still a
+    row, and without the bound "finish what you started" would be an
+    instruction nobody could follow.
+    """
+    from app.core.models import FlowState
+
+    practice = await get_practice(session)
+    cutoff = now_utc() - timedelta(minutes=practice.slot_hold_minutes)
+    rows = (
+        (
+            await session.execute(
+                select(FlowState.channel).where(
+                    FlowState.client_id == client_id,
+                    FlowState.step != _IDLE_STEP,
+                    FlowState.updated_at >= cutoff,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return [channel.value for channel in rows]
+
+
+async def merge_clients(session: AsyncSession, *, into: UUID, absorbing: UUID) -> Client:
+    """Join two rows that are one person (DESIGN.md §5.1).
+
+    Only the client can say that two records are the same human, and the
+    `link_channel` token in their own login email is how they say it: it
+    reaches one mailbox, and following it from a Telegram account claims both.
+    An admin-side merge is a different question and stays deferred (§20.2) --
+    there the service would be guessing, and a wrong guess joins two strangers'
+    histories irreversibly.
+
+    `into` is the token's client and survives. That is not a preference: a web
+    session is a cookie carrying a raw `client.id`, so the row named by the link
+    the client is holding is the one whose browser session must keep working,
+    while Telegram is reached through `identity.external_id`, which this moves.
+
+    Everything in `CLIENT_OWNED_TABLES` moves. The survivor keeps its own
+    `language`, `display_name` and `timezone` and takes the absorbed row's only
+    where its own is blank -- a name typed once into a web form must not
+    overwrite the one Telegram vouches for.
+    """
+    from sqlalchemy import delete, update
+
+    from app.core.models import (
+        AuditLog,
+        BookingRequest,
+        FlowState,
+        OutboxMessage,
+        WaitlistEntry,
+    )
+
+    if into == absorbing:
+        raise MergeRefused("same client")
+
+    survivor = await _get_client(session, into)
+    absorbed = await _get_client(session, absorbing)
+
+    # §16: erasure is a promise, and a link minted before it must not undo it.
+    if survivor.erased_at is not None or absorbed.erased_at is not None:
+        raise MergeRefused("erased")
+
+    # Refused rather than resolved: `flow_state` is UNIQUE per (client, channel),
+    # so a merge has to drop one of two live flows, and the one it would drop
+    # holds half of something somebody is typing right now.
+    busy = await _live_flow_channels(session, into) + await _live_flow_channels(
+        session, absorbing
+    )
+    if busy:
+        raise MergeRefused("busy")
+
+    counts = {
+        "requests": int(
+            (
+                await session.execute(
+                    select(func.count())
+                    .select_from(BookingRequest)
+                    .where(BookingRequest.client_id == absorbing)
+                )
+            ).scalar_one()
+        ),
+        "waitlist": int(
+            (
+                await session.execute(
+                    select(func.count())
+                    .select_from(WaitlistEntry)
+                    .where(WaitlistEntry.client_id == absorbing)
+                )
+            ).scalar_one()
+        ),
+    }
+
+    # Whatever flow rows are left are stale by the check above, and the
+    # survivor may hold one on the same channel -- so they go rather than move.
+    await session.execute(delete(FlowState).where(FlowState.client_id == absorbing))
+
+    for model in (Identity, AuthToken, BookingRequest, WaitlistEntry, OutboxMessage):
+        await session.execute(
+            update(model).where(model.client_id == absorbing).values(client_id=into)
+        )
+
+    survivor.display_name = survivor.display_name or absorbed.display_name
+    survivor.timezone = survivor.timezone or absorbed.timezone
+    survivor.updated_at = now_utc()
+    await session.flush()
+
+    # `booking_request` and `waitlist_entry` have no ON DELETE, so this fails
+    # loudly if anything above was missed. That is the completeness check.
+    await session.execute(delete(Client).where(Client.id == absorbing))
+
+    practice = await get_practice(session)
+    session.add(
+        AuditLog(
+            practice_id=practice.id,
+            actor_type=ActorType.client,
+            actor_id=str(into),
+            action="client.merge",
+            entity_type="client",
+            entity_id=str(into),
+            # The absorbed id is the map from the deleted row to this one: audit
+            # entries written before the merge still name it. Identifiers only,
+            # never what either of them wrote (hard rule 8).
+            meta={"absorbed": str(absorbing), **counts},
+        )
+    )
+    await session.flush()
+    return survivor

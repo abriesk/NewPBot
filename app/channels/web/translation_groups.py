@@ -50,9 +50,11 @@ GROUPS: tuple[Group, ...] = (
     Group(
         slug="pages",
         title="Pages the client sees",
-        blurb="Labels on the website: their request page, signing in, the menu "
-        "buttons, and the titles of your topic pages.",
-        prefixes=("request.", "auth.", "menu.", "content."),
+        blurb="Labels a client sees around their own account: their request "
+        "page, signing in, the menu buttons, the titles of your topic pages, "
+        "and the question the bot asks before joining a booking made by email "
+        "to someone's Telegram.",
+        prefixes=("request.", "auth.", "menu.", "content.", "merge."),
     ),
     Group(
         slug="waitlist",

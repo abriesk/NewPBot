@@ -55,6 +55,16 @@ COUNTER_SLOT = "cslot"
 #: §12.1's way out where a counter may not be words.
 COUNTER_WAITLIST = "cwait"
 
+#: §13.1: joining this Telegram account to a client the bot already knows
+#: separately. The raw `link_channel` token rides in the callback argument --
+#: `token_urlsafe(32)` is 43 characters, so `mrg:<token>` is 47 bytes and stays
+#: inside §9's budget. It is not a new exposure: the same token is already in
+#: the chat, in the `/start link_…` message that produced this screen. Carrying
+#: it rather than parking it keeps the confirmation stateless, the way every
+#: picker screen is.
+MERGE = "mrg"
+MERGE_NO = "mrgno"
+
 #: The same way out, offered under the booking picker. Its own action rather
 #: than `COUNTER_WAITLIST`: that one closes a request that already exists, while
 #: this one belongs to somebody who has not made one -- times can all be wrong
@@ -459,14 +469,26 @@ def slot_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-def choice_keyboard(action: str, options: list[tuple[str, str]]) -> InlineKeyboardMarkup:
-    """`(value, label)` pairs as one button per row."""
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text=label, callback_data=f"{action}:{value}")]
-            for value, label in options
-        ]
+def choice_keyboard(
+    action: str,
+    options: list[tuple[str, str]],
+    *,
+    extra: list[tuple[str, str]] | None = None,
+) -> InlineKeyboardMarkup:
+    """`(value, label)` pairs as one button per row.
+
+    `extra` appends `(label, callback_data)` rows beneath, for a button that is
+    not one of the choices -- the way out of the question rather than an answer
+    to it. Same shape and same purpose as `slot_keyboard`'s.
+    """
+    rows = [
+        [InlineKeyboardButton(text=label, callback_data=f"{action}:{value}")]
+        for value, label in options
+    ]
+    rows.extend(
+        [InlineKeyboardButton(text=label, callback_data=data)] for label, data in extra or ()
     )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def skip_keyboard(label: str) -> InlineKeyboardMarkup:

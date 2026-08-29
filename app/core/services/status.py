@@ -137,6 +137,7 @@ async def run_checks(session: AsyncSession, *, code_head: str | None = None) -> 
         _web_errors,
         _worker_errors,
         _practice_row,
+        _unreachable_clients,
     ):
         checks.append(await _guard(session, check))
 
@@ -432,6 +433,47 @@ async def _practice_row(session: AsyncSession) -> Check:
         "The practice's own settings are missing or duplicated. Call for help "
         "before changing anything.",
         f"practice: {count} rows, expected 1",
+    )
+
+
+async def _unreachable_clients(session: AsyncSession) -> Check:
+    """A client with no identity and no `erased_at` cannot be contacted.
+
+    One of §22's "counts that should be zero". Erasure removes every identity on
+    purpose (§16), so those are excluded; anything else is a person the practice
+    holds bookings for and has no way to reach.
+
+    It exists for `merge_clients`. That runs in one transaction and the absent
+    `ON DELETE` on `booking_request` makes the database refuse a half-finished
+    merge, so a partial merge cannot persist -- which means a repair job would
+    have nothing to repair. What a transaction cannot protect against is a
+    later change moving five tables instead of six, and this is what would
+    notice.
+    """
+    from app.core.models import Client, Identity
+
+    stranded = int(
+        (
+            await session.execute(
+                select(func.count())
+                .select_from(Client)
+                .where(
+                    Client.erased_at.is_(None),
+                    ~select(Identity.id).where(Identity.client_id == Client.id).exists(),
+                )
+            )
+        ).scalar_one()
+    )
+
+    if stranded == 0:
+        return ok("unreachable_clients", "every client can be reached")
+
+    return Check(
+        "unreachable_clients",
+        CheckState.warn,
+        "Some client records have no way to contact them. Their bookings are "
+        "unaffected; call for help before anyone tries to reply to one.",
+        f"clients with no identity: {stranded}",
     )
 
 

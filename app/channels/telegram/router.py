@@ -23,7 +23,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.channels.telegram import keyboards as kb
 from app.config import get_settings
 from app.core.enums import Channel, Modality, RequestStatus, SenderType, SlotStatus, TokenPurpose
-from app.core.errors import DomainError, SlotUnavailable, TokenInvalid
+from app.core.errors import DomainError, MergeRefused, SlotUnavailable, TokenInvalid
 from app.core.models import (
     BookingRequest,
     Client,
@@ -41,9 +41,11 @@ from app.core.services.clients import (
     link_identity,
     looks_like_email,
     magic_link_allowance_left,
+    merge_clients,
     resolve_client,
     set_client_language,
     set_client_timezone,
+    token_target,
 )
 from app.core.services.flow import Step
 from app.core.services.notifications import Envelope, Recipient
@@ -218,6 +220,16 @@ async def _start(session: AsyncSession, update: Update) -> Reply:
 
     existing = await _known_client(session, update.chat_id)
 
+    if payload.startswith(LINK_PREFIX) and existing is not None:
+        # The case this link exists for, and the one it used to walk past.
+        # Anyone who pressed /start before booking by email already has a client
+        # row here, so `link_identity` would refuse to reassign the identity --
+        # correctly, since silently moving one between people is not
+        # recoverable. The answer is not to reassign an identity but to join the
+        # two rows, and only the client can say they are one person. So this
+        # asks, and merges on the answer (DESIGN.md §5.1).
+        return await _offer_merge(session, existing, payload[len(LINK_PREFIX) :])
+
     if payload.startswith(LINK_PREFIX) and existing is None:
         raw = payload[len(LINK_PREFIX) :]
         try:
@@ -260,6 +272,65 @@ async def _start(session: AsyncSession, update: Update) -> Reply:
         await get_text(session, practice.default_language, "lang.select"),
         keyboard=kb.language_keyboard(),
     )
+
+
+async def _offer_merge(session: AsyncSession, existing: Client, raw: str) -> Reply:
+    """§13.1 step 1: ask before joining two records that may be one person.
+
+    The token is *peeked* rather than consumed. A client who taps "Not me", or
+    who never answers, must be left with the link they were sent still working
+    -- and burning it to draw this screen would spend it on a question.
+
+    The wording names no address. Whoever is holding this phone has proved they
+    can read the mailbox only if they are the person the mail was sent to, and
+    the screen is drawn before that is settled.
+    """
+    target = await token_target(session, raw, TokenPurpose.link_channel)
+    if target is None or target.client_id is None:
+        return Reply(await get_text(session, existing.language, "common.error.expired_link"))
+
+    if target.client_id == existing.id:
+        # Already one person: the link is doing nothing, which is not an error.
+        await consume_token(session, raw, TokenPurpose.link_channel)
+        return await _menu(session, existing, greeting_key="common.welcome_back")
+
+    return Reply(
+        await get_text(session, existing.language, "merge.confirm"),
+        keyboard=kb.choice_keyboard(
+            kb.MERGE,
+            [(raw, await get_text(session, existing.language, "merge.confirm.yes"))],
+            extra=[(await get_text(session, existing.language, "merge.confirm.no"), kb.MERGE_NO)],
+        ),
+    )
+
+
+async def _confirm_merge(session: AsyncSession, client: Client, raw: str) -> Reply:
+    """The answer to `_offer_merge`. Consumes the token only if the merge runs.
+
+    `into` is the token's client and this chat's row is absorbed: §5.1's reason
+    is that a web session is a cookie carrying a raw client id, so the row the
+    emailed link names is the one whose browser session has to keep working.
+    The Telegram identity moves with everything else, so the next update from
+    this chat finds the survivor.
+    """
+    target = await token_target(session, raw, TokenPurpose.link_channel)
+    if target is None or target.client_id is None:
+        return Reply(await get_text(session, client.language, "common.error.expired_link"))
+
+    language = client.language
+    try:
+        survivor = await merge_clients(session, into=target.client_id, absorbing=client.id)
+    except MergeRefused as refused:
+        if refused.reason == "busy":
+            # Their words are half-typed into `flow_state`, and a merge would
+            # have to drop one of two rows to satisfy its unique constraint.
+            # The token is not spent, so the same link works once they are done.
+            return Reply(await get_text(session, language, "merge.busy"))
+        logger.info("merge refused: %s", refused.reason)
+        return Reply(await get_text(session, language, "common.error.generic"))
+
+    await consume_token(session, raw, TokenPurpose.link_channel)
+    return await _menu(session, survivor, greeting_key="merge.done")
 
 
 async def _menu(
@@ -834,6 +905,15 @@ async def _submit_waitlist(session: AsyncSession, client: Client) -> Reply:
 async def _callback(session: AsyncSession, client: Client, update: Update) -> Reply | None:
     action, argument = kb.parse_callback(update.callback_data or "")
     step = await flow.current_step(session, client.id, Channel.telegram)
+
+    if action == kb.MERGE:
+        return await _confirm_merge(session, client, argument)
+
+    if action == kb.MERGE_NO:
+        # Nothing happens, and the token is deliberately left unspent: somebody
+        # who taps this by mistake, or whose family shares a phone, must still
+        # be able to follow the link they were sent.
+        return await _menu(session, client, greeting_key="common.welcome_back")
 
     if action == kb.LANG:
         await set_client_language(session, client.id, argument)

@@ -46,12 +46,14 @@ column's other shapes, and merging one person's two client rows. Both say what
 would settle them; neither is urgent. Read it before proposing new work here.
 
 **§20.3 is the second round, reported 2026-08-29 after the first session with
-the therapist.** Three of its ten are fixed — the slot delete that 500'd, the
-price field that 500'd on a decimal, and the login link that landed on the front
-page. The rest is open and is meant to be taken **one entry at a time**, in the
-order written: the last three each need a design question answered before any
-code, and two of them move §7.1 or §13.1. Read the entry before starting it —
-each says what is actually wrong, which is usually not what the report said.
+the therapist.** Eight of its entries are fixed; the preamble names them and
+what each turned out to be. What is left is the modality-first booking flow,
+moving a confirmed session, whether a price is client-facing at all, the
+retention of an abandoned `flow_state`, and the test database. Take them **one
+entry at a time**, in the order written: the first two each need a design
+question answered before any code, and both move §7.1 or §13.1. Read the entry
+before starting it — each says what is actually wrong, which is usually not what
+the report said.
 
 Milestones run M0 → M13 (`IMPLEMENTATION.md` §19). Work them **in order**. Each
 one's acceptance criteria must pass before starting the next. Do not implement

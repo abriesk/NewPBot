@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Psychobooking — Admin user guide</title>
 <!-- The commit this guide was last checked against. See the footer. -->
-<meta name="guide-revision" content="71230b6">
+<meta name="guide-revision" content="94bfefd">
 <meta name="guide-revised" content="2026-08-29">
 <style>
   :root {
@@ -577,7 +577,8 @@
       <h3>Clients — <code>/admin/clients</code></h3>
       <p>The practice's people: everyone who has requested a consultation, most recent activity first, with how to reach them, how many requests they have made, and their last and next session. The name and the count both open that person's page — every request they have made, drawn as the same row the queue draws, and their waitlist entries.</p>
       <p>Somebody who only ever asked for a sign-in link and never booked is not here. Neither is anybody erased. Both are on Privacy, whose list has to be complete.</p>
-      <p>Two identities that were never linked are still two rows. The service does not know they are one human; only the client can say so, by following the Telegram link their sign-in email already carries.</p>
+      <p>Two identities that were never linked are still two rows. The service does not know they are one human; only the client can say so, by following the Telegram link their sign-in email already carries. That link now works even when the bot already knows them separately: it asks them to confirm, and joins the two rows into one. So a person who appeared twice can become one row on this page, carrying both histories — that is them tidying themselves up, not something going wrong.</p>
+      <p>You cannot join two rows yourself, by design. Following the link is the client saying “both of these are me”; you would be guessing it from a name, and the join cannot be undone.</p>
       <p>No problem text on either page. It stays one click away, on the request.</p>
       <h3>Privacy — <code>/admin/privacy</code></h3>
       <p>Every client row there has ever been, unfiltered on purpose: “send me my data” and “forget me” can only be answered against the whole population, and a privacy page that filters is one with a hole in it. A client's page links to their row here.</p>
@@ -722,10 +723,10 @@ docker compose up -d --build</code></pre>
     <footer>
       Shipped with the service. This page is served from your own installation at <code>/admin/help</code>, so it always matches the version you are running.
       <br><br>
-      <strong>Written against commit <code>71230b6</code>, 2026-08-29.</strong>
+      <strong>Written against commit <code>94bfefd</code>, 2026-08-29.</strong>
       That is the last state of the service this guide was checked against. After
       updating the server, whoever ran the update can list what has changed since with
-      <code>git log 71230b6..HEAD -- app/ locales/</code> — anything in that list a
+      <code>git log 94bfefd..HEAD -- app/ locales/</code> — anything in that list a
       therapist would notice belongs in here, and the stamp moves with it.
     </footer>
   </main>

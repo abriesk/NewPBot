@@ -2,15 +2,28 @@
 
 from __future__ import annotations
 
+from datetime import timedelta
+
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.enums import Channel, TokenPurpose
-from app.core.errors import TokenInvalid
-from app.core.models import AuthToken, Identity, Practice
+from app.core.enums import Channel, Modality, RequestStatus, TokenPurpose
+from app.core.errors import MergeRefused, TokenInvalid
+from app.core.models import (
+    AuditLog,
+    AuthToken,
+    BookingRequest,
+    Client,
+    FlowState,
+    Identity,
+    OutboxMessage,
+    Practice,
+    SessionType,
+    WaitlistEntry,
+)
 from app.core.policies import now_utc
-from app.core.services import clients, waitlist
+from app.core.services import clients, flow, waitlist
 from app.core.services.clients import consume_token, issue_token, link_identity, resolve_client
 
 
@@ -248,3 +261,233 @@ async def test_a_new_waitlist_entry_cannot_skip_straight_to_converted(
 
     with pytest.raises(InvalidTransition):
         await waitlist.mark_converted(db, entry.id)
+
+
+# --- Merging two rows that are one person (DESIGN.md §5.1) ------------------
+
+
+def test_the_client_owned_table_list_matches_the_schema() -> None:
+    """A seventh table holding client data must fail here, loudly.
+
+    `merge_clients` moves every table in `CLIENT_OWNED_TABLES` and
+    `erase_client` empties every one of them. A table added to the schema
+    without being added to that list is a client half-moved or half-forgotten,
+    and neither leaves a trace at runtime.
+    """
+    from app.core.models import Base
+
+    with_client = {
+        name
+        for name, table in Base.metadata.tables.items()
+        for column in table.columns
+        if any(fk.column.table.name == "client" for fk in column.foreign_keys)
+    }
+    assert with_client == set(clients.CLIENT_OWNED_TABLES)
+
+
+async def _person_with_history(
+    db: AsyncSession, practice: Practice, external_id: str, channel: Channel
+) -> Client:
+    """A client carrying a row in every table the merge has to move."""
+    client = await resolve_client(db, channel, external_id, verified=True)
+    session_type_id = (
+        await db.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+
+    db.add(
+        BookingRequest(
+            practice_id=practice.id,
+            client_id=client.id,
+            session_type_id=session_type_id,
+            modality=Modality.online,
+            status=RequestStatus.pending,
+            source_channel=Channel.web,
+        )
+    )
+    db.add(
+        WaitlistEntry(
+            practice_id=practice.id, client_id=client.id, problem_text="something"
+        )
+    )
+    db.add(
+        OutboxMessage(
+            practice_id=practice.id,
+            client_id=client.id,
+            channel=channel,
+            address=external_id,
+            intent_key="request.rejected.client",
+            locale="ru",
+            payload={},
+        )
+    )
+    await issue_token(db, TokenPurpose.view_request, client_id=client.id)
+    await flow.set_step(db, client.id, Channel.web, flow.Step.entering_problem)
+    await db.flush()
+    return client
+
+
+async def test_a_merge_moves_every_table_and_deletes_the_absorbed_row(
+    db: AsyncSession, practice: Practice
+) -> None:
+    survivor = await _person_with_history(db, practice, "merge-web@example.test", Channel.email)
+    absorbed = await _person_with_history(db, practice, "918273645", Channel.telegram)
+
+    # The flow rows are what the merge refuses on while they are live, so age
+    # them past `slot_hold_minutes` first -- this test is about the moving.
+    stale = now_utc() - timedelta(minutes=practice.slot_hold_minutes + 5)
+    await db.execute(update(FlowState).values(updated_at=stale))
+    await db.flush()
+
+    result = await clients.merge_clients(db, into=survivor.id, absorbing=absorbed.id)
+    assert result.id == survivor.id
+
+    for model in (Identity, AuthToken, BookingRequest, WaitlistEntry, OutboxMessage):
+        left = (
+            await db.execute(select(model).where(model.client_id == absorbed.id))
+        ).scalars().all()
+        assert not left, f"{model.__tablename__} still points at the absorbed row"
+
+    # The Telegram identity now reaches the survivor, which is what makes the
+    # next update from that chat find the right person.
+    identity = (
+        await db.execute(select(Identity).where(Identity.external_id == "918273645"))
+    ).scalar_one()
+    assert identity.client_id == survivor.id
+
+    assert (
+        await db.execute(select(Client).where(Client.id == absorbed.id))
+    ).scalar_one_or_none() is None
+
+
+async def test_the_survivor_keeps_what_it_has_and_takes_only_blanks(
+    db: AsyncSession, practice: Practice
+) -> None:
+    """A name typed into a web form must not overwrite the one Telegram
+    vouches for, and the reverse is equally true."""
+    survivor = await resolve_client(db, Channel.email, "keeps@example.test")
+    survivor.display_name = "Anna"
+    survivor.timezone = None
+    absorbed = await resolve_client(db, Channel.telegram, "918273646", verified=True)
+    absorbed.display_name = "anna from telegram"
+    absorbed.timezone = "Asia/Yerevan"
+    await db.flush()
+
+    result = await clients.merge_clients(db, into=survivor.id, absorbing=absorbed.id)
+
+    assert result.display_name == "Anna", "a set field is never overwritten"
+    assert result.timezone == "Asia/Yerevan", "a blank one is filled"
+
+
+async def test_a_live_flow_refuses_the_merge_and_spends_nothing(
+    db: AsyncSession, practice: Practice
+) -> None:
+    """The client is told to finish what they started (§13.1).
+
+    `flow_state` is UNIQUE per (client, channel), so a merge would have to drop
+    one of two rows -- and the one it would drop holds half of something
+    somebody is typing.
+    """
+    survivor = await resolve_client(db, Channel.email, "busy@example.test")
+    absorbed = await resolve_client(db, Channel.telegram, "918273647", verified=True)
+    await flow.set_step(db, absorbed.id, Channel.telegram, flow.Step.entering_problem)
+
+    with pytest.raises(MergeRefused) as refused:
+        await clients.merge_clients(db, into=survivor.id, absorbing=absorbed.id)
+    assert refused.value.reason == "busy"
+
+    # Nothing moved.
+    assert (
+        await db.execute(select(Client).where(Client.id == absorbed.id))
+    ).scalar_one_or_none() is not None
+
+
+async def test_a_flow_nobody_came_back_to_does_not_block_forever(
+    db: AsyncSession, practice: Practice
+) -> None:
+    """Nothing sweeps `flow_state`, so without a bound "finish what you
+    started" would be an instruction nobody could follow."""
+    survivor = await resolve_client(db, Channel.email, "stale@example.test")
+    absorbed = await resolve_client(db, Channel.telegram, "918273648", verified=True)
+    await flow.set_step(db, absorbed.id, Channel.telegram, flow.Step.entering_problem)
+
+    stale = now_utc() - timedelta(minutes=practice.slot_hold_minutes + 1)
+    await db.execute(
+        update(FlowState).where(FlowState.client_id == absorbed.id).values(updated_at=stale)
+    )
+    await db.flush()
+
+    await clients.merge_clients(db, into=survivor.id, absorbing=absorbed.id)
+
+    left = (
+        await db.execute(select(FlowState).where(FlowState.client_id == absorbed.id))
+    ).scalars().all()
+    assert not left
+
+
+async def test_an_erased_client_is_never_merged(db: AsyncSession, practice: Practice) -> None:
+    """§16 is a promise, and a link minted before it must not undo it."""
+    survivor = await resolve_client(db, Channel.email, "erased-a@example.test")
+    absorbed = await resolve_client(db, Channel.telegram, "918273649", verified=True)
+    absorbed.erased_at = now_utc()
+    await db.flush()
+
+    with pytest.raises(MergeRefused) as refused:
+        await clients.merge_clients(db, into=survivor.id, absorbing=absorbed.id)
+    assert refused.value.reason == "erased"
+
+    # And in the other direction.
+    absorbed.erased_at = None
+    survivor.erased_at = now_utc()
+    await db.flush()
+    with pytest.raises(MergeRefused):
+        await clients.merge_clients(db, into=survivor.id, absorbing=absorbed.id)
+
+
+async def test_a_merge_leaves_the_map_from_the_deleted_row(
+    db: AsyncSession, practice: Practice
+) -> None:
+    """Audit entries written before the merge still name the absorbed id, and
+    `client` has no foreign key from `audit_log` to dangle on."""
+    survivor = await resolve_client(db, Channel.email, "audit@example.test")
+    absorbed = await resolve_client(db, Channel.telegram, "918273650", verified=True)
+
+    await clients.merge_clients(db, into=survivor.id, absorbing=absorbed.id)
+
+    entry = (
+        await db.execute(
+            select(AuditLog)
+            .where(AuditLog.action == "client.merge", AuditLog.entity_id == str(survivor.id))
+            .order_by(AuditLog.id.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+    assert entry.meta["absorbed"] == str(absorbed.id)
+
+
+async def test_merging_a_client_into_itself_is_refused(db: AsyncSession) -> None:
+    client = await resolve_client(db, Channel.email, "self@example.test")
+    with pytest.raises(MergeRefused):
+        await clients.merge_clients(db, into=client.id, absorbing=client.id)
+
+
+async def test_a_token_can_be_read_without_being_spent(db: AsyncSession) -> None:
+    """The confirmation screen has to name what it is joining before the client
+    answers, and burning the token to draw it would leave "Not me" with a dead
+    link (§6.2)."""
+    client = await resolve_client(db, Channel.email, "peek@example.test")
+    raw = await issue_token(db, TokenPurpose.link_channel, client_id=client.id)
+
+    peeked = await clients.token_target(db, raw, TokenPurpose.link_channel)
+    assert peeked is not None and peeked.client_id == client.id
+
+    # Still spendable, and only once.
+    assert (await consume_token(db, raw, TokenPurpose.link_channel)).client_id == client.id
+    assert await clients.token_target(db, raw, TokenPurpose.link_channel) is None
+
+
+async def test_peeking_refuses_the_wrong_purpose_like_consuming_does(
+    db: AsyncSession,
+) -> None:
+    client = await resolve_client(db, Channel.email, "peek2@example.test")
+    raw = await issue_token(db, TokenPurpose.login, client_id=client.id)
+    assert await clients.token_target(db, raw, TokenPurpose.link_channel) is None

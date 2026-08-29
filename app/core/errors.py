@@ -69,6 +69,21 @@ class TokenInvalid(DomainError):
     """
 
 
+class MergeRefused(DomainError):
+    """Two client rows cannot be joined right now.
+
+    Not a failure of the merge but a reason not to attempt one: a half-finished
+    booking on either side, a client who has been erased (§16 -- a forgotten
+    person is not resurrected by a stale link), or the same row twice. The
+    caller says which, because the client can act on the first and not on the
+    others.
+    """
+
+    def __init__(self, reason: str) -> None:
+        super().__init__(reason)
+        self.reason = reason
+
+
 class TextTooLong(DomainError):
     """A client sent more free text than a field accepts (§17).
 
