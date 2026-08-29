@@ -765,6 +765,25 @@ decide on — a bare number beside a duration is worse than no price at all, so 
 type with an amount and no currency should probably render as though it had
 none.
 
+**A reminder for an on-site session can arrive in the wrong clock.** Every
+outbound message renders in `client.timezone`, falling back to the practice's
+(`_recipient_timezone`). It never reads `booking_request.client_timezone`, which
+is written at booking time and used only by the request page and the admin UI.
+So a client who once booked online has a zone stored — say `Europe/Moscow` — and
+their later *on-site* booking is reminded in Moscow time, for a session in a
+room in Yerevan. An hour out, on a message whose whole job is to get somebody to
+a place at a time.
+
+Not new, and not what §13.1's timezone change was about: that stopped an
+on-site-only client from acquiring a wrong stored zone, and this is the client
+who already has a right one for a different session. The fix is for the renderer
+to prefer the request's zone where the request has one — the request knows it is
+an on-site session and the client row does not. Small, and deliberately not done
+inside the flow slice: it changes how *every* notification picks a zone. There
+is also a real counter-argument to weigh first, which is why this is an entry
+rather than a commit: somebody travelling to Yerevan next week may well prefer
+times in the zone their phone is in until they land.
+
 **The web cannot make a free-text time request at all.** `book.html` is handed
 a `negotiation` flag and never reads it, and the only submit path the web has is
 `submit_slot_request` — `submit_free_time_request` has no web caller. So a
