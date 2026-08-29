@@ -92,6 +92,13 @@ booking:
   timezone.detected: "We detected {timezone}. Is that right?"
   choose_slot: "Choose a time that suits you. Times are shown in {timezone}."
   slot.none_available: "There are no free times at the moment."
+  # Offered as a labelled switch rather than by quietly showing the other kind:
+  # a client looking at in-person times after asking for online has to work out
+  # what happened, where a button saying so tells them.
+  slot.none_online: "There are no free online times at the moment. There are some in person."
+  slot.none_onsite: "There are no free in-person times at the moment. There are some online."
+  switch.online: "Switch to online"
+  switch.onsite: "Switch to in person"
   slot.held: "Please finish within {minutes} minutes. The time is not held until you submit, so someone else can still choose it."
   slot.taken: "Sorry, that time has just been taken. Please choose another."
   slot.hold_expired: "Your reservation expired. Please choose a time again."

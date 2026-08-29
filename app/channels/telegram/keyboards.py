@@ -498,6 +498,13 @@ def choice_keyboard(
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+def one_button(label: str, data: str) -> InlineKeyboardMarkup:
+    """A single button, where the whole answer is whether they press it."""
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[InlineKeyboardButton(text=label, callback_data=data)]]
+    )
+
+
 def skip_keyboard(label: str) -> InlineKeyboardMarkup:
     """§13.1 step 7: optional answers are skippable."""
     return InlineKeyboardMarkup(

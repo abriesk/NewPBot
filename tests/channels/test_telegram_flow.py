@@ -13,7 +13,7 @@ from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels.telegram import keyboards as kb
@@ -26,6 +26,7 @@ from app.core.models import (
     Identity,
     OutboxMessage,
     Practice,
+    SessionType,
     Slot,
     WaitlistEntry,
 )
@@ -139,7 +140,17 @@ async def test_a_topic_button_sends_its_blocks_as_separate_messages(
 # --- The full booking flow (§13.1 steps 5-8) -------------------------------
 
 
-async def _walk_to_slot_pick(db: AsyncSession, slot: Slot) -> Client:
+async def _walk_to_slot_pick(
+    db: AsyncSession, slot: Slot, *, modality: str = "online"
+) -> Client:
+    """§13.1's order: how, then what, then when.
+
+    Modality first, so the picker can filter by an answer it actually has --
+    choosing a time and learning afterwards whether it was ever an online time
+    is the reported fault. The timezone question follows only for a session the
+    client attends from elsewhere; somebody coming to the room is in the room's
+    clock already.
+    """
     from app.core.services.translations import get_text
 
     await handle(db, Update(chat_id=CHAT, text="/start"))
@@ -147,8 +158,15 @@ async def _walk_to_slot_pick(db: AsyncSession, slot: Slot) -> Client:
 
     consultation = await get_text(db, "ru", "menu.consultation")
     await handle(db, Update(chat_id=CHAT, text=consultation))
-    # No timezone yet, so the picker asks for one first (§13.1 step 6).
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.TZ}:Europe/Moscow"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:{modality}"))
+
+    session_type_id = (
+        await db.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
+
+    if modality == "online":
+        await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.TZ}:Europe/Moscow"))
     await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.SLOT}:{slot.id}"))
     return await _client(db)
 
@@ -159,8 +177,6 @@ async def test_a_full_update_sequence_produces_a_pending_request_with_a_held_slo
     """M5 acceptance, stated exactly as §19 puts it."""
     client = await _walk_to_slot_pick(db, future_slot)
 
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
     await handle(db, Update(chat_id=CHAT, text="I would like to talk about work stress"))
     await handle(db, Update(chat_id=CHAT, text="Anna"))
     reply = await handle(db, Update(chat_id=CHAT, text="telegram is fine"))
@@ -183,9 +199,7 @@ async def test_a_full_update_sequence_produces_a_pending_request_with_a_held_slo
 async def test_the_answers_reach_the_request(
     db: AsyncSession, future_slot: Slot, session_type_id: int
 ) -> None:
-    await _walk_to_slot_pick(db, future_slot)
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:onsite"))
+    await _walk_to_slot_pick(db, future_slot, modality="onsite")
     await handle(db, Update(chat_id=CHAT, text="work stress"))
     await handle(db, Update(chat_id=CHAT, text="Anna"))
     await handle(db, Update(chat_id=CHAT, text="telegram is fine"))
@@ -199,7 +213,12 @@ async def test_the_answers_reach_the_request(
     assert request.contact_note == "telegram is fine"
     assert request.modality is Modality.onsite
     assert request.source_channel is Channel.telegram
-    assert request.client_timezone == "Europe/Moscow"
+    # On-site, so the timezone question was never asked: they are coming to the
+    # room, and the room's clock is theirs (§13.1). The request records the
+    # practice zone rather than a guess about where they live.
+    assert request.client_timezone == "Asia/Yerevan"
+    client = await _client(db)
+    assert client.timezone is None, "nothing was stored that a later booking would inherit"
 
 
 # --- My appointments (§13.1 step 9) -----------------------------------------
@@ -215,8 +234,6 @@ async def _book_and_return_to_menu(
     db: AsyncSession, slot: Slot, session_type_id: int
 ) -> BookingRequest:
     client = await _walk_to_slot_pick(db, slot)
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
     await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))  # problem
     await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))  # name
     await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.CONTACT}:{kb.CONTACT_TELEGRAM}"))
@@ -252,8 +269,6 @@ async def test_an_active_request_is_listed_without_its_problem_text(
 ) -> None:
     """Hard rule 8: the status and the time, never what they wrote."""
     client = await _walk_to_slot_pick(db, future_slot)
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
     await handle(db, Update(chat_id=CHAT, text="something I would not want repeated"))
     await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))  # name
     await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.CONTACT}:{kb.CONTACT_TELEGRAM}"))
@@ -326,8 +341,6 @@ async def test_a_menu_button_mid_flow_is_navigation_not_an_answer(
 ) -> None:
     """§13.1: without this the label lands in `problem_text`."""
     client = await _walk_to_slot_pick(db, future_slot)
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
     assert await flow.current_step(db, client.id, Channel.telegram) is Step.entering_problem
 
     reply = await handle(db, Update(chat_id=CHAT, text=await _appointments_label(db)))
@@ -350,8 +363,6 @@ async def _walk_to_contact(
 ) -> tuple[Client, Reply]:
     """Up to the contact question, returning it along with the client."""
     client = await _walk_to_slot_pick(db, slot)
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
     await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))  # problem
     reply = await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))  # name
     assert reply is not None
@@ -544,8 +555,6 @@ async def test_optional_answers_are_skippable(
 ) -> None:
     """§13.1 step 7: each optional answer is skippable."""
     await _walk_to_slot_pick(db, future_slot)
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
     await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))  # problem
     await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))  # name
     await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))  # contact
@@ -563,8 +572,6 @@ async def test_the_flow_is_cleared_once_the_request_is_submitted(
 ) -> None:
     """The scratch data can hold problem text, so it does not linger."""
     client = await _walk_to_slot_pick(db, future_slot)
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
     await handle(db, Update(chat_id=CHAT, text="private"))
     await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))
     await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))
@@ -579,8 +586,6 @@ async def test_submitting_notifies_through_the_outbox_not_directly(
     from app.core.models import OutboxMessage
 
     await _walk_to_slot_pick(db, future_slot)
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
     await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))
     await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))
     await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))
@@ -595,8 +600,6 @@ async def test_a_slot_taken_meanwhile_is_reported_not_crashed(
     """DESIGN.md §8's race, and the reason `booking.slot.taken` exists."""
 
     client = await _walk_to_slot_pick(db, future_slot)
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
 
     # Someone else takes it while this client is typing.
     other = await resolve_client(db, Channel.telegram, "999888777", verified=True)
@@ -633,8 +636,6 @@ async def test_progress_survives_a_restart(
     alone -- nothing is carried in a process.
     """
     client = await _walk_to_slot_pick(db, future_slot)
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
     await handle(db, Update(chat_id=CHAT, text="half-typed answer"))
 
     # Everything the flow knows is in this row and nowhere else.
@@ -726,7 +727,18 @@ async def test_negotiation_mode_asks_for_a_desired_time(
     await handle(db, Update(chat_id=CHAT, text=consultation))
 
     client = await _client(db)
+    # §13.1 asks how and what before when on both paths, so the free-text
+    # question comes two answers later rather than first.
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_modality
+
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
+
+    # No picker on this path, so the timezone is never asked for either -- the
+    # client is about to describe a time in their own words (§9).
     assert await flow.current_step(db, client.id, Channel.telegram) is Step.entering_desired_time
+    assert reply is not None
+    assert reply.text == await get_text(db, "ru", "booking.ask_desired_time")
 
 
 # --- Admin surface (§13.2) --------------------------------------------------
@@ -1068,14 +1080,18 @@ async def test_the_free_text_path_reaches_a_submitted_request(
     await handle(db, Update(chat_id=CHAT, text=consultation))
 
     client = await _client(db)
-    assert await flow.current_step(db, client.id, Channel.telegram) is Step.entering_desired_time
+    # §13.1's order, the same on both paths: how, what, when, problem. The
+    # free-text path has no picker to filter, but a client is asked how they
+    # want to meet before describing when either way.
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_modality
 
-    # §13.1's order, now the same on both paths: when, type, modality, problem.
-    await handle(db, Update(chat_id=CHAT, text="some evening next week?"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
     assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_session_type
 
     await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.entering_desired_time
+
+    await handle(db, Update(chat_id=CHAT, text="some evening next week?"))
     await handle(db, Update(chat_id=CHAT, text="work stress"))
     await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))
     reply = await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))
@@ -1423,3 +1439,183 @@ async def test_an_expired_link_says_so_rather_than_offering_a_merge(
 
     assert reply is not None
     assert reply.keyboard is None
+
+
+# --- How before when (§13.1) ------------------------------------------------
+
+
+async def _only_the_slots_this_test_makes(db: AsyncSession) -> None:
+    """Take every other slot off the picker for the length of this test.
+
+    The suite shares a database with whatever else has run against it, so
+    "nothing free" and "only these times free" cannot be assumed -- they have to
+    be arranged. Rolled back with the rest of the test.
+    """
+    await db.execute(
+        update(Slot)
+        .where(Slot.status == SlotStatus.available)
+        .values(status=SlotStatus.blocked)
+    )
+    await db.flush()
+
+
+async def _to_the_modality_question(db: AsyncSession) -> Client:
+    from app.core.services.translations import get_text
+
+    await handle(db, Update(chat_id=CHAT, text="/start"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.LANG}:ru"))
+    consultation = await get_text(db, "ru", "menu.consultation")
+    await handle(db, Update(chat_id=CHAT, text=consultation))
+    return await _client(db)
+
+
+async def test_the_first_question_is_how_not_when(
+    db: AsyncSession, future_slot: Slot
+) -> None:
+    """Reported in use: the client picked a time, then found out whether it was
+    ever an online time. The picker cannot filter by an answer it does not
+    have."""
+    client = await _to_the_modality_question(db)
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_modality
+
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_session_type
+
+
+async def test_an_on_site_client_is_never_asked_for_a_timezone(
+    db: AsyncSession, practice: Practice, session_type_id: int, future_slot: Slot
+) -> None:
+    """They are coming to the room, so the room's clock is theirs."""
+    client = await _to_the_modality_question(db)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:onsite"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
+
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_slot
+    await db.refresh(client)
+    assert client.timezone is None, "a stored zone is never asked for again"
+
+
+async def test_an_online_client_is_asked_once_and_not_again(
+    db: AsyncSession, session_type_id: int, future_slot: Slot
+) -> None:
+    client = await _to_the_modality_question(db)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_timezone
+
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.TZ}:Europe/Moscow"))
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_slot
+
+    # Second booking: the zone is known, so the question does not come back.
+    await handle(db, Update(chat_id=CHAT, text="/start"))
+    client = await _to_the_modality_question(db)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_slot
+
+
+async def test_the_picker_shows_only_times_that_match_both_answers(
+    db: AsyncSession, practice: Practice, session_type_id: int
+) -> None:
+    """`slot_session_type` and `slot.modality` were both dead while the picker
+    came first: it could not filter by answers it had not collected."""
+    await _only_the_slots_this_test_makes(db)
+    when = datetime.now(UTC) + timedelta(days=11)
+    online = Slot(
+        practice_id=practice.id,
+        starts_at=when,
+        duration_min=60,
+        modality=Modality.online,
+        status=SlotStatus.available,
+    )
+    onsite = Slot(
+        practice_id=practice.id,
+        starts_at=when + timedelta(hours=1),
+        duration_min=60,
+        modality=Modality.onsite,
+        status=SlotStatus.available,
+    )
+    db.add_all([online, onsite])
+    await db.flush()
+
+    await _to_the_modality_question(db)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.TZ}:Europe/Moscow"))
+
+    assert reply is not None and reply.keyboard is not None
+    data = [b.callback_data for row in reply.keyboard.inline_keyboard for b in row]
+    assert f"{kb.SLOT}:{online.id}" in data
+    assert f"{kb.SLOT}:{onsite.id}" not in data, "the other modality is not quietly included"
+
+
+async def test_nothing_online_offers_a_switch_rather_than_the_other_list(
+    db: AsyncSession, practice: Practice, session_type_id: int
+) -> None:
+    """A client shown in-person times after asking for online has to work out
+    what happened; a button saying "switch to in person" says it."""
+    await _only_the_slots_this_test_makes(db)
+    onsite = Slot(
+        practice_id=practice.id,
+        starts_at=datetime.now(UTC) + timedelta(days=12),
+        duration_min=60,
+        modality=Modality.onsite,
+        status=SlotStatus.available,
+    )
+    db.add(onsite)
+    await db.flush()
+
+    await _to_the_modality_question(db)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.TZ}:Europe/Moscow"))
+
+    assert reply is not None and reply.keyboard is not None
+    data = [b.callback_data for row in reply.keyboard.inline_keyboard for b in row]
+    assert f"{kb.MODE}:onsite" in data, "offered as a switch"
+    assert kb.WAITLIST in data
+    assert not any(str(d).startswith(f"{kb.SLOT}:") for d in data), "no times of the other kind"
+
+
+async def test_the_switch_goes_straight_back_to_the_picker(
+    db: AsyncSession, practice: Practice, session_type_id: int
+) -> None:
+    """The type is already chosen, so switching does not re-ask it."""
+    await _only_the_slots_this_test_makes(db)
+    onsite = Slot(
+        practice_id=practice.id,
+        starts_at=datetime.now(UTC) + timedelta(days=13),
+        duration_min=60,
+        modality=Modality.onsite,
+        status=SlotStatus.available,
+    )
+    db.add(onsite)
+    await db.flush()
+
+    client = await _to_the_modality_question(db)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.TZ}:Europe/Moscow"))
+
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:onsite"))
+
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_slot
+    assert reply is not None and reply.keyboard is not None
+    data = [b.callback_data for row in reply.keyboard.inline_keyboard for b in row]
+    assert f"{kb.SLOT}:{onsite.id}" in data
+
+
+async def test_nothing_either_way_offers_the_waitlist(
+    db: AsyncSession, session_type_id: int
+) -> None:
+    """No times of either kind is what the waitlist is for, and it is offered
+    rather than left to be found."""
+    await _only_the_slots_this_test_makes(db)
+    await _to_the_modality_question(db)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.TZ}:Europe/Moscow"))
+
+    assert reply is not None and reply.keyboard is not None
+    data = [b.callback_data for row in reply.keyboard.inline_keyboard for b in row]
+    assert data == [kb.WAITLIST]

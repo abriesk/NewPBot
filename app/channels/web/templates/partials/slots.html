@@ -1,7 +1,18 @@
 {# HTMX partial (§12.1 step 2). Times are already rendered in the client's
    timezone; storage stays UTC (DESIGN.md §8). #}
 {% if not days %}
-  <p class="muted">{{ t.no_slots }}</p>
+  {# §12.1: nothing this way, something the other. A labelled switch rather
+     than the other kind of time listed without explanation. Checking the radio
+     re-runs the same HTMX request the fieldset above does. #}
+  {% if switch_to %}
+    <p class="muted">{{ none_this_way }}</p>
+    <button type="button" class="switch-modality"
+            onclick="document.querySelector('input[name=modality][value={{ switch_to }}]').click()">
+      {{ switch_label }}
+    </button>
+  {% else %}
+    <p class="muted">{{ t.no_slots }}</p>
+  {% endif %}
 {% else %}
   {# §12.1: the waitlist is offered beside the picker, not only instead of it.
      Times can all be wrong for someone without being absent, and there used to

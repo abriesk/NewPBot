@@ -458,6 +458,24 @@ def build_router() -> APIRouter:
                 tz=zone,
             )
 
+            # §12.1: nothing this way, something the other. Offered as a
+            # labelled switch rather than by quietly listing the other kind --
+            # a client looking at in-person times after asking for online has
+            # to work out what happened, where a button saying so tells them.
+            chosen = Modality(modality) if modality else None
+            switch_to: Modality | None = None
+            if not slots and chosen is not None:
+                other = Modality.online if chosen is Modality.onsite else Modality.onsite
+                if await list_available_slots(
+                    session,
+                    window_from=now_utc(),
+                    window_to=now_utc() + SLOT_WINDOW,
+                    session_type_id=session_type_id,
+                    modality=other,
+                    tz=zone,
+                ):
+                    switch_to = other
+
             # Grouped by the calendar date, not by the heading it will be given:
             # keying a structure on rendered text is how two days quietly become
             # one when the wording changes.
@@ -484,6 +502,17 @@ def build_router() -> APIRouter:
                     "session_type_id": session_type_id or "",
                     "modality": modality or "online",
                     "tz": zone,
+                    "switch_to": switch_to.value if switch_to else None,
+                    "switch_label": (
+                        await get_text(session, lang, f"booking.switch.{switch_to.value}")
+                        if switch_to
+                        else ""
+                    ),
+                    "none_this_way": (
+                        await get_text(session, lang, f"booking.slot.none_{chosen.value}")
+                        if switch_to and chosen
+                        else ""
+                    ),
                 },
             )
 

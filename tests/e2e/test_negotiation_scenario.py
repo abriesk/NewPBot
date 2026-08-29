@@ -191,10 +191,12 @@ async def test_the_full_scenario_on_the_telegram_channel(
 
     consultation = await get_text(db, "ru", "menu.consultation")
     await handle(db, Update(chat_id=CHAT, text=consultation))
+    # §13.1's order: how, what, when. Modality first so the picker can filter by
+    # it; the timezone follows only because this one is online.
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
     await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.TZ}:Europe/Moscow"))
     await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.SLOT}:{future_slot.id}"))
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.STYPE}:{session_type_id}"))
-    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
     await handle(db, Update(chat_id=CHAT, text="work stress"))
     await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))
     await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))

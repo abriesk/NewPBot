@@ -403,12 +403,13 @@ async def _text(session: AsyncSession, client: Client, update: Update) -> Reply 
         return await _contact_email(session, client, text)
 
     if step is Step.entering_desired_time:
-        # §13.1 asks the slot path for the session type and modality *after* the
-        # time, so the free-text path asks in the same order. Going straight to
-        # the problem text here left `session_type_id` unset, and the submit
-        # below needs it: booking_request.session_type_id is NOT NULL.
+        # §13.1 asks how and what before when, and the free-text path asks in
+        # the same order for the same reason -- modality and session type are
+        # answered before this, so what is left after the time is the problem.
+        # `session_type_id` is set by then, which the submit below needs:
+        # booking_request.session_type_id is NOT NULL.
         await flow.remember(session, client.id, Channel.telegram, desired_time=text)
-        return await _ask_session_type(session, client)
+        return await _ask_problem(session, client)
 
     if step is Step.entering_counter:
         return await _submit_counter(session, client, text)
@@ -589,47 +590,72 @@ async def _begin_consultation(session: AsyncSession, client: Client) -> Reply:
             extra=[await get_text(session, client.language, "waitlist.ask_problem")],
         )
 
-    if resolved.path is BookingPath.negotiation:
-        await flow.set_step(
-            session, client.id, Channel.telegram, Step.entering_desired_time, replace={}
-        )
-        return Reply(await get_text(session, client.language, "booking.ask_desired_time"))
+    # §13.1: how before when. Choosing a time first and learning afterwards
+    # whether it was ever an online time is the wrong order twice over -- the
+    # picker cannot filter by an answer it does not have, and the client
+    # discovers the mismatch only after committing to a slot.
+    #
+    # Both paths start here. Which one this is has to be *remembered* rather
+    # than re-derived after the questions: `resolve_booking_mode` reads the slot
+    # inventory, and a slot appearing while somebody answers two questions would
+    # otherwise move them onto a picker they never asked for.
+    await flow.set_step(
+        session,
+        client.id,
+        Channel.telegram,
+        Step.choosing_modality,
+        replace={"path": resolved.path.value},
+    )
+    return await _ask_modality(session, client)
 
-    if client.timezone is None:
-        await flow.set_step(
-            session, client.id, Channel.telegram, Step.choosing_timezone, replace={}
-        )
-        options = (
-            (
-                await session.execute(
-                    select(TimezoneOption)
-                    .where(TimezoneOption.is_active.is_(True))
-                    .order_by(TimezoneOption.sort_order, TimezoneOption.id)
-                )
+
+async def _ask_timezone(session: AsyncSession, client: Client) -> Reply:
+    """§13.1 step 6, and only for a session the client attends from elsewhere.
+
+    An on-site client is in the room, so the room's clock is theirs and the
+    question is noise. Their `client.timezone` is deliberately left unset rather
+    than filled with the practice's: a stored zone is never asked for again, so
+    guessing here would silently answer the question for a later *online*
+    booking made from anywhere else. Nothing is lost by waiting -- §16.9's
+    delivery path already falls back to the practice zone for a client who has
+    not said, which is exactly the right answer for somebody sitting in it.
+    """
+    await flow.set_step(session, client.id, Channel.telegram, Step.choosing_timezone)
+    options = (
+        (
+            await session.execute(
+                select(TimezoneOption)
+                .where(TimezoneOption.is_active.is_(True))
+                .order_by(TimezoneOption.sort_order, TimezoneOption.id)
             )
-            .scalars()
-            .all()
         )
-        return Reply(
-            await get_text(session, client.language, "booking.choose_timezone"),
-            keyboard=kb.timezone_keyboard([(o.iana_name, o.display_name) for o in options]),
-        )
-
-    return await _show_slots(session, client)
+        .scalars()
+        .all()
+    )
+    return Reply(
+        await get_text(session, client.language, "booking.choose_timezone"),
+        keyboard=kb.timezone_keyboard([(o.iana_name, o.display_name) for o in options]),
+    )
 
 
 async def _show_slots(session: AsyncSession, client: Client) -> Reply:
     """§13.1 step 6: grouped by day, in the client's timezone."""
     practice = await get_practice(session)
     tz = client.timezone or practice.timezone
+    chosen = await _chosen_modality(session, client)
+    scratch = await flow.data(session, client.id, Channel.telegram)
+    session_type_id = int(scratch["session_type_id"]) if scratch.get("session_type_id") else None
+
     slots = await list_available_slots(
         session,
         window_from=now_utc(),
         window_to=now_utc() + SLOT_WINDOW,
+        session_type_id=session_type_id,
+        modality=chosen,
         tz=tz,
     )
     if not slots:
-        return Reply(await get_text(session, client.language, "booking.slot.none_available"))
+        return await _no_slots_for(session, client, chosen, session_type_id, tz)
 
     await flow.set_step(session, client.id, Channel.telegram, Step.choosing_slot)
     # The picker's day headings are written here, where there is a session and a
@@ -660,6 +686,63 @@ async def _show_slots(session: AsyncSession, client: Client) -> Reply:
                 ]
             ],
         ),
+    )
+
+
+async def _chosen_modality(session: AsyncSession, client: Client) -> Modality | None:
+    """What they answered to "how would you like to meet?", if anything yet."""
+    scratch = await flow.data(session, client.id, Channel.telegram)
+    raw = scratch.get("modality")
+    return Modality(str(raw)) if raw else None
+
+
+async def _no_slots_for(
+    session: AsyncSession,
+    client: Client,
+    chosen: Modality | None,
+    session_type_id: int | None,
+    tz: str,
+) -> Reply:
+    """Nothing free the way they asked to meet (§13.1).
+
+    The other modality is offered as a **switch**, not as a list of times: a
+    client shown on-site times after asking for online has to work out what
+    happened, where a button saying "switch to in person" says it. Where
+    neither side has anything, the waitlist is the only honest answer and is
+    offered directly rather than left to be found.
+    """
+    waitlist_label = await get_text(session, client.language, "waitlist.from_picker")
+
+    if chosen is not None:
+        other = Modality.online if chosen is Modality.onsite else Modality.onsite
+        alternatives = await list_available_slots(
+            session,
+            window_from=now_utc(),
+            window_to=now_utc() + SLOT_WINDOW,
+            session_type_id=session_type_id,
+            modality=other,
+            tz=tz,
+        )
+        if alternatives:
+            return Reply(
+                await get_text(session, client.language, f"booking.slot.none_{chosen.value}"),
+                keyboard=kb.choice_keyboard(
+                    kb.MODE,
+                    [
+                        (
+                            other.value,
+                            await get_text(
+                                session, client.language, f"booking.switch.{other.value}"
+                            ),
+                        )
+                    ],
+                    extra=[(waitlist_label, kb.WAITLIST)],
+                ),
+            )
+
+    return Reply(
+        await get_text(session, client.language, "booking.slot.none_available"),
+        keyboard=kb.one_button(waitlist_label, kb.WAITLIST),
     )
 
 
@@ -924,8 +1007,11 @@ async def _callback(session: AsyncSession, client: Client, update: Update) -> Re
         return await _show_slots(session, client)
 
     if action == kb.SLOT:
+        # Last question of the picker rather than the first: modality and
+        # session type are already known, so the slot list this came from was
+        # filtered by both and every time on it was bookable (§13.1).
         await flow.remember(session, client.id, Channel.telegram, slot_id=int(argument))
-        return await _ask_session_type(session, client)
+        return await _ask_problem(session, client)
 
     if action == kb.WAITLIST:
         # The picker's way out. `replace={}` drops whatever was chosen on the
@@ -941,14 +1027,43 @@ async def _callback(session: AsyncSession, client: Client, update: Update) -> Re
 
     if action == kb.STYPE:
         await flow.remember(session, client.id, Channel.telegram, session_type_id=int(argument))
-        return await _ask_modality(session, client)
+        scratch = await flow.data(session, client.id, Channel.telegram)
+
+        if scratch.get("path") == BookingPath.negotiation.value:
+            # No picker to filter and no timezone to ask for: the client is
+            # about to describe a time in their own words (§9).
+            await flow.set_step(
+                session, client.id, Channel.telegram, Step.entering_desired_time
+            )
+            return Reply(await get_text(session, client.language, "booking.ask_desired_time"))
+
+        # An on-site client is in the room, so the room's clock is theirs.
+        if await _chosen_modality(session, client) is Modality.onsite:
+            return await _show_slots(session, client)
+        if client.timezone is None:
+            return await _ask_timezone(session, client)
+        return await _show_slots(session, client)
 
     if action == kb.MODE:
+        already_typed = bool(
+            (await flow.data(session, client.id, Channel.telegram)).get("session_type_id")
+        )
         await flow.remember(session, client.id, Channel.telegram, modality=argument)
+        if already_typed:
+            # Not the first answer but the switch offered when their side had
+            # nothing free. The type is chosen, so this goes straight back to
+            # the picker rather than walking them through a question they have
+            # already answered.
+            if argument == Modality.onsite.value or client.timezone is not None:
+                return await _show_slots(session, client)
+            return await _ask_timezone(session, client)
+
+        reply = await _ask_session_type(session, client)
         if argument == Modality.onsite.value:
             practice = await get_practice(session)
             if practice.clinic_onsite_url:
-                reply = await _ask_problem(session, client)
+                # §12.1: choosing on-site MUST show where on-site is. Said here,
+                # where the choice is made, rather than four questions later.
                 reply.extra.insert(
                     0,
                     await get_text(
@@ -958,8 +1073,7 @@ async def _callback(session: AsyncSession, client: Client, update: Update) -> Re
                         url=practice.clinic_onsite_url,
                     ),
                 )
-                return reply
-        return await _ask_problem(session, client)
+        return reply
 
     if action == kb.CONTACT:
         return await _contact_choice(session, client, argument)

@@ -22,7 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from app.channels.web.client import LANG_COOKIE
 from app.channels.web.security import CLIENT_COOKIE, CSRF_COOKIE
 from app.config import get_settings
-from app.core.enums import Channel, RequestStatus, SlotStatus, TokenPurpose
+from app.core.enums import Channel, Modality, RequestStatus, SlotStatus, TokenPurpose
 from app.core.models import (
     AuthToken,
     BookingRequest,
@@ -1309,3 +1309,61 @@ async def test_the_waitlist_page_still_submits(
     await committed.execute(delete(Identity).where(Identity.id == identity.id))
     await committed.execute(delete(Client).where(Client.id == identity.client_id))
     await committed.commit()
+
+
+async def test_the_web_offers_a_switch_when_the_other_modality_has_times(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """§12.1, the same rule as the bot: a labelled switch rather than the other
+    kind of time listed without explanation."""
+    from app.core.services.translations import get_text
+
+    practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+    onsite = Slot(
+        practice_id=practice.id,
+        starts_at=datetime.now(UTC) + timedelta(days=25, microseconds=11),
+        duration_min=60,
+        modality=Modality.onsite,
+        status=SlotStatus.available,
+    )
+    # The suite shares a database, so "only this slot is free" has to be
+    # arranged rather than assumed. Restored in `finally` for the same reason
+    # `free_text_off` restores its setting there: these tests commit, so a
+    # failure before cleanup would leave the picker empty for everything after.
+    ambient = (
+        (
+            await committed.execute(
+                select(Slot.id).where(Slot.status == SlotStatus.available)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    await committed.execute(
+        update(Slot).where(Slot.id.in_(ambient)).values(status=SlotStatus.blocked)
+    )
+    committed.add(onsite)
+    await committed.commit()
+
+    try:
+        partial = web.get(
+            "/book/slots",
+            params={
+                "session_type_id": session_type_id,
+                "modality": "online",
+                "tz": "Europe/Moscow",
+            },
+        )
+        assert partial.status_code == 200
+        assert str(onsite.id) not in partial.text, "no times of the other kind"
+        assert await get_text(committed, "ru", "booking.switch.onsite") in partial.text
+    finally:
+        await committed.rollback()
+        await committed.execute(delete(Slot).where(Slot.id == onsite.id))
+        await committed.execute(
+            update(Slot).where(Slot.id.in_(ambient)).values(status=SlotStatus.available)
+        )
+        await committed.commit()
