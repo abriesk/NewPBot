@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Psychobooking — Руководство администратора</title>
 <!-- Коммит, на котором это руководство сверялось в последний раз. См. подвал. -->
-<meta name="guide-revision" content="f4569be">
+<meta name="guide-revision" content="4bf1f4b">
 <meta name="guide-revised" content="2026-08-29">
 <style>
   :root {
@@ -520,11 +520,14 @@
       <h2>9. Типы сессий (Session types)</h2>
       <p>При установке создаются <code>individual</code> и <code>couple</code> по 60 минут. Можно добавить своё (например <code>supervision</code>) без обновления программы.</p>
       <ul>
+        <li><strong>Code</strong> — ваше короткое название латиницей. Его видите только вы: здесь и в карточках заявок, клиенту оно не показывается никогда.</li>
+        <li><strong>Name (ru / hy / en)</strong> — то, что клиент видит при выборе сессии. Заполняйте сразу, когда заводите тип. Пустой язык подставится из другого, а если пусты все три — клиент увидит код.</li>
         <li><strong>Price</strong> — целое число, ровно так, как вы его произносите: <code>15000</code> — сессия за 15 000 драмов. Без запятой и точки, без знака валюты; пробел между тысячами допустим. Пустое поле — цены нет.</li>
         <li><strong>Currency</strong> — три буквы (<code>AMD</code>, <code>EUR</code>…).</li>
         <li>Снимите <strong>active</strong>, чтобы спрятать тип из новой записи.</li>
       </ul>
       <div class="callout">Код потом не переименовывайте. Заведите новый тип и выключите старый.</div>
+      <div class="callout">Названия — обычные переводы, поэтому они же есть в разделе <strong>Translations</strong> в группе «Booking conversation» под ключом <code>booking.type.&lt;code&gt;</code>. Править их там или здесь — одно и то же.</div>
     </section>
 
     <section class="card" id="tz">
@@ -720,10 +723,10 @@ docker compose up -d --build</code></pre>
     <footer>
       Поставляется вместе с сервисом. Страница отдаётся вашей же установкой по адресу <code>/admin/help</code>, поэтому всегда соответствует запущенной версии.
       <br><br>
-      <strong>Написано по коммиту <code>f4569be</code>, 2026-08-29.</strong>
+      <strong>Написано по коммиту <code>4bf1f4b</code>, 2026-08-29.</strong>
       Это последнее состояние сервиса, с которым руководство сверяли. После обновления
       сервера тот, кто его обновлял, может посмотреть, что изменилось с тех пор:
-      <code>git log f4569be..HEAD -- app/ locales/</code> — всё, что из этого списка
+      <code>git log 4bf1f4b..HEAD -- app/ locales/</code> — всё, что из этого списка
       заметит терапевт, должно попасть сюда, а отметка о коммите — сдвинуться вместе с этим.
     </footer>
   </main>

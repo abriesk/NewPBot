@@ -67,6 +67,7 @@ from app.core.services.slots import list_available_slots
 from app.core.services.translations import get_text
 from app.db import unit_of_work
 from app.render.dates import day_label
+from app.render.labels import session_type_name
 from app.render.markdown import to_web_html
 
 logger = logging.getLogger(__name__)
@@ -377,7 +378,7 @@ def build_router() -> APIRouter:
 
             session_types = []
             for st in await _active_session_types(session):
-                name = await get_text(session, context["lang"], f"booking.type.{st.code}")
+                name = await session_type_name(session, context["lang"], st.code)
                 session_types.append(
                     {
                         "id": st.id,

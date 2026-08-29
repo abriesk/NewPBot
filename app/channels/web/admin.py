@@ -181,6 +181,25 @@ def _price_display(amount: int | None) -> str:
     return "" if amount is None else str(amount)
 
 
+async def _stored_text(session: AsyncSession, lang: str, key: str) -> str:
+    """The row behind a key, or "" when there is none.
+
+    Deliberately not `get_text`: that falls back through the default language
+    and then English (§15), which is right when rendering and wrong when
+    prefilling a form. A field showing the Russian name on the Armenian tab
+    invites her to press Save, and Save would write the fallback in as though
+    it were a translation.
+    """
+    value = (
+        await session.execute(
+            select(Translation.value).where(
+                Translation.lang == lang, Translation.key == key
+            )
+        )
+    ).scalar_one_or_none()
+    return str(value) if value else ""
+
+
 async def _labels(session: AsyncSession) -> dict[str, str]:
     """Only the labels the catalogue actually covers."""
     keys = {
@@ -949,6 +968,18 @@ def build_router() -> APIRouter:
                 .scalars()
                 .all()
             )
+            # What each type is called in each client-facing language. A type is
+            # a row, so its name cannot live in the locale files (§6.4) -- these
+            # are `translation` rows under `booking.type.<code>`, and without
+            # them a client is offered the key (DESIGN.md §20.3).
+            names = {
+                row.id: {
+                    lang: await _stored_text(session, lang, f"booking.type.{row.code}")
+                    for lang in LANGUAGES
+                }
+                for row in rows
+            }
+
             return _render(
                 "admin/session_types.html",
                 await _context(
@@ -956,6 +987,8 @@ def build_router() -> APIRouter:
                     request,
                     admin,
                     rows=rows,
+                    languages=LANGUAGES,
+                    names=names,
                     # Rendered here rather than in the template, so that the one
                     # place deciding what a price means is `_price_amount` and
                     # its inverse rather than a Jinja expression beside them.
@@ -971,6 +1004,9 @@ def build_router() -> APIRouter:
         price_amount_minor: str = Form(""),
         price_currency: str = Form(""),
         is_active: str = Form(""),
+        name_ru: str = Form(""),
+        name_hy: str = Form(""),
+        name_en: str = Form(""),
         csrf_token: str = Form("", alias=CSRF_FIELD),
     ) -> Response:
         """Adding "supervision" is an insert, not a migration (§6.4)."""
@@ -1005,6 +1041,17 @@ def build_router() -> APIRouter:
             row.price_currency = price_currency.strip().upper() or None
             row.is_active = bool(is_active)
             await session.flush()
+
+            # The name a client is offered. Written through `set_text` like any
+            # other translation, so it appears on /admin/translations under
+            # `booking.` too and she has two ways to reach it. A blank field
+            # writes nothing rather than an empty row: §15's fallback chain is a
+            # better answer than a button with no label, and `session_type_name`
+            # ends it at the code.
+            for lang, value in (("ru", name_ru), ("hy", name_hy), ("en", name_en)):
+                if value.strip():
+                    await set_text(session, lang, f"booking.type.{code}", value.strip())
+
             return _back("/admin/session-types", "saved")
 
     @router.get("/timezones", response_class=HTMLResponse, include_in_schema=False)

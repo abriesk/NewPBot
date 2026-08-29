@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Psychobooking — Admin user guide</title>
 <!-- The commit this guide was last checked against. See the footer. -->
-<meta name="guide-revision" content="f4569be">
+<meta name="guide-revision" content="4bf1f4b">
 <meta name="guide-revised" content="2026-08-29">
 <style>
   :root {
@@ -517,11 +517,14 @@
       <h2>9. Session types</h2>
       <p>Seeded: <code>individual</code> and <code>couple</code>, both 60 minutes. Add more (e.g. <code>supervision</code>) without a software update.</p>
       <ul>
+        <li><strong>Code</strong> — your own short name for it, in Latin letters. Only you see it: it appears here and on request cards, never in front of a client.</li>
+        <li><strong>Name (ru / hy / en)</strong> — what a client is offered when choosing a session. Fill these in when you add a type. Leave a language empty and it falls back to another one, and if all three are empty the client sees the code.</li>
         <li><strong>Price</strong> — a whole number, written the way you would say it: <code>15000</code> for a 15,000 dram session. No decimal point, no currency sign, no spaces needed (though a space between the thousands is accepted). Leave it empty for no price.</li>
         <li><strong>Currency</strong> — three letters (<code>AMD</code>, <code>EUR</code>…).</li>
         <li>Uncheck <strong>active</strong> to hide a type from new bookings.</li>
       </ul>
       <div class="callout">Do not rename a code later. Add a new type and deactivate the old one.</div>
+      <div class="callout">The names are ordinary translations, so they also appear on <strong>Translations</strong> under “Booking conversation” as <code>booking.type.&lt;code&gt;</code>. Editing them in either place is the same edit.</div>
     </section>
 
     <section class="card" id="tz">
@@ -716,10 +719,10 @@ docker compose up -d --build</code></pre>
     <footer>
       Shipped with the service. This page is served from your own installation at <code>/admin/help</code>, so it always matches the version you are running.
       <br><br>
-      <strong>Written against commit <code>f4569be</code>, 2026-08-29.</strong>
+      <strong>Written against commit <code>4bf1f4b</code>, 2026-08-29.</strong>
       That is the last state of the service this guide was checked against. After
       updating the server, whoever ran the update can list what has changed since with
-      <code>git log f4569be..HEAD -- app/ locales/</code> — anything in that list a
+      <code>git log 4bf1f4b..HEAD -- app/ locales/</code> — anything in that list a
       therapist would notice belongs in here, and the stamp moves with it.
     </footer>
   </main>

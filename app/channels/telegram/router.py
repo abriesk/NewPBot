@@ -51,6 +51,7 @@ from app.core.services.settings import get_practice
 from app.core.services.slots import list_available_slots
 from app.core.services.translations import get_text
 from app.render.dates import day_label
+from app.render.labels import session_type_name
 from app.render.markdown import escape_telegram
 
 logger = logging.getLogger(__name__)
@@ -406,10 +407,10 @@ async def _my_appointments(session: AsyncSession, client: Client) -> Reply:
 
     for request in requests:
         when = await booking.requested_start(session, request)
-        session_type = await get_text(
+        session_type = await session_type_name(
             session,
             client.language,
-            f"booking.type.{await _session_type_code(session, request.session_type_id)}",
+            await _session_type_code(session, request.session_type_id),
         )
         lines.append(
             await get_text(
@@ -586,7 +587,7 @@ async def _ask_session_type(session: AsyncSession, client: Client) -> Reply:
     )
     options = []
     for session_type in types:
-        name = await get_text(session, client.language, f"booking.type.{session_type.code}")
+        name = await session_type_name(session, client.language, session_type.code)
         label = await get_text(
             session,
             client.language,

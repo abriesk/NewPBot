@@ -37,7 +37,9 @@ from app.core.models import (
     Slot,
     Translation,
 )
+from app.core.services.translations import invalidate_cache
 from app.main import create_app
+from app.render.labels import session_type_name
 
 # The seed hashes whatever ADMIN_USERNAME/ADMIN_PASSWORD the deployment was
 # installed with (§20), so the test signs in with those rather than a literal.
@@ -1999,5 +2001,135 @@ async def test_a_price_that_is_not_a_number_says_so_instead_of_crashing(
     assert row.price_amount_minor is None, "a refused save must change nothing"
 
     await committed.rollback()
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
+# --- Session type names -----------------------------------------------------
+
+
+async def test_a_session_type_with_no_name_falls_back_to_its_code(
+    committed: AsyncSession,
+) -> None:
+    """§15 returns the key itself when nothing is written for it.
+
+    A type the therapist adds has a `booking.type.<code>` nobody has written,
+    so clients were offered `booking.type.superme`.
+    """
+    practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
+    row = SessionType(practice_id=practice.id, code="unnamedtype", duration_min=60)
+    committed.add(row)
+    await committed.commit()
+
+    try:
+        assert await session_type_name(committed, "ru", "unnamedtype") == "unnamedtype"
+    finally:
+        await committed.execute(delete(SessionType).where(SessionType.id == row.id))
+        await committed.commit()
+
+
+async def test_naming_a_session_type_reaches_both_client_channels(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """The name is a `translation` row, so it is one edit for every surface."""
+    _sign_in(web)
+
+    response = web.post(
+        "/admin/session-types",
+        data={
+            "csrf_token": _csrf(web),
+            "code": "supervision",
+            "duration_min": "60",
+            "price_amount_minor": "",
+            "price_currency": "",
+            "is_active": "1",
+            "name_ru": "Супервизия",
+            "name_hy": "Սուպերվիզիա",
+            "name_en": "Supervision",
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    await _fresh(committed)
+    row = (
+        await committed.execute(select(SessionType).where(SessionType.code == "supervision"))
+    ).scalar_one()
+
+    try:
+        assert await session_type_name(committed, "ru", "supervision") == "Супервизия"
+        assert await session_type_name(committed, "hy", "supervision") == "Սուպերվիզիա"
+        assert await session_type_name(committed, "en", "supervision") == "Supervision"
+
+        # Written through `set_text`, so it is also on the translations page --
+        # `booking.` is the first group there.
+        page = web.get("/admin/translations?lang=ru")
+        assert "booking.type.supervision" in page.text
+
+        # And the form offers back exactly what is stored, not a fallback: a
+        # prefilled Armenian field holding the Russian name would be saved as
+        # though somebody had translated it.
+        types_page = web.get("/admin/session-types")
+        assert 'value="Супервизия"' in types_page.text
+    finally:
+        await committed.execute(
+            delete(Translation).where(Translation.key == "booking.type.supervision")
+        )
+        await committed.execute(delete(SessionType).where(SessionType.id == row.id))
+        await committed.commit()
+        invalidate_cache()
+
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
+async def test_a_language_left_empty_writes_no_row(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """§15's fallback chain beats an empty row, which would render as nothing."""
+    _sign_in(web)
+
+    web.post(
+        "/admin/session-types",
+        data={
+            "csrf_token": _csrf(web),
+            "code": "halfnamed",
+            "duration_min": "60",
+            "price_amount_minor": "",
+            "price_currency": "",
+            "is_active": "1",
+            "name_ru": "Только по-русски",
+            "name_hy": "",
+            "name_en": "",
+        },
+        follow_redirects=False,
+    )
+
+    await _fresh(committed)
+    row = (
+        await committed.execute(select(SessionType).where(SessionType.code == "halfnamed"))
+    ).scalar_one()
+
+    try:
+        keys = (
+            (
+                await committed.execute(
+                    select(Translation.lang).where(
+                        Translation.key == "booking.type.halfnamed"
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        assert set(keys) == {"ru"}
+    finally:
+        await committed.execute(
+            delete(Translation).where(Translation.key == "booking.type.halfnamed")
+        )
+        await committed.execute(delete(SessionType).where(SessionType.id == row.id))
+        await committed.commit()
+        invalidate_cache()
+
     await committed.execute(delete(AdminSession))
     await committed.commit()

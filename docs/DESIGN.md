@@ -625,33 +625,33 @@ through both channels as a client would. The rules are §20.2's: smallest first,
 each entry says what is actually wrong and what closing it takes, and an entry
 leaves this list when it is fixed rather than being marked done in it.
 
-Four are gone and are not below — a slot the therapist could not delete without
+Five are gone and are not below — a slot the therapist could not delete without
 a 500, a price field that answered a decimal point with one, a login link that
-landed on the front page instead of the request it was sent about, and the
-Telegram day heading a client kept tapping on a one-slot day. That last one
-turned out to be two faults: the heading was the wider half of what reads as one
-control, which `slot_keyboard` now solves by making a single-time day a single
-button, and `NOOP` was not in `ADMIN_ACTIONS`, so a mis-tapped dead cell in the
-therapist's own picker fell through to `/start` and asked her to pick a
-language. Only the first was reported.
+landed on the front page instead of the request it was sent about, a session
+type offered to clients as `booking.type.superme`, and the Telegram day heading
+a client kept tapping on a one-slot day.
+
+Two of those turned out to be more than they looked. The day heading was the
+wider half of what reads as one control, which `slot_keyboard` now solves by
+making a single-time day a single button — and beside it, `NOOP` was not in
+`ADMIN_ACTIONS`, so a mis-tapped dead cell in the therapist's own picker fell
+through to `/start` and asked her to pick a language. And the session type's
+name could not live in the locale files at all, because a type is a row (§6.4)
+and the catalogue is a file: the fix is a name per language written through
+`set_text` from the admin form, which puts it on `/admin/translations` as well,
+plus `session_type_name` ending §15's fallback chain at the code rather than at
+the key. Only the first half of each was reported.
 
 What is left is deliberately not one piece of work. The last three each open a
 design question before they open an editor, and are meant to be taken one at a
 time.
 
-**A session type the therapist creates reaches the client as a translation
-key.** Adding "supervision" is an insert by design (§6.4), but nothing writes
-the `booking.type.<code>` that both pickers read, and `get_text` falls through
-to returning the bare key — so a type she named herself is offered to a client
-as `booking.type.supervision`. Closing it means the session-type form asking for
-the name in all three languages and writing it through `set_text`, plus a
-fallback that prefers the bare code to the key for any type created before that
-form existed.
-
-The price on that same page was the other half of the report and is fixed, but
-it left a decision behind that belongs here rather than in a commit message.
-The field was labelled "minor units" — a developer's phrase sitting in a
-therapist's field — and it now takes **whole units of the currency named beside
+**Nobody has decided whether a price is client-facing, and the therapist has
+been filling one in regardless.** This is what is left of the session-types
+report once the two faults on that page were fixed, and it starts with what
+fixing the second of them settled. The field was labelled "minor units" — a
+developer's phrase sitting in a therapist's field — and it now takes **whole
+units of the currency named beside
 it**, stored exactly as typed: `15000` is a 15,000 dram session, and a decimal
 point is refused rather than rounded. That is what this practice means by a
 price, and the alternative was asking her to write 1500000 in a text box. The
@@ -661,12 +661,14 @@ Nothing reads it today, so nothing is wrong today — but **whoever renders a
 price to a client has to read `_price_amount` rather than the column name**, and
 that is the trap this paragraph exists to set off.
 
-Which leaves the question the fix did not answer: no client has ever seen a
-price at all. `booking.type.with_price` exists in all three locale files and
-neither channel has ever used it, so the therapist is filling in a field with no
-reader. Decide whether price is client-facing before building anything else on
-it. If it is not, the field is better removed from the form than explained in
-it, and §6.4 moves to say so.
+And the question neither fix answered: no client has ever seen a price at all.
+`booking.type.with_price` exists in all three locale files and neither channel
+has ever used it — both call `booking.type.without_price`. So there is a field
+on the admin page, now with a guide entry explaining how to fill it in, whose
+value nothing reads. Decide whether price is client-facing before building
+anything else on it. If it is, the renderer is small and this is where the
+column-name trap above goes off. If it is not, the field is better removed from
+the form than explained in it, and §6.4 moves to say so.
 
 **A client who does not like the times on offer has nowhere to go.** The
 waitlist is reachable only when `resolve_booking_mode` sends the whole practice
