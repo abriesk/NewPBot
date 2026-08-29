@@ -625,24 +625,19 @@ through both channels as a client would. The rules are §20.2's: smallest first,
 each entry says what is actually wrong and what closing it takes, and an entry
 leaves this list when it is fixed rather than being marked done in it.
 
-Three went out immediately and are not below — a slot the therapist could not
-delete without a 500, a price field that answered a decimal point with one, and
-a login link that landed on the front page instead of the request it was sent
-about. What is left is deliberately not one piece of work. The last three each
-open a design question before they open an editor, and are meant to be taken one
-at a time.
+Four are gone and are not below — a slot the therapist could not delete without
+a 500, a price field that answered a decimal point with one, a login link that
+landed on the front page instead of the request it was sent about, and the
+Telegram day heading a client kept tapping on a one-slot day. That last one
+turned out to be two faults: the heading was the wider half of what reads as one
+control, which `slot_keyboard` now solves by making a single-time day a single
+button, and `NOOP` was not in `ADMIN_ACTIONS`, so a mis-tapped dead cell in the
+therapist's own picker fell through to `/start` and asked her to pick a
+language. Only the first was reported.
 
-**The day heading in the Telegram picker looks like a button, because it is
-one.** `slot_keyboard` renders each day as an `InlineKeyboardButton` carrying
-`callback_data="noop"`, so the picker stays one editable message rather than a
-message per day. Nothing hangs — the webhook answers every callback query — but
-on a day offering a single time the client's eye goes to the heading, taps it,
-and gets nothing at all, which reads as a broken bot rather than as a label.
-Two cheap answers: fold the date into the time button where a day has only one
-(`Mon 3 · 15:00`), or answer `noop` with a toast that says to tap the time
-below. The first is better where it applies and does not apply everywhere, so
-they are complementary rather than alternatives. Contained to
-`app/channels/telegram/keyboards.py` and one router branch; §13.1 does not move.
+What is left is deliberately not one piece of work. The last three each open a
+design question before they open an editor, and are meant to be taken one at a
+time.
 
 **A session type the therapist creates reaches the client as a translation
 key.** Adding "supervision" is an insert by design (§6.4), but nothing writes

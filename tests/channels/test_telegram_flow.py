@@ -19,7 +19,15 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.channels.telegram import keyboards as kb
 from app.channels.telegram.router import Reply, Update, handle
 from app.core.enums import Channel, Modality, RequestStatus, SlotStatus, TokenPurpose
-from app.core.models import BookingRequest, Client, FlowState, Practice, Slot, WaitlistEntry
+from app.core.models import (
+    BookingRequest,
+    Client,
+    FlowState,
+    Identity,
+    Practice,
+    Slot,
+    WaitlistEntry,
+)
 from app.core.services import booking, content, flow
 from app.core.services.clients import issue_token, resolve_client
 from app.core.services.flow import Step
@@ -976,6 +984,50 @@ def test_slot_buttons_are_grouped_by_day_in_the_client_timezone() -> None:
     # The heading is whatever the router wrote in the client's language; this
     # module no longer has an opinion about the wording (§15).
     assert "вт 15 сен" in labels
+
+
+def test_a_day_offering_one_time_is_a_single_button() -> None:
+    """Reported in use: on a one-slot day the client taps the heading.
+
+    It is the wider, upper half of what looks like one control, and it is a
+    `NOOP`, so the tap does nothing and reads as a broken bot. The day and the
+    time therefore arrive as one button that books the slot.
+    """
+    from app.core.services.slots import SlotView
+
+    only = SlotView(
+        id=7,
+        starts_at_utc=datetime(2026, 9, 15, 6, 0, tzinfo=UTC),
+        starts_at_local=datetime(2026, 9, 15, 6, 0, tzinfo=UTC),
+        duration_min=60,
+        modality=None,
+    )
+    markup = kb.slot_keyboard([only], "Asia/Yerevan", {"2026-09-15": "вт 15 сен"})
+    buttons = [b for row in markup.inline_keyboard for b in row]
+
+    assert len(buttons) == 1, "no heading of its own to mis-tap"
+    assert buttons[0].callback_data == f"{kb.SLOT}:7"
+    assert "вт 15 сен" in buttons[0].text
+    assert "10:00" in buttons[0].text  # 06:00 UTC in Asia/Yerevan
+    assert all(b.callback_data != kb.NOOP for b in buttons)
+
+
+async def test_a_dead_button_never_sends_the_therapist_through_start(
+    db: AsyncSession,
+) -> None:
+    """`NOOP` is not an admin action, and she has no client record.
+
+    Her propose picker is full of dead cells -- weekday letters, padding, the
+    hours §13.2 marks taken -- and one mis-tap used to reach `_start`, which
+    asks for a language and clears the flow she was in the middle of.
+    """
+    assert await handle(db, Update(chat_id=1, callback_data=kb.NOOP)) is None
+
+    # `_start` would have created one for her chat on the way to asking.
+    identities = (
+        await db.execute(select(Identity).where(Identity.external_id == "1"))
+    ).scalars().all()
+    assert not identities
 
 
 @pytest.mark.parametrize("action", [kb.SLOT, kb.STYPE, kb.MODE, kb.TZ, kb.LANG])

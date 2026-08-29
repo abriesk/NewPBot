@@ -124,6 +124,18 @@ async def handle(session: AsyncSession, update: Update) -> Reply | None:
     # /start because she pressed Approve would be absurd.
     if update.callback_data:
         action, argument = kb.parse_callback(update.callback_data)
+        if action == kb.NOOP:
+            # A button that is there to be read: a day heading, a weekday
+            # letter, a padding cell in the month grid, an hour §13.2 marks as
+            # taken. The webhook answers the query, so the tap resolves and
+            # nothing is sent.
+            #
+            # This MUST come before the client lookup for the same reason the
+            # admin block does. `NOOP` is not an admin action, so the
+            # therapist -- who has no client record -- fell through to `_start`
+            # and was asked to choose a language, mid-proposal, for tapping one
+            # of the dead cells her own picker is full of.
+            return None
         if action in kb.ADMIN_ACTIONS:
             return await _admin_action(session, update.chat_id, action, argument)
 

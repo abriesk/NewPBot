@@ -400,6 +400,15 @@ def slot_keyboard(
     slot, and suggesting one in answer to a proposal. `extra` appends rows
     beneath -- the waitlist button, where §12.1's gate leaves nothing else to
     offer.
+
+    **A day offering one time is one button**, carrying the day and the time
+    together, rather than a heading with a single time under it. Reported in
+    use: the heading is a `NOOP` -- there to be read -- and on a one-slot day it
+    is the wider, upper half of what looks like one control, so it is what gets
+    tapped, and tapping it does nothing at all. That reads as a broken bot
+    rather than as a label. A toast on the heading was the other candidate and
+    is not needed here: where the ambiguity exists there is now no heading to
+    tap, and where a heading remains the times are visibly plural beneath it.
     """
     zone = ZoneInfo(tz)
     by_day: dict[str, list[SlotView]] = defaultdict(list)
@@ -408,10 +417,25 @@ def slot_keyboard(
 
     rows: list[list[InlineKeyboardButton]] = []
     for day in sorted(by_day):
-        rows.append(
-            [InlineKeyboardButton(text=day_labels.get(day, day), callback_data="noop")]
-        )
         times = by_day[day]
+        heading = day_labels.get(day, day)
+
+        if len(times) == 1:
+            only = times[0]
+            rows.append(
+                [
+                    InlineKeyboardButton(
+                        text=(
+                            f"{heading} · "
+                            f"{only.starts_at_utc.astimezone(zone).strftime('%H:%M')}"
+                        ),
+                        callback_data=f"{action}:{prefix}{only.id}",
+                    )
+                ]
+            )
+            continue
+
+        rows.append([_dead(heading)])
         # Three times per row keeps the buttons readable on a phone.
         for start in range(0, len(times), 3):
             rows.append(
