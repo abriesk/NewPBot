@@ -19,6 +19,10 @@
 # directories out of the working tree. Python skips writing bytecode it cannot
 # write and carries on.
 #
+# `docs/` is mounted for `web` alone and is not in the image: nothing at runtime
+# reads the specification, but tests/core/test_spec_coverage.py reads it to check
+# that every section of IMPLEMENTATION.md is claimed by some test module.
+#
 # `alembic.ini`, `pyproject.toml`, `requirements.txt` and the Dockerfile are not
 # mounted -- changing any of those still needs `docker compose build web`.
 services:
@@ -26,6 +30,7 @@ services:
     volumes:
       - ./app:/app/app:ro
       - ./tests:/app/tests:ro
+      - ./docs:/app/docs:ro
       - ./locales:/app/locales:ro
       - ./alembic:/app/alembic:ro
   worker:
