@@ -90,7 +90,13 @@ LANGUAGES = ("ru", "hy", "en")
 # --- Page context -----------------------------------------------------------
 
 
-async def _queue_login_link(session: AsyncSession, *, client_id: UUID, email: str) -> None:
+async def _queue_login_link(
+    session: AsyncSession,
+    *,
+    client_id: UUID,
+    email: str,
+    request_uuid: UUID | None = None,
+) -> None:
     """Queue `auth.login_link.client` to an address that has not proved itself.
 
     §13.3 makes this the one intent allowed to reach an unverified address,
@@ -98,10 +104,20 @@ async def _queue_login_link(session: AsyncSession, *, client_id: UUID, email: st
     deep link too: the merge has to be behind the same proof, or attaching a
     Telegram account to somebody else's client record costs nothing but knowing
     their email (DESIGN.md §5.1).
+
+    `request_uuid` is where the link lands once it has signed the client in.
+    Sent from the booking flow it is the request they have just made -- the mail
+    says "open your booking", and it used to open the front page, leaving the
+    client to find their way back to a request whose only address is a UUID they
+    were shown once. The same link sent from `/auth/email` has no request behind
+    it and still lands on the front page, which is the right answer there.
     """
     settings = get_settings()
+    payload: dict[str, str] = {"email": email}
+    if request_uuid is not None:
+        payload["request"] = str(request_uuid)
     raw = await issue_token(
-        session, TokenPurpose.login, client_id=client_id, payload={"email": email}
+        session, TokenPurpose.login, client_id=client_id, payload=payload
     )
     link_raw = await issue_token(session, TokenPurpose.link_channel, client_id=client_id)
     await notifications.enqueue(
@@ -651,7 +667,12 @@ def build_router() -> APIRouter:
                 # unverified address (§13.3), which is why the booking otherwise
                 # leaves the client with no route back at all.
                 if settings.email_enabled and await magic_link_allowance_left(session, email) > 0:
-                    await _queue_login_link(session, client_id=client.id, email=email)
+                    await _queue_login_link(
+                        session,
+                        client_id=client.id,
+                        email=email,
+                        request_uuid=booking_request.uuid,
+                    )
                 verify_notice = await get_text(session, context["lang"], "booking.check_email")
 
             await notifications.publish(session)
@@ -980,7 +1001,21 @@ def build_router() -> APIRouter:
                         status_code=400,
                     )
 
-            response = RedirectResponse("/", status_code=303)
+            # Where the link was sent from. A login link minted by the booking
+            # flow is about one request and says so, so it lands there rather
+            # than on the front page; one from `/auth/email` names no request
+            # and lands on the front page as before. Parsed rather than
+            # interpolated: this is our own payload, and a redirect built from
+            # a string in the database should still have to be a UUID.
+            target = "/"
+            requested = str(result.payload.get("request", ""))
+            if requested:
+                try:
+                    target = f"/r/{UUID(requested)}"
+                except ValueError:
+                    logger.info("login token carried an unreadable request reference")
+
+            response = RedirectResponse(target, status_code=303)
             issue_client_session(response, result.client_id)
             issue_csrf(response, csrf_token_for(request))
             return response

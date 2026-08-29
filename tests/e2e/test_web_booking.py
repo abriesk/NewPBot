@@ -1127,3 +1127,103 @@ async def test_with_free_text_off_the_page_offers_the_waitlist_instead(
         .all()
     )
     assert entries, "they asked to be told when something opens"
+
+
+async def test_the_login_link_from_a_booking_lands_on_that_booking(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """Reported in use: the first email after booking opened the front page.
+
+    The mail says "open your booking", and the client who followed it arrived
+    at the practice home page instead -- with no way back to a request whose
+    only address is a UUID they were shown once, on a page they have left.
+    """
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+    web.get("/book")
+    web.post(
+        "/book/hold",
+        data={
+            "csrf_token": _csrf(web),
+            "slot_id": web_slot,
+            "session_type_id": session_type_id,
+            "modality": "online",
+            "tz": "Europe/Moscow",
+        },
+    )
+    web.post(
+        "/book",
+        data={"csrf_token": _csrf(web), "problem": "", "name": "", "contact": "", "email": EMAIL},
+    )
+
+    await committed.rollback()
+    request = (
+        await committed.execute(select(BookingRequest).order_by(BookingRequest.id.desc()).limit(1))
+    ).scalar_one()
+    identity = (
+        await committed.execute(select(Identity).where(Identity.external_id == EMAIL))
+    ).scalar_one()
+
+    token = (
+        await committed.execute(
+            select(AuthToken)
+            .where(
+                AuthToken.client_id == identity.client_id,
+                AuthToken.purpose == TokenPurpose.login,
+            )
+            .order_by(AuthToken.id.desc())
+            .limit(1)
+        )
+    ).scalar_one()
+    assert token.payload.get("request") == str(request.uuid), "the link knows what it is about"
+
+    # Only the hash is stored, so mint one carrying the same payload and follow
+    # it the way the client would.
+    from app.core.services.clients import issue_token
+
+    raw = await issue_token(
+        committed,
+        TokenPurpose.login,
+        client_id=identity.client_id,
+        payload={"email": EMAIL, "request": str(request.uuid)},
+    )
+    await committed.commit()
+
+    callback = web.get("/auth/callback", params={"token": raw}, follow_redirects=False)
+    assert callback.status_code == 303
+    assert callback.headers["location"] == f"/r/{request.uuid}"
+
+    # And the page it lands on is really theirs.
+    assert web.get(f"/r/{request.uuid}").status_code == 200
+
+
+async def test_a_login_link_with_no_booking_behind_it_still_lands_on_the_front_page(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """`/auth/email` is somebody signing in, not somebody booking."""
+    web.get("/auth/email")
+    web.post("/auth/email", data={"csrf_token": _csrf(web), "email": EMAIL})
+
+    identity = (
+        await committed.execute(select(Identity).where(Identity.external_id == EMAIL))
+    ).scalar_one()
+
+    from app.core.services.clients import issue_token
+
+    raw = await issue_token(
+        committed, TokenPurpose.login, client_id=identity.client_id, payload={"email": EMAIL}
+    )
+    await committed.commit()
+
+    callback = web.get("/auth/callback", params={"token": raw}, follow_redirects=False)
+    assert callback.status_code == 303
+    assert callback.headers["location"] == "/"
+
+    await committed.execute(
+        delete(OutboxMessage).where(OutboxMessage.client_id == identity.client_id)
+    )
+    await committed.execute(delete(AuthToken).where(AuthToken.client_id == identity.client_id))
+    await committed.execute(delete(Identity).where(Identity.id == identity.id))
+    await committed.execute(delete(Client).where(Client.id == identity.client_id))
+    await committed.commit()
