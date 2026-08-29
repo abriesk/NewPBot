@@ -84,6 +84,12 @@ APPROVE = "approve"
 PROPOSE = "propose"
 REJECT = "reject"
 CANCEL_REQUEST = "cancelreq"
+#: The same cancellation, keeping the hour off the picker. Its own action rather
+#: than a flag, because the two are one tap each on a phone and the difference
+#: between them is the whole point: `CANCEL_REQUEST` frees the time for somebody
+#: else, and this one does not, because the reason it is free is her own day
+#: (DESIGN.md §14).
+CANCEL_KEEP = "cancelkeep"
 
 #: §13.2's propose picker: month -> day -> hour, and the slots offered above it.
 #: Every screen's callback carries the whole answer so far, so the picker holds
@@ -140,6 +146,7 @@ ADMIN_ACTIONS = frozenset(
         PROPOSE_TYPE,
         REJECT,
         CANCEL_REQUEST,
+        CANCEL_KEEP,
         PANEL,
         PANEL_REQUESTS,
         PANEL_OPEN,

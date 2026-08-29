@@ -332,9 +332,15 @@ The worker's sweep is the only mechanism; there is no in-memory scheduler holdin
 
 ---
 
-## 14. Cancellation
+## 14. Cancellation, and moving a session
 
 Therapist-initiated cancellation ships in this version and is not optional: without it, a confirmed booking has no exit that releases its slot, and the therapist has no recourse when she is ill. Cancelling sets a reason, releases the slot, cancels pending reminders, and notifies the client on every channel they have.
+
+**Releasing the slot was the only behaviour, and it is the wrong one for the commonest reason to cancel.** She calls off Thursday because she is ill; the hour goes straight back on the picker, and a stranger can book the time she is ill in before she has put the phone down. So cancelling asks which it is: the hour is freed, or it is **blocked**. Releasing stays the default, because the other reason to cancel is ordinary — a session that will not happen for a reason that has nothing to do with her day, where the hour is genuinely free and somebody else may have it. Blocking is not automatic and not undone automatically either: only she knows when the day is hers again, and a slot that quietly reappeared on the picker while she was still unwell would be the same bug with a delay.
+
+**Cancelling is not how a session moves.** The state machine used to say that a change of time after confirmation was a cancellation plus a new request, which is tidy for reminders and slot bookkeeping and wrong for the person it happens to: it throws away the request, its thread and its history, and asks the client to start again for something that happened to *her* diary. Moving a session keeps the booking confirmed throughout — it never becomes something the client has to re-agree to, and it never leaves the week schedule. The hour it leaves is blocked for the reason above; the client is told both times and reads why in her own words, or in the standing sentence §15 keeps for the day she has no time to write one.
+
+Nothing waits on the client's answer, and that is deliberate rather than an oversight. Making a moved session provisional until they accept would punish her for an emergency by dissolving the booking, and leave a session that *was* agreed sitting in limbo if they never reply. A client the new time does not suit answers with the note their request page already offers, which reaches her without the booking evaporating first.
 
 Client-initiated cancellation is deferred. The data model accommodates it — `cancelled_by` already distinguishes actor types — so enabling it later is a UI surface plus a policy check against `cancel_window_hours`, not a migration.
 
@@ -344,7 +350,7 @@ Client-initiated cancellation is deferred. The data model accommodates it — `c
 
 The web UI is the primary admin surface:
 
-- **Requests** — filter by status, view the full negotiation thread, approve, propose, reject, cancel; and the same requests as a **week schedule** (below)
+- **Requests** — filter by status, view the full negotiation thread, approve, propose, reject, cancel, move to another time; and the same requests as a **week schedule** (below)
 - **Slots** — create in bulk (a weekly pattern over a date range) and individually, block, delete
 - **Waitlist** — mark contacted, convert to a request, close
 - **Content** — edit blocks per topic and language, reorder, preview per channel, view and restore revisions
@@ -670,6 +676,17 @@ value in `en.yaml` changes nothing on an install that has already been seeded.
 The three rows were still the seeded defaults and were updated in place. Anything
 similar has to be, or the fix ships without arriving.
 
+A ninth is gone: **a confirmed session could not be moved.** §7.1 now has
+`confirmed → admin_reschedule → confirmed`, §7.2 has `booked → blocked`, and
+§14 carries the reasoning. Two things it settled are worth keeping here. The
+old slot is blocked rather than freed — and so, now, is the hour of a
+cancellation she marks as her own day, because releasing was the only behaviour
+and it offered a stranger the time she is ill in. And nothing waits on the
+client's answer: making a moved session provisional would punish her for an
+emergency by dissolving the booking, and leave one that *was* agreed in limbo if
+they never replied. A client the new time does not suit answers with the note
+§7.1 already accepts on a confirmed request.
+
 An eighth is gone: **the connect-Telegram link did nothing for a client the bot
 already knew**, which was the client it exists for. §5.1 carries what was
 decided and why, §20.2's merge paragraph is corrected, and the admin-side merge
@@ -747,22 +764,19 @@ asymmetry belongs with this entry because the empty state is where it shows, but
 it is a missing path rather than a wrong order, and §12.1 has to gain the step
 Telegram already has.
 
-**A confirmed session cannot be moved.** The therapist falls ill, or the day
-comes apart, and the only exit §7.1 gives her from `confirmed` is `admin_cancel`
-— which throws the booking away and puts the slot back on the picker. What she
-needs is to move the session and have the client told, and the table says
-outright that there is no path back from `confirmed`. So this is a new
-transition, `confirmed → confirmed`, and every part of it is a decision:
-whether the new time is announced or has to be accepted, which makes it either a
-transition or a return to `negotiating`; what happens to the old slot, where the
-report is specific and interesting — it should be held rather than freed,
-because her day is still spoken for even though this client is no longer in it,
-which means `booked → blocked` and a new row in §7.2; and whether the reminders
-already scheduled are cancelled and rebuilt or moved. It also needs an event, an
-intent, a message in three languages, a form on the request page, probably a
-Telegram control, and an audit entry. It is the largest item on this list and
-the one a therapist will use on her worst day, which is an argument for building
-it carefully rather than soon.
+**A moved session leaves the old time in the client's calendar.** `session_ics`
+hardcodes `SEQUENCE:0`, and that number is precisely how iCalendar marks a
+revision of an event carrying the same `UID`. A second attachment at `0` is a
+duplicate of the first as far as a calendar client is concerned, and is very
+likely ignored — so sending one would leave the old time in their calendar, the
+new time in the message, and no way for them to tell which the service believes.
+`request.rescheduled.client` therefore carries no attachment at all, which is
+honest and not helpful. Closing it means a real sequence — a counter on the
+request, bumped every time the instant changes, so the second file supersedes
+the first. Then a cancellation could carry `METHOD:CANCEL` for the same reason
+and stop asking the client to tidy up by hand (§13.5). Worth doing together,
+and worth doing only when somebody will test it against a real phone: the failure
+mode here is silent and lands in a stranger's calendar rather than in a log.
 
 **An abandoned booking keeps what the client typed, indefinitely.** `flow.data`
 is scratch that can hold `problem_text`, and its own docstring says it "is

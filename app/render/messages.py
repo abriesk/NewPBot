@@ -74,6 +74,16 @@ async def render(
         if payload.get(field):
             lines.append(await get_text(session, locale, key, **fmt))
 
+    if intent_key == "request.rescheduled.client" and not payload.get("reason"):
+        # Her standing sentence, when she moved a session without stopping to
+        # write one. Resolved here rather than substituted when the row was
+        # written, because only here is the client's own language known -- the
+        # whole reason it is a translation key and not a settings field. A
+        # session that moves with no word at all is the thing it prevents.
+        lines.append(
+            await get_text(session, locale, "intent.request.rescheduled.client.default")
+        )
+
     lines.extend(await _join_lines(session, intent_key, payload, locale, channel, fmt))
 
     if intent_key == "request.cancelled.client" and channel == Channel.email:

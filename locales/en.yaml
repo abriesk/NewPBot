@@ -180,6 +180,15 @@ intent:
   request.confirmed.client.join_online: "Join here: {url}"
   request.confirmed.client.join_onsite: "Address: {url}"
 
+  request.rescheduled.client.body: "Your session has been moved. It was {previous_time}; it is now {time}."
+  request.rescheduled.client.reason: "{reason}"
+  # The standing sentence, used when she moves a session without stopping to
+  # write one. She reaches for this on the day her diary came apart, so it has
+  # to be worth sending unedited -- and it is the only line here a therapist
+  # MUST review before going live, because it speaks for her at her worst
+  # moment. Edit it on the Translations page.
+  request.rescheduled.client.default: "Something has come up that I could not work around. I am sorry for the change, and I hope the new time works for you."
+
   request.rejected.client.body: "Unfortunately your request {uuid} could not be scheduled."
   # No label: the body above already says the request could not be scheduled,
   # and her answer is as often a referral as a reason. "Reason:" in front of

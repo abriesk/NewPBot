@@ -169,6 +169,9 @@ intent:
   request.confirmed.client.join_online: "Միանալ այստեղ՝ {url}"   # TODO: review
   request.confirmed.client.join_onsite: "Հասցե՝ {url}"   # TODO: review
 
+  request.rescheduled.client.body: "Ձեր հանդիպումը տեղափոխվել է։ Էր՝ {previous_time}։ Այժմ՝ {time}։"   # TODO: review
+  request.rescheduled.client.reason: "{reason}"
+  request.rescheduled.client.default: "Առաջացան հանգամանքներ, որոնք չկարողացա շրջանցել։ Ներողություն տեղափոխության համար, հուսով եմ՝ նոր ժամը ձեզ կհարմարի։"   # TODO: review
   request.rejected.client.body: "Ցավոք, ձեր {uuid} հայտը հնարավոր չեղավ պլանավորել։"   # TODO: review
   request.rejected.client.reason: "{reason}"
   request.expired.client.body: "Ձեր {uuid} հայտի ժամկետը լրացավ առանց պատասխանի։ Կարող եք նորը ներկայացնել։"   # TODO: review

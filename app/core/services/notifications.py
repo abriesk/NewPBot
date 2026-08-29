@@ -40,6 +40,7 @@ from app.core.events import (
     RequestNote,
     RequestProposal,
     RequestRejected,
+    RequestRescheduled,
     RequestSubmitted,
     WaitlistJoined,
     drain,
@@ -67,7 +68,9 @@ class Recipient(StrEnum):
 
 #: §13.3. Both identities are used for these two, when both exist -- a session
 #: reminder is worth arriving twice rather than not at all.
-BOTH_CHANNELS = frozenset({"reminder.client", "request.confirmed.client"})
+BOTH_CHANNELS = frozenset(
+    {"reminder.client", "request.confirmed.client", "request.rescheduled.client"}
+)
 
 #: §13.4. Stripped from any payload bound for the email channel. `problem`
 #: appears in the admin submission intent; `note` and `thread` carry negotiation
@@ -198,6 +201,38 @@ async def envelopes_for(session: AsyncSession, event: DomainEvent) -> list[Envel
                 dedupe_scope=f"confirmed-admin:{request.id}",
             ),
         ]
+
+    if isinstance(event, RequestRescheduled):
+        request = await _request(session, event.request_id)
+        join = await join_info(session, request)
+        return [
+            Envelope(
+                "request.rescheduled.client",
+                Recipient.client,
+                {
+                    "uuid": str(request.uuid),
+                    "time": _iso(event.scheduled_start),
+                    "previous_time": _iso(event.previous_start),
+                    "duration_min": await _duration_min(session, request),
+                    "join_url": join,
+                    # Called `reason`, not `note`, and the name is load-bearing:
+                    # §13.4 strips `note` from every email payload, because that
+                    # field carries negotiation bodies. This is her explanation
+                    # to the client, and an email-only client reading "your
+                    # session has moved" with the reason stripped out is exactly
+                    # what this text exists to prevent. `request.cancelled.
+                    # client` already carries hers under that name.
+                    "reason": event.note,
+                },
+                request_id=request.id,
+                # Every move is its own news. Scoped by the instant rather than
+                # by the request, so a second reschedule is not swallowed as a
+                # duplicate of the first.
+                dedupe_scope=f"rescheduled:{request.id}:{_iso(event.scheduled_start)}",
+            ),
+        ]
+        # No admin copy: she is the one who moved it. Same reasoning that keeps
+        # her own rejections from being read back to her.
 
     if isinstance(event, RequestProposal):
         request = await _request(session, event.request_id)

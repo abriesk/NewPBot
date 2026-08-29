@@ -127,7 +127,21 @@ UNAVAILABLE_BECAUSE = {
         "Only a confirmed session can be cancelled. A request that was never "
         "confirmed is rejected instead."
     ),
+    "admin_reschedule": (
+        "Only a confirmed session can be moved. Before that, propose a time "
+        "instead — there is nothing booked to move yet."
+    ),
 }
+
+#: §12.2: moving a session onto an hour she has already promised. Said rather
+#: than refused -- she may be stacking two deliberately, and this is the clash
+#: she would otherwise discover on the day.
+ALREADY_BOOKED = (
+    "Moved. Note that you already had a confirmed session at that time — "
+    "check the week schedule."
+)
+
+NO_NEW_TIME = "Moving a session needs a new time. Nothing was changed."
 
 #: Why a slot the page still lists cannot be deleted, for the same reason and in
 #: the same voice as the entries above. The delete button is withheld from a
@@ -444,9 +458,10 @@ def build_router() -> APIRouter:
         meeting_url: str = Form(""),
         body: str = Form(""),
         reason: str = Form(""),
+        keep_slot: str = Form(""),
         csrf_token: str = Form("", alias=CSRF_FIELD),
     ) -> Response:
-        """§12.2: approve, propose, reject, cancel."""
+        """§12.2: approve, propose, reject, cancel, reschedule."""
         if not csrf_ok(request, csrf_token):
             return Response(status_code=403)
 
@@ -486,8 +501,32 @@ def build_router() -> APIRouter:
                     await booking.admin_reject(session, booking_request.id, reason=reason or None)
                 elif action == "cancel":
                     await booking.admin_cancel(
-                        session, booking_request.id, reason=reason or None
+                        session,
+                        booking_request.id,
+                        reason=reason or None,
+                        keep_slot=bool(keep_slot),
                     )
+                elif action == "reschedule":
+                    if when is None:
+                        # The one action with nothing to fall back on: approve
+                        # can take the held slot's time and propose may be words,
+                        # but a move with no time to move to is not a move.
+                        return _back(f"/admin/requests/{uuid}", NO_NEW_TIME)
+                    clash = await booking.clashes_at(
+                        session, when, ignoring=booking_request.id
+                    )
+                    await booking.admin_reschedule(
+                        session,
+                        booking_request.id,
+                        new_start=when,
+                        note=reason.strip() or None,
+                    )
+                    if clash is not None:
+                        # Said, not refused (§12.2): she may be stacking two on
+                        # purpose, and this is the hour she would otherwise find
+                        # out about on the day.
+                        await notifications.publish(session)
+                        return _back(f"/admin/requests/{uuid}", ALREADY_BOOKED)
                 else:
                     return Response(status_code=404)
             except DomainError as exc:

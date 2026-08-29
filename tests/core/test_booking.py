@@ -41,11 +41,12 @@ from app.core.models import (
     BookingRequest,
     Client,
     NegotiationMessage,
+    OutboxMessage,
     Practice,
     Reminder,
     Slot,
 )
-from app.core.services import booking
+from app.core.services import booking, notifications
 from app.core.services import slots as slot_service
 
 LATER = datetime.now(UTC) + timedelta(days=10)
@@ -654,7 +655,7 @@ LEGAL: dict[RequestStatus, set[str]] = {
         "client_decline",
         "admin_reject",
     },
-    RequestStatus.confirmed: {"admin_cancel", "complete"},
+    RequestStatus.confirmed: {"admin_cancel", "admin_reschedule", "complete"},
     RequestStatus.rejected: set(),
     RequestStatus.expired: set(),
     RequestStatus.cancelled: set(),
@@ -674,6 +675,7 @@ async def _invoke(db: AsyncSession, event: str, request_id: int) -> None:
         "client_counter": lambda: booking.client_counter(db, request_id, body_text="x"),
         "client_decline": lambda: booking.client_decline(db, request_id),
         "admin_cancel": lambda: booking.admin_cancel(db, request_id, reason="x"),
+        "admin_reschedule": lambda: booking.admin_reschedule(db, request_id, new_start=LATER),
         "complete": lambda: booking.complete_request(db, request_id),
     }
     await calls[event]()
@@ -1408,3 +1410,228 @@ async def test_the_waitlist_way_out_is_refused_where_a_decline_would_be(
 
     with pytest.raises(InvalidTransition):
         await booking.client_decline_to_waitlist(db, request.id)
+
+
+# --- Moving a confirmed session (§7.1) --------------------------------------
+
+
+async def _confirmed_on_slot(
+    db: AsyncSession, practice: Practice, request_id: int, slot: Slot
+) -> BookingRequest:
+    request = (
+        await db.execute(select(BookingRequest).where(BookingRequest.id == request_id))
+    ).scalar_one()
+    request.slot_id = slot.id
+    await db.flush()
+    await slot_service.hold_slot(db, slot.id, request_id=request_id)
+    await booking.admin_approve(db, request_id)
+    await db.refresh(request)
+    return request
+
+
+async def test_a_move_keeps_the_booking_and_blocks_the_hour_it_leaves(
+    db: AsyncSession, practice: Practice, request_id: int, future_slot: Slot
+) -> None:
+    """§7.1's other exit from `confirmed`.
+
+    Cancelling and rebooking was the documented answer and is not the same
+    move: it loses the request, its thread and its history, and asks the client
+    to start again for something that happened to her diary.
+    """
+    request = await _confirmed_on_slot(db, practice, request_id, future_slot)
+    original = request.scheduled_start
+    assert original is not None
+
+    moved_to = original + timedelta(days=1)
+    await booking.admin_reschedule(db, request.id, new_start=moved_to, note="I am ill")
+
+    await db.refresh(request)
+    assert request.status is RequestStatus.confirmed, "it never stops being a booking"
+    assert request.scheduled_start == moved_to
+
+    # The hour she is leaving does not go back on offer: the reason it is free
+    # is that she cannot work it.
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.blocked
+    assert future_slot.booked_request is None
+
+    free = await slot_service.list_available_slots(
+        db, window_from=datetime.now(UTC), window_to=datetime.now(UTC) + timedelta(days=30)
+    )
+    assert future_slot.id not in {slot.id for slot in free}
+
+
+async def test_a_move_takes_a_slot_she_publishes_at_the_new_time(
+    db: AsyncSession, practice: Practice, request_id: int, future_slot: Slot
+) -> None:
+    """The same rule `admin_approve` follows: a slot at the agreed instant comes
+    off the picker rather than staying double-bookable."""
+    request = await _confirmed_on_slot(db, practice, request_id, future_slot)
+    moved_to = future_slot.starts_at + timedelta(days=2)
+    target = Slot(
+        practice_id=practice.id,
+        starts_at=moved_to,
+        duration_min=60,
+        status=SlotStatus.available,
+    )
+    db.add(target)
+    await db.flush()
+
+    await booking.admin_reschedule(db, request.id, new_start=moved_to)
+
+    await db.refresh(target)
+    assert target.status is SlotStatus.booked
+    assert target.booked_request == request.id
+    await db.refresh(request)
+    assert request.slot_id == target.id
+
+
+async def test_reminders_move_with_the_session(
+    db: AsyncSession, practice: Practice, request_id: int, future_slot: Slot
+) -> None:
+    """Moved, not rebuilt: `UNIQUE(request_id, offset_min)` leaves no room for a
+    second row at the same offset. A reminder that already fired for the old
+    time is revived, because the client was told about a time that is no longer
+    the time."""
+    request = await _confirmed_on_slot(db, practice, request_id, future_slot)
+    reminders = (
+        (await db.execute(select(Reminder).where(Reminder.request_id == request.id)))
+        .scalars()
+        .all()
+    )
+    assert reminders, "the fixture practice configures at least one offset"
+    reminders[0].state = ReminderState.sent
+    reminders[0].fired_at = datetime.now(UTC)
+    await db.flush()
+
+    moved_to = future_slot.starts_at + timedelta(days=3)
+    await booking.admin_reschedule(db, request.id, new_start=moved_to)
+
+    after = (
+        (await db.execute(select(Reminder).where(Reminder.request_id == request.id)))
+        .scalars()
+        .all()
+    )
+    assert len(after) == len(reminders), "moved, not duplicated"
+    for reminder in after:
+        await db.refresh(reminder)
+        assert reminder.due_at == moved_to - timedelta(minutes=reminder.offset_min)
+        assert reminder.state is ReminderState.scheduled
+
+
+async def test_the_client_is_told_both_times_and_the_reason(
+    db: AsyncSession, practice: Practice, request_id: int, future_slot: Slot
+) -> None:
+    request = await _confirmed_on_slot(db, practice, request_id, future_slot)
+    original = request.scheduled_start
+    moved_to = future_slot.starts_at + timedelta(days=1)
+
+    await booking.admin_reschedule(db, request.id, new_start=moved_to, note="I am ill")
+    await notifications.publish(db)
+
+    row = (
+        await db.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.request_id == request.id,
+                OutboxMessage.intent_key == "request.rescheduled.client",
+            )
+        )
+    ).scalar_one()
+    assert row.payload["previous_time"] == original.isoformat()
+    assert row.payload["time"] == moved_to.isoformat()
+    # `reason`, not `note`: §13.4 strips `note` from email, and an email-only
+    # client reading "your session moved" with no explanation is the thing this
+    # text exists to prevent.
+    assert row.payload["reason"] == "I am ill"
+
+    # She is not told about her own move.
+    admin_rows = (
+        (
+            await db.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.request_id == request.id,
+                    OutboxMessage.intent_key.like("%.admin"),
+                    OutboxMessage.intent_key.like("%rescheduled%"),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert not admin_rows
+
+
+async def test_a_move_into_the_past_is_refused(
+    db: AsyncSession, practice: Practice, request_id: int, future_slot: Slot
+) -> None:
+    """A session that has already started is moved by saying so out loud."""
+    request = await _confirmed_on_slot(db, practice, request_id, future_slot)
+    with pytest.raises(InvalidTransition):
+        await booking.admin_reschedule(
+            db, request.id, new_start=datetime.now(UTC) - timedelta(hours=1)
+        )
+
+
+async def test_only_a_confirmed_session_can_be_moved(
+    db: AsyncSession, request_id: int
+) -> None:
+    """Before confirmation there is nothing booked to move; §7.1 has propose."""
+    with pytest.raises(InvalidTransition):
+        await booking.admin_reschedule(
+            db, request_id, new_start=datetime.now(UTC) + timedelta(days=2)
+        )
+
+
+async def test_a_clash_is_reported_but_never_refused(
+    db: AsyncSession, practice: Practice, request_id: int, other_request_id: int, future_slot: Slot
+) -> None:
+    """§12.2 says so in the flash and lets her proceed: she may be stacking two
+    deliberately, and `admin_approve` has always allowed it."""
+    request = await _confirmed_on_slot(db, practice, request_id, future_slot)
+    taken = request.scheduled_start
+    assert taken is not None
+
+    other = (
+        await db.execute(select(BookingRequest).where(BookingRequest.id == other_request_id))
+    ).scalar_one()
+    other.status = RequestStatus.confirmed
+    other.scheduled_start = taken + timedelta(days=5)
+    other.confirmed_at = datetime.now(UTC)
+    await db.flush()
+
+    assert await booking.clashes_at(db, other.scheduled_start) is not None
+    assert (
+        await booking.clashes_at(db, other.scheduled_start, ignoring=other.id) is None
+    ), "a session never clashes with itself"
+
+    # Allowed anyway.
+    await booking.admin_reschedule(db, request.id, new_start=other.scheduled_start)
+    await db.refresh(request)
+    assert request.scheduled_start == other.scheduled_start
+
+
+async def test_cancelling_can_keep_the_hour_off_the_picker(
+    db: AsyncSession, practice: Practice, request_id: int, future_slot: Slot
+) -> None:
+    """Releasing was the only behaviour and is wrong for the commonest reason to
+    cancel: she is ill, and a stranger books the hour she is ill in."""
+    request = await _confirmed_on_slot(db, practice, request_id, future_slot)
+
+    await booking.admin_cancel(db, request.id, reason="ill", keep_slot=True)
+
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.blocked
+    assert future_slot.booked_request is None
+
+
+async def test_cancelling_still_frees_the_hour_by_default(
+    db: AsyncSession, practice: Practice, request_id: int, future_slot: Slot
+) -> None:
+    """The other reason to cancel is ordinary, and then the hour is genuinely
+    free for somebody else."""
+    request = await _confirmed_on_slot(db, practice, request_id, future_slot)
+
+    await booking.admin_cancel(db, request.id, reason="rearranged")
+
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.available

@@ -569,10 +569,21 @@ error_event
 | `negotiating` | `admin_approve` | `confirmed` | `scheduled_start` = the time given, else the last instant proposed by *either* side; the held slot is **released** unless it is that instant; book a matching slot if one is free; create reminders; emit `request.confirmed` |
 | `negotiating` | `admin_propose` | `negotiating` | Insert message; emit `request.proposal` |
 | `negotiating` | `client_decline` / `admin_reject` | `rejected` | Release slot; emit `request.rejected` |
-| `confirmed` | `admin_cancel` | `cancelled` | Release slot; cancel scheduled reminders; emit `request.cancelled` |
+| `confirmed` | `admin_cancel` | `cancelled` | Release slot — or **block** it, see below; cancel scheduled reminders; emit `request.cancelled` |
+| `confirmed` | `admin_reschedule` | `confirmed` | Old slot → `blocked`; book a free slot at the new time if one exists; move reminders; insert `negotiation_message(admin, note)`; emit `request.rescheduled` |
 | `confirmed` | `complete` (worker) | `completed` | Release slot booking; no notification |
 
-Any transition not in this table **MUST** raise `InvalidTransition` and change nothing. There is no path from `confirmed` back to `negotiating`.
+Any transition not in this table **MUST** raise `InvalidTransition` and change nothing. There is still no path from `confirmed` back to `negotiating`: a booking under discussion again is a booking nobody can rely on.
+
+**A confirmed session can be moved, and moving it is not cancelling it.** This table used to say a change of time after confirmation was a cancellation plus a new request. That is tidy for reminders and slot bookkeeping and wrong for the person it happens to: it discards the request, its thread and its history, and asks the client to start again for something that happened to the therapist's diary. `admin_reschedule` therefore keeps the booking `confirmed` throughout — it never becomes something the client has to re-agree to, and it never leaves the week schedule.
+
+**The hour it leaves is blocked, not released.** The reason that hour is free is that she cannot work it, so putting it back on the picker offers a stranger the time she is ill in. It stays off the picker until she unblocks it by hand; only she knows when the day is hers again. For the same reason `admin_cancel` takes a `keep_slot` flag, and both surfaces offer it as a second control (§12.2, §13.2) — releasing remains the default, because the *other* reason to cancel is ordinary and then the hour is genuinely free.
+
+**Reminders are moved, not rebuilt.** `UNIQUE(request_id, offset_min)` leaves no room for a second row at the same offset, which is the schema saying a reminder belongs to an offset rather than to an instant. Each existing row takes the new `due_at`; one whose new due time has already passed becomes `skipped`, exactly as `_create_reminders` decides for a new booking; one that already **fired** is put back to `scheduled`, because the client was reminded of a time that is no longer the time. A `cancelled` reminder is not revived — somebody stopped that one on purpose.
+
+**A move into the past MUST be refused**, and a clash **MUST NOT** be. Rescheduling onto an hour that already holds a confirmed session is reported to the therapist and allowed (§12.2): `admin_approve` has always permitted two sessions at one instant, and she may be doing it deliberately.
+
+**The client is told, and nothing waits on their answer.** `request.rescheduled.client` carries both instants and her note; it is not `request.confirmed.client`, which says a session is confirmed and, said about a time nobody discussed, reads as a mistake. A client the new time does not suit answers with the note §7.1 already accepts on a `confirmed` request, which reaches her without the booking evaporating first. There is **no** admin copy: she is the one who moved it.
 
 **A slot is the booking only while it is the time.** Approving names an instant — given, or the last one the conversation put forward — and the held slot is kept only if it *is* that instant. Otherwise it is released: a slot at Tuesday marked `booked` for a Thursday session is off the picker for good and attached to a request that is not at it. And once any proposal exists, the slot stops being the fallback for "no time given": it is what the client *asked for*, while the negotiation is what they *settled on*, and confirming the former would tell the client a time they never agreed to. A negotiation that named no instant at all is therefore refused — only the therapist can turn "thursday evening" into one. A `pending` request is the unchanged case: nothing has been discussed, so the slot is both.
 
@@ -594,7 +605,10 @@ A **client note** is deliberately not in the table, because it is not a transiti
 | `available` | `book(request)` | `booked` | Row lock (admin approving a free-text request onto a slot) |
 | `booked` | `release` | `available` | Request left `confirmed` |
 | `available` | `block` | `blocked` | Admin |
+| `booked` | `block` | `blocked` | Admin; §7.1's `admin_reschedule`, or `admin_cancel` with `keep_slot` |
 | `blocked` | `unblock` | `available` | Admin |
+
+`booked → blocked` is the emergency, and it exists so that calling off or moving a session does not hand the hour to somebody else. It clears the reservation fields the way `release` does — §6.4's CHECK permits neither on a slot that is not `held` or `booked` — so the request keeps pointing at the time it had while the slot belongs to nobody. Only an admin reaches it; nothing in the client path or the worker blocks a slot.
 
 `hold` and `book` **MUST** execute `SELECT … FROM slot WHERE id = :id FOR UPDATE` before checking status. This is the only place where a lost update would double-book.
 
@@ -707,6 +721,7 @@ Each intent has a key, a recipient, a payload schema, and available actions. Tra
 | `request.accepted.admin` | admin | uuid, note | approve, propose, reject |
 | `request.confirmed.client` | client | uuid, scheduled_start, duration_min, session type, modality, join info | open |
 | `request.confirmed.admin` | admin | uuid, scheduled_start, client | — |
+| `request.rescheduled.client` | client | uuid, previous_start, scheduled_start, duration_min, join info, reason | open |
 | `request.rejected.client` | client | uuid, reason | — |
 | `request.declined.admin` | admin | uuid, name | — |
 | `request.expired.client` | client | uuid | — |
@@ -819,7 +834,7 @@ The waitlist path is a decline and would fire that notification too. It **MUST**
 
 All under `/admin`, session-authenticated, CSRF-protected.
 
-`/admin/login`, `/admin/requests` (+ `?view=`, `?start=`), `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients`, `/admin/clients/{id}`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/privacy`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`), `/admin/help`, `/admin/status`.
+`/admin/login`, `/admin/requests` (+ `?view=`, `?start=`), `/admin/requests/{uuid}` (+ `approve`, `propose`, `reject`, `cancel`, `reschedule`), `/admin/waitlist`, `/admin/slots` (+ `bulk`, `block`, `delete`), `/admin/content` (+ `blocks`, `preview`, `revisions`), `/admin/translations` (+ `missing`), `/admin/settings`, `/admin/session-types`, `/admin/timezones`, `/admin/delivery`, `/admin/clients`, `/admin/clients/{id}`, `/admin/clients/{id}/export`, `/admin/clients/{id}/erase`, `/admin/privacy`, `/admin/maintenance` (+ `config/export`, `config/import`, `backups/{filename}`), `/admin/help`, `/admin/status`.
 
 **A time the therapist types and the form cannot read MUST be refused, not dropped.** `/admin/requests/{uuid}/approve` and `/propose` parse `scheduled_start` as `YYYY-MM-DDTHH:MM` in the practice timezone; anything else answers with a flash naming the format and changes nothing. Silently reading it as "no time given" turned a mistyped proposal into a timeless one, which the therapist had no way to notice — she had said when, and the client was told nothing. A proposal of words only is still available by leaving the field empty (§7.1).
 
@@ -972,6 +987,7 @@ Requirements:
 - Every screen **MUST** offer a way back. No reply may end in text with nothing to press — including the outcome of an action, which **MUST** be the re-rendered request screen rather than a bare "Confirmed …".
 - A request's action buttons **MUST** be derived from §7.1's transition table, so the panel never offers what the core would refuse. `negotiating` therefore offers propose and reject but not approve.
 - `cancel` needs typing, so it parks the request id in `flow_state` (§13.1's store, not aiogram FSM) and answers with a prompt carrying `✕` to abandon and `Skip` beside it; the reason reaches the client in `request.cancelled.client`, so it is asked for rather than invented. Approve uses the practice's default meeting link; a per-request `meeting_url` stays web-only.
+- **Cancel is two buttons here**: one frees the hour, one blocks it (§7.1's `keep_slot`). Two controls rather than a follow-up question, because this is the surface for answering in a hurry and the difference between them is a single tap. Which one she pressed is parked alongside the request id, so skipping the reason cannot quietly turn "keep the hour" into "give it away". **Rescheduling to a new time stays web-only** (§12.2): it needs a time typed into a field, and from a phone in an emergency `Cancel & block` is the move that matters.
 
 **`propose` MUST be answerable without typing.** It asked for `YYYY-MM-DD HH:MM` in the practice timezone, on the one surface that exists for answering away from a desk — a full ISO timestamp thumbed into a phone. The screen now offers, in order: the practice's own free slots for that request as one-tap buttons, a **month → day → hour** picker for a time it has not published, and typing kept as the escape hatch for anything neither covers (`18:30`, or words, which §7.1 still allows as a proposal).
 
@@ -1021,6 +1037,7 @@ A confirmation delivered by email carries one iCalendar file, so a client who ke
 - The file **MUST** be built from the payload *after* §13.4's scrub, never from `booking_request` directly, so the attachment cannot become a second way around the scrub.
 - Encoding follows RFC 5545: CRLF line endings, lines folded at 75 octets, and `\`, `;`, `,` and newlines escaped in text values.
 - A cancelled session is **not** withdrawn from the client's calendar: no `METHOD:CANCEL` counterpart is sent, since that would require the invitation form ruled out above. `request.cancelled.client` **MUST** therefore say in words that a calendar entry added earlier needs removing by hand.
+- A **moved** session is not updated in it either, and for a subtler reason: `SEQUENCE` is hardcoded to `0`, and that number is how iCalendar marks a revision of an event with the same `UID`. A second attachment at `SEQUENCE:0` would be treated as a duplicate of the first and very likely ignored, leaving the old time in the client's calendar and the new one only in the message. Sending no attachment at all is the honest option until the sequence is real, so `request.rescheduled.client` carries none — see DESIGN.md §20.3.
 
 ---
 

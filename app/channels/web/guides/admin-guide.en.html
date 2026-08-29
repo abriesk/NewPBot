@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Psychobooking — Admin user guide</title>
 <!-- The commit this guide was last checked against. See the footer. -->
-<meta name="guide-revision" content="94bfefd">
+<meta name="guide-revision" content="57cdae1">
 <meta name="guide-revised" content="2026-08-29">
 <style>
   :root {
@@ -412,6 +412,9 @@
         <p><strong>Approve</strong> — from <code>pending</code> and from <code>negotiating</code>. Leave the time blank and it confirms the last time either side put forward; on a <code>pending</code> request, where nothing has been discussed, that is the slot the client picked. Naming a time still wins. Optional per-session meeting URL; otherwise the standing room from Settings is used for online sessions.</p>
         <p><strong>Propose</strong> — a time, a note, or both. A note with no time is a real move, not a mistake: the client is told there is a reply and sent to their request page to read it, and they can accept it there. Nothing can be scheduled out of words, so the request stays <code>negotiating</code> until one of you names a time — you are told when they accept.</p>
         <p><strong>Reject</strong> — a <em>note to the client</em>, optional, and it reaches them in your words with nothing added in front of it. Use it for a referral as readily as for a refusal: “not my area, Anna at the centre takes these” is the answer more often than “no”, and the message no longer labels it as a reason. Cancel stops reminders on a confirmed session. Cancel is not an alias for Reject: they send the client different messages.</p>
+        <p><strong>Move this session</strong> — for the day something happens and you cannot keep an appointment you have already agreed. Give the new time and, if you have a moment, a line for the client. The booking stays booked: they are told the old time and the new one, their reminders follow, and nothing waits on their reply. If the new time does not suit them they will write back on their request page.</p>
+        <p>The hour you are <em>leaving</em> is <strong>blocked</strong>, not put back on offer — the reason it is free is that your day came apart, and the last thing you need is a stranger booking it. Unblock it on Slots when the day is yours again. If you move onto an hour where you already have someone, you are told so and it goes through anyway; check the week schedule.</p>
+        <p><strong>Cancel</strong> has the same choice as a checkbox: <em>keep the hour off the picker</em>. Tick it when the reason is your own day. Leave it when the session simply will not happen and somebody else may as well have the time.</p>
         <p>A time this form cannot read flashes <code>bad-time</code> and changes nothing — nothing is sent, so retype it and submit again. An empty time field still means words only. If the status moved while the page was open, it flashes <code>refused</code>.</p>
       </details>
       <details class="box">
@@ -611,8 +614,12 @@
       </div>
       <p><code>/admin availability</code> also toggles availability. A request card carries the client's name and how to reach them — the same identities the web page shows, an email marked verified or not.</p>
       <p>Its buttons are derived from the request's status, from the same table the web page reads, so the panel never offers a move the service would refuse. Approve works on a request under negotiation too. Sending <code>/admin</code> again drops a half-typed answer.</p>
+      <div class="callout warn"><strong>Fill this in before you go live.</strong> On <strong>Translations</strong>, in “Pages the client sees”, the key <code>intent.request.rescheduled.client.default</code> is the message sent when you move a session <em>without</em> writing a note. It ships with a sensible sentence, but it speaks for you on the day your diary came apart and everyone reads it in their own language — so make it sound like you, in all three, while you have time to think about it. Every other translation can wait; this one is written for the moment you have no time to write anything.</div>
       <h3>Declining from your phone</h3>
       <p><strong>Reject</strong> asks before it acts: “anything to tell them?” Send a line — another practice, another time to ask, or why not — and it reaches the client in your words. <strong>Skip</strong> declines with nothing attached, which is what the button used to do without asking. Same note as the web form, same message to the client.</p>
+      <h3>Calling a session off from your phone</h3>
+      <p>A confirmed session gives you two buttons. <strong>Cancel</strong> frees the hour for somebody else. <strong>Cancel &amp; block</strong> keeps it off the picker — that is the one for “I am ill”, and it is the difference between an hour going back on offer and staying yours. Both ask for a reason, and both let you skip it.</p>
+      <p>Moving a session to a <em>new</em> time is on the website: it needs a time typed into a field, which is not a thing to do one-handed. From here, <strong>Cancel &amp; block</strong> is the move — it stops the session, keeps the hour, and tells the client.</p>
       <h3>Proposing a time from your phone</h3>
       <p>Propose opens on <strong>your own free times</strong> for that request; one tap sends it. If none of them suit — or you have none published — <strong>Another time</strong> opens a picker: month, then day, then hour. Times are in the practice timezone, and the message afterwards names what you sent, so a mis-tap is visible at once rather than after the client has answered it.</p>
       <ul>
@@ -723,10 +730,10 @@ docker compose up -d --build</code></pre>
     <footer>
       Shipped with the service. This page is served from your own installation at <code>/admin/help</code>, so it always matches the version you are running.
       <br><br>
-      <strong>Written against commit <code>94bfefd</code>, 2026-08-29.</strong>
+      <strong>Written against commit <code>57cdae1</code>, 2026-08-29.</strong>
       That is the last state of the service this guide was checked against. After
       updating the server, whoever ran the update can list what has changed since with
-      <code>git log 94bfefd..HEAD -- app/ locales/</code> — anything in that list a
+      <code>git log 57cdae1..HEAD -- app/ locales/</code> — anything in that list a
       therapist would notice belongs in here, and the stamp moves with it.
     </footer>
   </main>

@@ -1062,7 +1062,12 @@ async def _submit_cancel_reason(
         return _admin_gone()
 
     try:
-        await booking.admin_cancel(session, request.id, reason=text.strip() or None)
+        await booking.admin_cancel(
+            session,
+            request.id,
+            reason=text.strip() or None,
+            keep_slot=bool(scratch.get("keep_slot")),
+        )
     except DomainError as exc:
         return await _admin_request(session, request, toast=f"Not possible: {type(exc).__name__}.")
 
@@ -1670,11 +1675,19 @@ async def _admin_action(
     if action in _PROPOSE_SCREENS:
         return await _propose_screen(session, chat_id, request, action, rest)
 
-    if action == kb.CANCEL_REQUEST:
-        await _park_admin_input(session, chat_id, Step.admin_entering_cancel_reason, request.id)
+    if action in (kb.CANCEL_REQUEST, kb.CANCEL_KEEP):
+        keep_slot = action == kb.CANCEL_KEEP
+        await _park_admin_input(
+            session,
+            chat_id,
+            Step.admin_entering_cancel_reason,
+            request.id,
+            extra={"keep_slot": keep_slot},
+        )
         return Reply(
-            f"Cancelling {request.uuid}.\n\n"
-            "Why? The client is told the reason. Send a line, or skip it.",
+            f"Cancelling {request.uuid}."
+            + (" The hour stays off the picker." if keep_slot else " The hour goes back on offer.")
+            + "\n\nWhy? The client is told the reason. Send a line, or skip it.",
             keyboard=kb.panel_keyboard(
                 [
                     [
@@ -1727,9 +1740,15 @@ async def _admin_action(
                 await booking.admin_reject(session, request.id, reason=None)
                 toast = "Declined."
             else:
+                # Which cancellation she started is parked too, so skipping the
+                # reason does not quietly turn "keep the hour" into "give it
+                # away" -- the difference is the reason she pressed it.
+                keep_slot = await _parked_admin_flag(session, chat_id, "keep_slot")
                 await _clear_admin_input(session, chat_id)
-                await booking.admin_cancel(session, request.id, reason=None)
-                toast = "Cancelled."
+                await booking.admin_cancel(
+                    session, request.id, reason=None, keep_slot=keep_slot
+                )
+                toast = "Cancelled, hour blocked." if keep_slot else "Cancelled."
         else:
             return None
     except DomainError as exc:
@@ -1767,16 +1786,30 @@ def _admin_nav() -> list[tuple[str, str]]:
 
 
 async def _park_admin_input(
-    session: AsyncSession, chat_id: int, step: Step, request_id: int
+    session: AsyncSession,
+    chat_id: int,
+    step: Step,
+    request_id: int,
+    *,
+    extra: dict[str, Any] | None = None,
 ) -> None:
     """§13.2: a typed answer needs somewhere to remember what it is about.
 
     `flow_state` on the therapist's own client row -- the same store §13.1 uses,
     and for the same reason: a restart mid-sentence loses nothing.
+
+    `extra` carries whatever else the answer needs. Cancelling uses it for
+    whether the hour is kept: the two cancellations ask the same question and
+    differ only in what happens to the slot, so they share a step rather than
+    inventing a second one that would want the same handler.
     """
     admin_client = await resolve_client(session, Channel.telegram, str(chat_id), verified=True)
     await flow.set_step(
-        session, admin_client.id, Channel.telegram, step, replace={"request_id": request_id}
+        session,
+        admin_client.id,
+        Channel.telegram,
+        step,
+        replace={"request_id": request_id, **(extra or {})},
     )
 
 
@@ -1793,6 +1826,13 @@ async def _parked_admin_step(session: AsyncSession, chat_id: int) -> Step | None
     """
     admin_client = await resolve_client(session, Channel.telegram, str(chat_id), verified=True)
     return await flow.current_step(session, admin_client.id, Channel.telegram)
+
+
+async def _parked_admin_flag(session: AsyncSession, chat_id: int, name: str) -> bool:
+    """One boolean she chose on the screen before this one (§13.2)."""
+    admin_client = await resolve_client(session, Channel.telegram, str(chat_id), verified=True)
+    scratch = await flow.data(session, admin_client.id, Channel.telegram)
+    return bool(scratch.get(name))
 
 
 async def _skip(session: AsyncSession, client: Client, step: Step) -> Reply | None:
@@ -2001,6 +2041,12 @@ async def _admin_request(
             ("admin_propose", "Propose", kb.PROPOSE),
             ("admin_reject", "Reject", kb.REJECT),
             ("admin_cancel", "Cancel", kb.CANCEL_REQUEST),
+            # §13.2: the same cancellation, keeping the hour off the picker.
+            # Two buttons rather than a question, because this is the surface
+            # for answering in a hurry and the difference is one tap.
+            # Rescheduling to a *new* time stays on the web (§12.2): from a
+            # phone, in an emergency, this is the move.
+            ("admin_cancel", "Cancel & block", kb.CANCEL_KEEP),
         )
         if event in allowed
     ]

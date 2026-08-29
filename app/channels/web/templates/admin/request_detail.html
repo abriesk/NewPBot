@@ -95,6 +95,30 @@
     {% endif %}
   </form>
 
+  {# §7.1's other exit from `confirmed`, and the one that keeps the booking.
+     Cancelling and rebooking loses the request, its thread and its history, and
+     asks the client to start again for something that happened to her diary. #}
+  <form method="post" action="/admin/requests/{{ req.uuid }}/reschedule"
+        class="card{% if 'admin_reschedule' in unavailable %} unavailable{% endif %}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <h3>Move this session</h3>
+    {% if 'admin_reschedule' in unavailable %}
+      <p class="why">{{ unavailable['admin_reschedule'] }}</p>
+    {% else %}
+      <label>New time (practice timezone)
+        <input type="datetime-local" name="scheduled_start" required>
+      </label>
+      <label>Note to the client
+        <input type="text" name="reason"
+               placeholder="Leave empty to send your standing message">
+      </label>
+      <p class="muted">The session stays booked and the client is told both
+         times. The hour you are leaving is <strong>blocked</strong>, not put
+         back on the picker — unblock it on Slots when the day is yours again.</p>
+      <button type="submit">Move</button>
+    {% endif %}
+  </form>
+
   <form method="post" action="/admin/requests/{{ req.uuid }}/cancel"
         class="card{% if 'admin_cancel' in unavailable %} unavailable{% endif %}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -103,6 +127,14 @@
       <p class="why">{{ unavailable['admin_cancel'] }}</p>
     {% else %}
       <label>Reason <input type="text" name="reason"></label>
+      {# Releasing was the only behaviour and is the wrong one when the reason
+         is her own day: the hour went straight back on the picker. #}
+      <label class="choice">
+        <input type="checkbox" name="keep_slot" value="1">
+        Keep the hour off the picker
+      </label>
+      <p class="muted">Tick this when the reason is your own day. The time is
+         blocked instead of offered to somebody else.</p>
       <button type="submit">{{ t.cancel }}</button>
     {% endif %}
   </form>

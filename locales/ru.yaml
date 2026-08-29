@@ -163,6 +163,9 @@ intent:
   request.confirmed.client.join_online: "Ссылка для подключения: {url}"         # TODO
   request.confirmed.client.join_onsite: "Адрес: {url}"                          # TODO
 
+  request.rescheduled.client.body: "Ваша консультация перенесена. Было: {previous_time}. Стало: {time}."   # TODO: review
+  request.rescheduled.client.reason: "{reason}"
+  request.rescheduled.client.default: "У меня возникли обстоятельства, которые я не смогла обойти. Простите за перенос — надеюсь, новое время вам подойдёт."   # TODO: review
   request.rejected.client.body: "К сожалению, заявку {uuid} не удалось согласовать."
   request.rejected.client.reason: "{reason}"
   request.expired.client.body: "Заявка {uuid} истекла без ответа. Вы можете оставить новую."   # TODO

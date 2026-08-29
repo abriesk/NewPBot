@@ -207,15 +207,26 @@ async def release_slot(session: AsyncSession, slot_id: int) -> Slot:
 
 
 async def block_slot(session: AsyncSession, slot_id: int) -> Slot:
-    """available -> blocked.
+    """available|booked -> blocked (§7.2).
 
     Blocking rather than deleting is what lets a request keep referencing a slot
     the therapist has withdrawn (DESIGN.md §8).
+
+    From `booked` it is the emergency: she has moved or called off a session and
+    the hour must not go back on the picker, because the reason it is free is
+    that her day came apart (DESIGN.md §14). Releasing would have offered a
+    stranger the very hour she is ill in. The reservation fields are cleared the
+    way `release_slot` clears them -- §6.4's CHECK allows neither on a slot that
+    is not held or booked -- so the request keeps pointing at the time it had
+    and the slot belongs to nobody.
     """
     slot = await _lock(session, slot_id)
-    if slot.status != SlotStatus.available:
+    if slot.status not in (SlotStatus.available, SlotStatus.booked):
         raise InvalidTransition("slot", slot.status.value, "block")
     slot.status = SlotStatus.blocked
+    slot.hold_expires_at = None
+    slot.held_by_request = None
+    slot.booked_request = None
     await session.flush()
     return slot
 

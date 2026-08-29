@@ -1474,7 +1474,9 @@ def test_each_status_offers_what_7_1_allows_and_greys_the_rest() -> None:
         # agreeing is an approval -- but nothing here is confirmed yet, and
         # cancel is for a confirmed session. This is the reported case.
         RequestStatus.negotiating: {"admin_approve", "admin_propose", "admin_reject"},
-        RequestStatus.confirmed: {"admin_cancel"},
+        # Moving it keeps the booking; cancelling ends it. Both, and only
+        # from here (§7.1).
+        RequestStatus.confirmed: {"admin_cancel", "admin_reschedule"},
         RequestStatus.rejected: set(),
         RequestStatus.expired: set(),
         RequestStatus.cancelled: set(),
