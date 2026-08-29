@@ -348,6 +348,9 @@ async def _text(session: AsyncSession, client: Client, update: Update) -> Reply 
     if step is Step.admin_entering_cancel_reason:
         return await _submit_cancel_reason(session, client, update.chat_id, text)
 
+    if step is Step.admin_entering_reject_note:
+        return await _submit_reject_note(session, client, update.chat_id, text)
+
     if step is Step.waitlist_problem:
         await flow.remember(session, client.id, Channel.telegram, problem=text)
         await flow.set_step(session, client.id, Channel.telegram, Step.waitlist_contact)
@@ -990,6 +993,42 @@ async def _submit_cancel_reason(
     return reply
 
 
+async def _submit_reject_note(
+    session: AsyncSession, client: Client, chat_id: int, text: str
+) -> Reply:
+    """The note typed after pressing Decline (§13.2).
+
+    It reaches the client in her own words, under a body that already says the
+    request could not be scheduled -- which is why the message carries no
+    "Reason:" label any more. A referral read as the justification for a
+    refusal is worse than no note at all.
+    """
+    settings = get_settings()
+    if chat_id not in settings.admin_telegram_ids:
+        return Reply(await get_text(session, client.language, "common.error.generic"))
+
+    scratch = await flow.data(session, client.id, Channel.telegram)
+    request = (
+        await session.execute(
+            select(BookingRequest).where(BookingRequest.id == int(scratch.get("request_id", 0)))
+        )
+    ).scalar_one_or_none()
+    await flow.clear(session, client.id, Channel.telegram)
+    if request is None:
+        return _admin_gone()
+
+    try:
+        await booking.admin_reject(session, request.id, reason=text.strip() or None)
+    except DomainError as exc:
+        return await _admin_request(session, request, toast=f"Not possible: {type(exc).__name__}.")
+
+    await notifications.publish(session)
+    await session.refresh(request)
+    reply = await _admin_request(session, request, toast="Declined.")
+    reply.edit = False
+    return reply
+
+
 def _parse_time(text: str, tz: str) -> datetime | None:
     """`YYYY-MM-DD HH:MM` in `tz` -> an aware UTC instant, or None.
 
@@ -1567,19 +1606,50 @@ async def _admin_action(
             edit=True,
         )
 
+    if action == kb.REJECT:
+        # Asked for rather than assumed. `admin_reject` has taken a reason since
+        # it was written and the web form has always offered the field, but this
+        # button sent `None` -- so from the phone, which is the surface built
+        # for answering away from a desk, the only rejection possible was a
+        # silent one. What she usually wants to say is not "no" but "not me,
+        # try her", and the prompt asks for that rather than for a reason.
+        await _park_admin_input(session, chat_id, Step.admin_entering_reject_note, request.id)
+        return Reply(
+            f"Declining {request.uuid}.\n\n"
+            "Anything to tell them? Another practice, another time to ask, "
+            "or why not. It reaches them in your words. Send a line, or skip it.",
+            keyboard=kb.panel_keyboard(
+                [
+                    [
+                        ("Skip", f"{kb.PANEL_SKIP}:{request.id}"),
+                        ("✕ Cancel", f"{kb.PANEL_OPEN}:{request.id}"),
+                    ]
+                ]
+            ),
+            edit=True,
+        )
+
     try:
         if action == kb.APPROVE:
             # §13.2: the practice's default meeting link. A per-request one is
             # web-only, because it means typing a URL on a phone.
             await booking.admin_approve(session, request.id)
             toast = "Confirmed."
-        elif action == kb.REJECT:
-            await booking.admin_reject(session, request.id)
-            toast = "Rejected."
         elif action == kb.PANEL_SKIP:
-            await _clear_admin_input(session, chat_id)
-            await booking.admin_cancel(session, request.id, reason=None)
-            toast = "Cancelled."
+            # Two questions end in this button now, so it has to ask which one
+            # it is answering. The parked step is the only thing that knows:
+            # the callback carries the request id and nothing else, and adding
+            # the verb to it would put the answer somewhere a stale message
+            # could still be tapped.
+            parked = await _parked_admin_step(session, chat_id)
+            if parked is Step.admin_entering_reject_note:
+                await _clear_admin_input(session, chat_id)
+                await booking.admin_reject(session, request.id, reason=None)
+                toast = "Declined."
+            else:
+                await _clear_admin_input(session, chat_id)
+                await booking.admin_cancel(session, request.id, reason=None)
+                toast = "Cancelled."
         else:
             return None
     except DomainError as exc:
@@ -1633,6 +1703,16 @@ async def _park_admin_input(
 async def _clear_admin_input(session: AsyncSession, chat_id: int) -> None:
     admin_client = await resolve_client(session, Channel.telegram, str(chat_id), verified=True)
     await flow.clear(session, admin_client.id, Channel.telegram)
+
+
+async def _parked_admin_step(session: AsyncSession, chat_id: int) -> Step | None:
+    """Which question she is part-way through answering (§13.2).
+
+    Skip is offered by two prompts now -- a cancellation's reason and a
+    rejection's note -- and the callback behind it carries only the request id.
+    """
+    admin_client = await resolve_client(session, Channel.telegram, str(chat_id), verified=True)
+    return await flow.current_step(session, admin_client.id, Channel.telegram)
 
 
 async def _skip(session: AsyncSession, client: Client, step: Step) -> Reply | None:

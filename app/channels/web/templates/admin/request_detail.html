@@ -85,7 +85,12 @@
     {% if 'admin_reject' in unavailable %}
       <p class="why">{{ unavailable['admin_reject'] }}</p>
     {% else %}
-      <label>Reason <input type="text" name="reason"></label>
+      {# Not "Reason": the answer to a request she cannot take is as often a
+         referral as a refusal, and the client reads this verbatim. #}
+      <label>Note to the client
+        <input type="text" name="reason"
+               placeholder="Another practice, another time to ask, or why not">
+      </label>
       <button type="submit">{{ t.reject }}</button>
     {% endif %}
   </form>

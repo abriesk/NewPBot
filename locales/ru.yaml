@@ -157,7 +157,7 @@ intent:
   request.confirmed.client.join_onsite: "Адрес: {url}"                          # TODO
 
   request.rejected.client.body: "К сожалению, заявку {uuid} не удалось согласовать."
-  request.rejected.client.reason: "Причина: {reason}"                           # TODO
+  request.rejected.client.reason: "{reason}"
   request.expired.client.body: "Заявка {uuid} истекла без ответа. Вы можете оставить новую."   # TODO
   request.cancelled.client.body: "Консультация {time} отменена."                # TODO
   request.cancelled.client.reason: "Причина: {reason}"                          # TODO

@@ -163,7 +163,7 @@ intent:
   request.confirmed.client.join_onsite: "Հասցե՝ {url}"   # TODO: review
 
   request.rejected.client.body: "Ցավոք, ձեր {uuid} հայտը հնարավոր չեղավ պլանավորել։"   # TODO: review
-  request.rejected.client.reason: "Պատճառը՝ {reason}"   # TODO: review
+  request.rejected.client.reason: "{reason}"
   request.expired.client.body: "Ձեր {uuid} հայտի ժամկետը լրացավ առանց պատասխանի։ Կարող եք նորը ներկայացնել։"   # TODO: review
   request.cancelled.client.body: "{time} ձեր հանդիպումը չեղարկվել է։"   # TODO: review
   request.cancelled.client.reason: "Պատճառը՝ {reason}"   # TODO: review

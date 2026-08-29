@@ -170,7 +170,11 @@ intent:
   request.confirmed.client.join_onsite: "Address: {url}"
 
   request.rejected.client.body: "Unfortunately your request {uuid} could not be scheduled."
-  request.rejected.client.reason: "Reason: {reason}"
+  # No label: the body above already says the request could not be scheduled,
+  # and her answer is as often a referral as a reason. "Reason:" in front of
+  # "my colleague Anna works with exactly this" reads as a refusal being
+  # justified. Her words stand as their own paragraph.
+  request.rejected.client.reason: "{reason}"
   request.expired.client.body: "Your request {uuid} expired without a reply. You are welcome to make a new one."
   request.cancelled.client.body: "Your session on {time} has been cancelled."
   request.cancelled.client.reason: "Reason: {reason}"

@@ -24,6 +24,7 @@ from app.core.models import (
     Client,
     FlowState,
     Identity,
+    OutboxMessage,
     Practice,
     Slot,
     WaitlistEntry,
@@ -1168,3 +1169,125 @@ async def test_the_waitlist_button_reaches_a_waitlist_entry(
     # The slot they walked past is untouched: they made no request.
     await db.refresh(future_slot)
     assert future_slot.status is SlotStatus.available
+
+
+# --- Declining with a note (§13.2) ------------------------------------------
+
+
+async def test_reject_asks_for_a_note_before_it_rejects(
+    db: AsyncSession, practice: Practice, client: Client, session_type_id: int
+) -> None:
+    """Reported in use: from the phone she could only decline silently.
+
+    `admin_reject` has taken a reason since it was written and the web form has
+    always offered the field; this button sent `None`.
+    """
+    request = BookingRequest(
+        practice_id=practice.id,
+        client_id=client.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        status=RequestStatus.pending,
+        source_channel=Channel.web,
+    )
+    db.add(request)
+    await db.flush()
+
+    reply = await handle(db, Update(chat_id=1, callback_data=f"{kb.REJECT}:{request.id}"))
+
+    assert reply is not None
+    # Nothing has happened yet: the question comes first.
+    await db.refresh(request)
+    assert request.status is RequestStatus.pending
+
+    admin = await resolve_client(db, Channel.telegram, "1", verified=True)
+    assert (
+        await flow.current_step(db, admin.id, Channel.telegram)
+        is Step.admin_entering_reject_note
+    )
+
+    await handle(db, Update(chat_id=1, text="Not my area — Anna at the centre takes these."))
+
+    await db.refresh(request)
+    assert request.status is RequestStatus.rejected
+    assert request.rejected_reason == "Not my area — Anna at the centre takes these."
+
+
+async def test_the_note_reaches_the_client_without_a_reason_label(
+    db: AsyncSession, practice: Practice, client: Client, session_type_id: int
+) -> None:
+    """A referral read as the justification for a refusal is worse than none."""
+    request = BookingRequest(
+        practice_id=practice.id,
+        client_id=client.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        status=RequestStatus.pending,
+        source_channel=Channel.web,
+    )
+    db.add(request)
+    await db.flush()
+
+    await handle(db, Update(chat_id=1, callback_data=f"{kb.REJECT}:{request.id}"))
+    await handle(db, Update(chat_id=1, text="Anna at the centre works with exactly this."))
+
+    row = (
+        await db.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.request_id == request.id,
+                OutboxMessage.intent_key == "request.rejected.client",
+            )
+        )
+    ).scalar_one()
+    assert row.payload["reason"] == "Anna at the centre works with exactly this."
+
+
+async def test_skip_still_declines_and_does_not_cancel(
+    db: AsyncSession, practice: Practice, client: Client, session_type_id: int
+) -> None:
+    """Two prompts end in Skip now, so it has to know which it is answering.
+
+    Answering the decline prompt with the cancellation's action would refuse:
+    §7.1 allows `admin_cancel` only from `confirmed`.
+    """
+    request = BookingRequest(
+        practice_id=practice.id,
+        client_id=client.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        status=RequestStatus.pending,
+        source_channel=Channel.web,
+    )
+    db.add(request)
+    await db.flush()
+
+    await handle(db, Update(chat_id=1, callback_data=f"{kb.REJECT}:{request.id}"))
+    await handle(db, Update(chat_id=1, callback_data=f"{kb.PANEL_SKIP}:{request.id}"))
+
+    await db.refresh(request)
+    assert request.status is RequestStatus.rejected
+    assert request.rejected_reason is None
+
+
+async def test_skip_after_the_cancel_prompt_still_cancels(
+    db: AsyncSession, practice: Practice, client: Client, session_type_id: int
+) -> None:
+    """The other half of the same dispatch."""
+    request = BookingRequest(
+        practice_id=practice.id,
+        client_id=client.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        status=RequestStatus.confirmed,
+        source_channel=Channel.web,
+        scheduled_start=datetime.now(UTC) + timedelta(days=3),
+        confirmed_at=datetime.now(UTC),
+    )
+    db.add(request)
+    await db.flush()
+
+    await handle(db, Update(chat_id=1, callback_data=f"{kb.CANCEL_REQUEST}:{request.id}"))
+    await handle(db, Update(chat_id=1, callback_data=f"{kb.PANEL_SKIP}:{request.id}"))
+
+    await db.refresh(request)
+    assert request.status is RequestStatus.cancelled

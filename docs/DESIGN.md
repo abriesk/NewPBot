@@ -634,6 +634,26 @@ could make none of them, and had nowhere to say so — the waitlist is now offer
 beside the picker on both channels rather than only instead of it, which §12.1
 and §13.1 now require.
 
+A seventh is gone with them, and it is the one whose diff was smallest and whose
+point was largest. **A rejection had no room for a referral.** Her answer to a
+request she cannot take is more often "not me, try her" than "no", and every
+part of the machinery for that already existed — `admin_reject` has taken a
+reason since it was written, the notification carries it, the web form offered
+the field. Two things made it unusable. The Telegram button passed `None`, so on
+the surface built for answering away from a desk the only rejection available
+was a silent one; it now asks first, with Skip for the silent case, which meant
+teaching Skip to tell the two prompts apart. And the client's copy read
+`Reason: {reason}`, which turns "my colleague Anna works with exactly this" into
+the justification of a refusal. The label is gone and her words stand as their
+own paragraph. A *cancellation* keeps its label, because a session called off
+does have a reason — the two looked like one string and were not.
+
+That last change also found the trap under any copy correction: seeding inserts
+missing keys and never overwrites (§15, so that her edits win), so editing a
+value in `en.yaml` changes nothing on an install that has already been seeded.
+The three rows were still the seeded defaults and were updated in place. Anything
+similar has to be, or the fix ships without arriving.
+
 Two of those turned out to be more than they looked. The day heading was the
 wider half of what reads as one control, which `slot_keyboard` now solves by
 making a single-time day a single button — and beside it, `NOOP` was not in
@@ -672,19 +692,6 @@ value nothing reads. Decide whether price is client-facing before building
 anything else on it. If it is, the renderer is small and this is where the
 column-name trap above goes off. If it is not, the field is better removed from
 the form than explained in it, and §6.4 moves to say so.
-
-**A rejection has no room for a referral.** The therapist's answer to a request
-she cannot take is often not "no" but "not me, try her" — and the surface offers
-her Reject, whose client-facing wording is `Reason: {reason}`. Half the
-machinery is already right: `admin_reject(reason=…)` persists `rejected_reason`,
-the notification carries it, and `intent.request.rejected.client.reason` renders
-it, so the web form's Reason field reaches the client today. Two things are
-wrong. The Telegram Reject button passes no reason at all, so from the phone —
-the surface built for answering away from a desk — she can only reject silently;
-it wants a typed step of its own, which `admin_entering_cancel_reason` is the
-model for. And "Reason" is the wrong word for what she actually writes there: a
-referral read as a justification for a refusal is worse than no note. This one
-is mostly copy, and the copy is the point, so it is not as small as its diff.
 
 **The booking flow asks when before it asks how.** Telegram walks the client
 slot → session type → modality, so somebody who can only meet online picks a

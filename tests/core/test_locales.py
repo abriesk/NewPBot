@@ -118,3 +118,19 @@ def test_english_is_complete() -> None:
     so it is the one file that may not have gaps."""
     empty = [k for k, v in CATALOGUE["en"].items() if not v.strip()]
     assert not empty, f"en.yaml is the fallback of last resort; empty: {empty}"
+
+
+@pytest.mark.parametrize("lang", LANGUAGES)
+def test_a_rejection_carries_the_therapist_words_without_a_label(lang: str) -> None:
+    """Her answer to a request she cannot take is as often a referral as a
+    refusal, and the client reads it verbatim under a body that has already
+    said the request could not be scheduled. "Reason:" in front of "my
+    colleague Anna works with exactly this" reads as a refusal being justified.
+
+    A cancellation is the opposite case and keeps its label: a session called
+    off genuinely has a reason.
+    """
+    key = "intent.request.rejected.client.reason"
+    value = CATALOGUE[lang][key]
+    assert value == "{reason}", f"{lang}.yaml labels the note: {value}"
+    assert "{reason}" in CATALOGUE[lang]["intent.request.cancelled.client.reason"]

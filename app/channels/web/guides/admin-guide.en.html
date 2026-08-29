@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Psychobooking — Admin user guide</title>
 <!-- The commit this guide was last checked against. See the footer. -->
-<meta name="guide-revision" content="f02c55a">
+<meta name="guide-revision" content="71230b6">
 <meta name="guide-revised" content="2026-08-29">
 <style>
   :root {
@@ -411,7 +411,7 @@
         <p>Only the actions this status allows are live. The rest stay on the page, greyed, with a line saying why — so someone looking for Cancel learns that it is for confirmed sessions only, instead of hunting for a button that was removed.</p>
         <p><strong>Approve</strong> — from <code>pending</code> and from <code>negotiating</code>. Leave the time blank and it confirms the last time either side put forward; on a <code>pending</code> request, where nothing has been discussed, that is the slot the client picked. Naming a time still wins. Optional per-session meeting URL; otherwise the standing room from Settings is used for online sessions.</p>
         <p><strong>Propose</strong> — a time, a note, or both. A note with no time is a real move, not a mistake: the client is told there is a reply and sent to their request page to read it, and they can accept it there. Nothing can be scheduled out of words, so the request stays <code>negotiating</code> until one of you names a time — you are told when they accept.</p>
-        <p><strong>Reject</strong> / <strong>Cancel</strong> — optional reason. Cancel stops reminders on a confirmed session. Cancel is not an alias for Reject: they send the client different messages.</p>
+        <p><strong>Reject</strong> — a <em>note to the client</em>, optional, and it reaches them in your words with nothing added in front of it. Use it for a referral as readily as for a refusal: “not my area, Anna at the centre takes these” is the answer more often than “no”, and the message no longer labels it as a reason. Cancel stops reminders on a confirmed session. Cancel is not an alias for Reject: they send the client different messages.</p>
         <p>A time this form cannot read flashes <code>bad-time</code> and changes nothing — nothing is sent, so retype it and submit again. An empty time field still means words only. If the status moved while the page was open, it flashes <code>refused</code>.</p>
       </details>
       <details class="box">
@@ -610,6 +610,8 @@
       </div>
       <p><code>/admin availability</code> also toggles availability. A request card carries the client's name and how to reach them — the same identities the web page shows, an email marked verified or not.</p>
       <p>Its buttons are derived from the request's status, from the same table the web page reads, so the panel never offers a move the service would refuse. Approve works on a request under negotiation too. Sending <code>/admin</code> again drops a half-typed answer.</p>
+      <h3>Declining from your phone</h3>
+      <p><strong>Reject</strong> asks before it acts: “anything to tell them?” Send a line — another practice, another time to ask, or why not — and it reaches the client in your words. <strong>Skip</strong> declines with nothing attached, which is what the button used to do without asking. Same note as the web form, same message to the client.</p>
       <h3>Proposing a time from your phone</h3>
       <p>Propose opens on <strong>your own free times</strong> for that request; one tap sends it. If none of them suit — or you have none published — <strong>Another time</strong> opens a picker: month, then day, then hour. Times are in the practice timezone, and the message afterwards names what you sent, so a mis-tap is visible at once rather than after the client has answered it.</p>
       <ul>
@@ -720,10 +722,10 @@ docker compose up -d --build</code></pre>
     <footer>
       Shipped with the service. This page is served from your own installation at <code>/admin/help</code>, so it always matches the version you are running.
       <br><br>
-      <strong>Written against commit <code>f02c55a</code>, 2026-08-29.</strong>
+      <strong>Written against commit <code>71230b6</code>, 2026-08-29.</strong>
       That is the last state of the service this guide was checked against. After
       updating the server, whoever ran the update can list what has changed since with
-      <code>git log f02c55a..HEAD -- app/ locales/</code> — anything in that list a
+      <code>git log 71230b6..HEAD -- app/ locales/</code> — anything in that list a
       therapist would notice belongs in here, and the stamp moves with it.
     </footer>
   </main>
