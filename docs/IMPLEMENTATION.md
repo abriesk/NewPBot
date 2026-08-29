@@ -770,6 +770,7 @@ The renderer **MUST** have golden tests including: Russian text containing `.`, 
 | POST | `/book/hold` | Hold a slot; returns hold expiry |
 | GET | `/book/details` | Step 3 — problem, name, contact note |
 | POST | `/book` | Submit; returns confirmation with the request UUID |
+| GET | `/waitlist` | The waitlist form, reached by choice from under the picker |
 | POST | `/waitlist` | Join the waitlist |
 | GET | `/r/{uuid}` | Request status and negotiation thread (auth required) |
 | POST | `/r/{uuid}/accept` \| `/counter` \| `/decline` | Negotiation actions |
@@ -785,6 +786,8 @@ Timezone is detected client-side and posted with the booking; a visible selector
 Both prefills require a **session**, never a typed address: at step 3 an unsigned visitor has not identified themselves — the email arrives at submit — so prefilling from a typed address would confirm to anyone who guessed it that the address is known here and whom it belongs to (DESIGN.md §5.1).
 
 The name field is prefilled rather than hidden, which is the opposite of the email field's treatment on the same form. An email is a credential: the session establishes it and changing it goes through verification. A name is a label, and no client-facing route lets a client edit one anywhere else — hiding it once set would make a client's own name uncorrectable by them for good.
+
+**The waitlist MUST be offered beside the picker, not only instead of it.** `resolve_booking_mode` sends a client to the waitlist when the practice has nothing to offer (§6), which leaves the client who *can* see four times and cannot make any of them with no way to say so — the picker offers times, the menu offers topics, and the only remaining move is to close the page. `/book/slots` therefore carries a link to `GET /waitlist` in both its states, empty and full, and it is the same form `/book` renders on §6's waitlist path. It **MUST NOT** open on the same sentence: telling somebody there is nothing free while they are looking at a list of free times reads as a broken page, so the form takes `waitlist.intro_by_choice` when it is reached by choice and `waitlist.intro` when there is genuinely nothing. Joining this way creates a plain `waitlist_entry` and no request — there is no booking to decline, which is what separates it from `POST /r/{uuid}/waitlist` below.
 
 A message *about a request* **MUST** link to `/r/{uuid}` carrying a `view_request` token (§6.2), so following it opens the request rather than a sign-in form. Consuming that token starts a client session, which is what makes the link still work when it is opened a second time — the token itself is single-use, as §6.2 requires of every token.
 
@@ -917,7 +920,7 @@ Uploads **MUST** be capped (5 MB) and rejected above it before parsing.
 3. Persistent main keyboard: one button per menu topic, plus Consultation and My appointments.
 4. Topic button → send that topic's published blocks in order, as separate messages.
 5. Consultation → `resolve_booking_mode()` and follow the resolved path (slots picker / free-text / waitlist).
-6. Slot picker: inline keyboard grouped by day, times in the client's timezone; timezone chosen from `timezone_option` if unknown.
+6. Slot picker: inline keyboard grouped by day, times in the client's timezone; timezone chosen from `timezone_option` if unknown. A day offering a **single** time is one button carrying the day and the time together: the day heading is a dead button, and where it sits directly above one time it is the wider half of what reads as a single control, so it is what gets tapped. Beneath the picker, a row offering the **waitlist** — §12.1's rule, and for the same reason: times can all be wrong for a client without being absent, and `resolve_booking_mode` only routes to the waitlist when there are none. It carries its own callback action rather than the negotiation's, which closes a request that already exists; this one belongs to a client who has not made one.
 7. After the slot is held: session type, modality, problem text, optional name, then the contact step (each skippable where optional). The contact step is a choice, not free text, because "email" is a natural answer to an open question and the service cannot act on it:
    - **Telegram** — the identity already exists, so nothing is stored and delivery keeps following §13.3.
    - **Email** — ask for an address and reject anything not shaped like one. The address is **not** trusted on arrival: `auth.login_link.client` is sent to it, and following that link is what sets `verified_at` (§6.2). Once verified, §13.3 delivers confirmations and reminders to both channels. Verification is never a precondition for booking — the request is submitted either way.

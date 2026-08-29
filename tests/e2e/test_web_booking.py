@@ -1227,3 +1227,85 @@ async def test_a_login_link_with_no_booking_behind_it_still_lands_on_the_front_p
     await committed.execute(delete(Identity).where(Identity.id == identity.id))
     await committed.execute(delete(Client).where(Client.id == identity.client_id))
     await committed.commit()
+
+
+async def test_the_slot_list_offers_a_way_onto_the_waitlist(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """§12.1: beside the picker, not only instead of it.
+
+    `/book` renders the waitlist form when there is nothing to choose from.
+    Somebody looking at times that are all wrong for them had no way to say so.
+    """
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+
+    partial = web.get(
+        "/book/slots",
+        params={"session_type_id": session_type_id, "modality": "online", "tz": "Europe/Moscow"},
+    )
+    assert partial.status_code == 200
+    assert str(web_slot) in partial.text, "the times are still the point of the page"
+    assert 'href="/waitlist"' in partial.text
+
+
+async def test_the_waitlist_page_reached_by_choice_does_not_claim_there_is_nothing(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """Telling somebody there are no free places while they are looking at a
+    list of them is worse than saying nothing."""
+    from app.core.services.translations import get_text
+
+    page = web.get("/waitlist")
+    assert page.status_code == 200
+
+    by_choice = await get_text(committed, "ru", "waitlist.intro_by_choice")
+    nothing_free = await get_text(committed, "ru", "waitlist.intro")
+    assert by_choice in page.text
+    assert nothing_free not in page.text
+
+
+async def test_the_waitlist_page_still_submits(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """The form behind it is the one that was already there."""
+    web.get("/waitlist")
+    response = web.post(
+        "/waitlist",
+        data={
+            "csrf_token": _csrf(web),
+            "problem": "evenings would suit me better",
+            "contact": "",
+            "email": EMAIL,
+        },
+    )
+    assert response.status_code == 200
+
+    await committed.rollback()
+    identity = (
+        await committed.execute(select(Identity).where(Identity.external_id == EMAIL))
+    ).scalar_one()
+    entry = (
+        await committed.execute(
+            select(WaitlistEntry).where(WaitlistEntry.client_id == identity.client_id)
+        )
+    ).scalar_one()
+    assert entry.problem_text == "evenings would suit me better"
+
+    # The admin's copy of the join carries neither `client_id` nor `request_id`,
+    # so a delete filtered on either misses it -- and left behind it is a `dead`
+    # row against a chat id that exists only in conftest. Scoped by `dedupe_key`
+    # for the same reason as the `web_slot` teardown above.
+    await committed.execute(
+        delete(OutboxMessage).where(
+            OutboxMessage.dedupe_key.like(f"waitlist-admin:{entry.id}:%")
+        )
+    )
+    await committed.execute(delete(WaitlistEntry).where(WaitlistEntry.id == entry.id))
+    await committed.execute(
+        delete(OutboxMessage).where(OutboxMessage.client_id == identity.client_id)
+    )
+    await committed.execute(delete(Identity).where(Identity.id == identity.id))
+    await committed.execute(delete(Client).where(Client.id == identity.client_id))
+    await committed.commit()

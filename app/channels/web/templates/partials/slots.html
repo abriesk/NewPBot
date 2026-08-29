@@ -3,6 +3,9 @@
 {% if not days %}
   <p class="muted">{{ t.no_slots }}</p>
 {% else %}
+  {# §12.1: the waitlist is offered beside the picker, not only instead of it.
+     Times can all be wrong for someone without being absent, and there used to
+     be no way to say so. #}
   {% for day, slots in days %}
     <div class="day">
       <h3>{{ day }}</h3>
@@ -21,3 +24,6 @@
     </div>
   {% endfor %}
 {% endif %}
+<p class="muted waitlist-out">
+  <a href="/waitlist">{{ t.waitlist_from_picker }}</a>
+</p>

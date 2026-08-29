@@ -114,6 +114,10 @@ booking:
 
 waitlist:
   intro: "There are no free places at the moment. You can leave a request and I will get in touch when something opens up."
+  # Offered beside the picker rather than instead of it: times can all be wrong
+  # for someone without being absent.
+  from_picker: "None of these times suit me"
+  intro_by_choice: "Leave a request and I will get in touch when a time that suits you opens up."
   ask_problem: "Briefly, what would you like to work on?"
   ask_contact: "How can I reach you?"
   submitted: "Thank you. I have your request and will be in touch."

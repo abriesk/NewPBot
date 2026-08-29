@@ -625,11 +625,14 @@ through both channels as a client would. The rules are §20.2's: smallest first,
 each entry says what is actually wrong and what closing it takes, and an entry
 leaves this list when it is fixed rather than being marked done in it.
 
-Five are gone and are not below — a slot the therapist could not delete without
-a 500, a price field that answered a decimal point with one, a login link that
+Six are gone and are not below — a slot the therapist could not delete without a
+500, a price field that answered a decimal point with one, a login link that
 landed on the front page instead of the request it was sent about, a session
-type offered to clients as `booking.type.superme`, and the Telegram day heading
-a client kept tapping on a one-slot day.
+type offered to clients as `booking.type.superme`, the Telegram day heading a
+client kept tapping on a one-slot day, and the client who could see four times,
+could make none of them, and had nowhere to say so — the waitlist is now offered
+beside the picker on both channels rather than only instead of it, which §12.1
+and §13.1 now require.
 
 Two of those turned out to be more than they looked. The day heading was the
 wider half of what reads as one control, which `slot_keyboard` now solves by
@@ -669,21 +672,6 @@ value nothing reads. Decide whether price is client-facing before building
 anything else on it. If it is, the renderer is small and this is where the
 column-name trap above goes off. If it is not, the field is better removed from
 the form than explained in it, and §6.4 moves to say so.
-
-**A client who does not like the times on offer has nowhere to go.** The
-waitlist is reachable only when `resolve_booking_mode` sends the whole practice
-there — no slots at all, or availability switched off (§6). A client looking at
-four times that are all wrong for them has no way to say so: the picker offers
-times and the menu offers topics, and the only remaining move is to close the
-app. Everything needed already exists — `join_waitlist`, the `POST /waitlist`
-route, `waitlist.html`, the `waitlist_problem` and `waitlist_contact` steps on
-Telegram, and `client_decline_to_waitlist` as the pattern for entering it from
-somewhere that is not the top of the flow. What is missing is the entrance: a
-`GET /waitlist` page with a link to it from the slot list, and a row beneath the
-Telegram picker, which `slot_keyboard` already accepts through `extra`. Copy in
-three languages, and a test on each channel. §12.1 and §13.1 both gain a
-sentence saying the waitlist is offered beside the picker and not only instead
-of it.
 
 **A rejection has no room for a referral.** The therapist's answer to a request
 she cannot take is often not "no" but "not me, try her" — and the surface offers

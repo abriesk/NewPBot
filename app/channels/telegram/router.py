@@ -569,7 +569,23 @@ async def _show_slots(session: AsyncSession, client: Client) -> Reply:
 
     return Reply(
         await get_text(session, client.language, "booking.choose_slot", timezone=tz),
-        keyboard=kb.slot_keyboard(slots, tz, labels),
+        keyboard=kb.slot_keyboard(
+            slots,
+            tz,
+            labels,
+            # §13.1: the waitlist is offered beside the picker, not only
+            # instead of it. `resolve_booking_mode` sends a client here when
+            # times exist, and four times that are all wrong for them left no
+            # move but closing the app.
+            extra=[
+                [
+                    (
+                        await get_text(session, client.language, "waitlist.from_picker"),
+                        kb.WAITLIST,
+                    )
+                ]
+            ],
+        ),
     )
 
 
@@ -827,6 +843,18 @@ async def _callback(session: AsyncSession, client: Client, update: Update) -> Re
     if action == kb.SLOT:
         await flow.remember(session, client.id, Channel.telegram, slot_id=int(argument))
         return await _ask_session_type(session, client)
+
+    if action == kb.WAITLIST:
+        # The picker's way out. `replace={}` drops whatever was chosen on the
+        # way here: a waitlist entry has no slot and no session type, so
+        # carrying them forward would only leave them to be cleared later.
+        await flow.set_step(
+            session, client.id, Channel.telegram, Step.waitlist_problem, replace={}
+        )
+        return Reply(
+            await get_text(session, client.language, "waitlist.intro_by_choice"),
+            extra=[await get_text(session, client.language, "waitlist.ask_problem")],
+        )
 
     if action == kb.STYPE:
         await flow.remember(session, client.id, Channel.telegram, session_type_id=int(argument))

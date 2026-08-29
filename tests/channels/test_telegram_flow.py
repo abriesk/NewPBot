@@ -1111,3 +1111,60 @@ async def test_submit_without_a_session_type_asks_again_rather_than_crashing(
 
     assert reply is not None
     assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_session_type
+
+
+async def test_the_picker_offers_the_waitlist_beside_the_times(
+    db: AsyncSession, future_slot: Slot
+) -> None:
+    """§13.1: times can all be wrong for a client without being absent.
+
+    `resolve_booking_mode` only sends somebody to the waitlist when there is
+    nothing to choose from, so a client looking at four times that do not suit
+    them had no move left but closing the app.
+    """
+    from app.core.services.translations import get_text
+
+    await handle(db, Update(chat_id=CHAT, text="/start"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.LANG}:ru"))
+    consultation = await get_text(db, "ru", "menu.consultation")
+    await handle(db, Update(chat_id=CHAT, text=consultation))
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.TZ}:Europe/Moscow"))
+
+    assert reply is not None and reply.keyboard is not None
+    data = [b.callback_data for row in reply.keyboard.inline_keyboard for b in row]
+    assert kb.WAITLIST in data, "the way out is on the picker"
+    # The slot is still bookable: this is an addition, not a replacement.
+    assert f"{kb.SLOT}:{future_slot.id}" in data
+
+
+async def test_the_waitlist_button_reaches_a_waitlist_entry(
+    db: AsyncSession, future_slot: Slot
+) -> None:
+    from app.core.services.translations import get_text
+
+    await handle(db, Update(chat_id=CHAT, text="/start"))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.LANG}:ru"))
+    consultation = await get_text(db, "ru", "menu.consultation")
+    await handle(db, Update(chat_id=CHAT, text=consultation))
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.TZ}:Europe/Moscow"))
+
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=kb.WAITLIST))
+    client = await _client(db)
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.waitlist_problem
+
+    # Not "there are no free places" -- they are looking at some (§12.1).
+    assert reply is not None
+    assert reply.text == await get_text(db, "ru", "waitlist.intro_by_choice")
+    assert reply.text != await get_text(db, "ru", "waitlist.intro")
+
+    await handle(db, Update(chat_id=CHAT, text="evenings would suit me better"))
+    await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))
+
+    entry = (
+        await db.execute(select(WaitlistEntry).where(WaitlistEntry.client_id == client.id))
+    ).scalar_one()
+    assert entry.problem_text == "evenings would suit me better"
+
+    # The slot they walked past is untouched: they made no request.
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.available

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Psychobooking — Admin user guide</title>
 <!-- The commit this guide was last checked against. See the footer. -->
-<meta name="guide-revision" content="4bf1f4b">
+<meta name="guide-revision" content="f02c55a">
 <meta name="guide-revised" content="2026-08-29">
 <style>
   :root {
@@ -434,11 +434,12 @@
 
     <section class="card" id="waitlist">
       <h2>6. Waitlist</h2>
-      <p>People land here three ways:</p>
+      <p>People land here four ways:</p>
       <ul>
         <li>Accepting new bookings is off.</li>
         <li>Slot mode, no free slots, and fallback-to-negotiation off.</li>
         <li>They could not make a time you proposed and had no other way to say so — no free slots and free text off. Declining and joining the list is one move, and the entry carries what they wrote and their contact note, so it does not arrive anonymous.</li>
+        <li><strong>They saw your free times and none of them suited.</strong> Both the website and the bot now offer “None of these times suit me” under the picker. This is the one that arrives while you <em>do</em> have openings, so expect entries that are about the hours you offer rather than about having no room — worth reading as a hint about which times to add.</li>
       </ul>
       <table>
         <thead><tr><th>Action</th><th>Meaning</th></tr></thead>
@@ -719,10 +720,10 @@ docker compose up -d --build</code></pre>
     <footer>
       Shipped with the service. This page is served from your own installation at <code>/admin/help</code>, so it always matches the version you are running.
       <br><br>
-      <strong>Written against commit <code>4bf1f4b</code>, 2026-08-29.</strong>
+      <strong>Written against commit <code>f02c55a</code>, 2026-08-29.</strong>
       That is the last state of the service this guide was checked against. After
       updating the server, whoever ran the update can list what has changed since with
-      <code>git log 4bf1f4b..HEAD -- app/ locales/</code> — anything in that list a
+      <code>git log f02c55a..HEAD -- app/ locales/</code> — anything in that list a
       therapist would notice belongs in here, and the stamp moves with it.
     </footer>
   </main>

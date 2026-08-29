@@ -55,6 +55,13 @@ COUNTER_SLOT = "cslot"
 #: §12.1's way out where a counter may not be words.
 COUNTER_WAITLIST = "cwait"
 
+#: The same way out, offered under the booking picker. Its own action rather
+#: than `COUNTER_WAITLIST`: that one closes a request that already exists, while
+#: this one belongs to somebody who has not made one -- times can all be wrong
+#: for a client without being absent, and until this existed the only answer to
+#: that was to close the app.
+WAITLIST = "wait"
+
 #: §12.1's picker, the client's half of §13.2's. Same three screens, their own
 #: language, their own timezone, and never a word about the therapist's diary.
 COUNTER_MONTHS = "cm"

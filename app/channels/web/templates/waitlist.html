@@ -3,7 +3,10 @@
 <div class="page-head">
   <span class="eyebrow">{{ practice.name }}</span>
   <h1>{{ t.consultation }}</h1>
-  <p class="muted">{{ t.waitlist_intro }}</p>
+  {# Reached by choice from under the picker, or because there is nothing free
+     at all (§12.1). Telling somebody there are no times while they are looking
+     at a list of them is worse than saying nothing. #}
+  <p class="muted">{{ t.waitlist_intro_by_choice if by_choice else t.waitlist_intro }}</p>
 </div>
 <form method="post" action="/waitlist" class="card">
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

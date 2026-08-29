@@ -172,6 +172,11 @@ async def _labels(session: AsyncSession, lang: str) -> dict[str, str]:
         "submitted": "booking.submitted",
         "unavailable": "booking.unavailable",
         "waitlist_intro": "waitlist.intro",
+        # The same form reached by choice rather than because there is nothing
+        # free (§12.1), so it opens on a different sentence and offers itself
+        # from under the picker.
+        "waitlist_intro_by_choice": "waitlist.intro_by_choice",
+        "waitlist_from_picker": "waitlist.from_picker",
         "waitlist_problem": "waitlist.ask_problem",
         "waitlist_contact": "waitlist.ask_contact",
         "waitlist_submitted": "waitlist.submitted",
@@ -374,7 +379,9 @@ def build_router() -> APIRouter:
             resolved = resolve_booking_mode(practice, slots_exist=bool(slots))
 
             if resolved.path is BookingPath.waitlist:
-                return _render("waitlist.html", context)
+                # Not by choice: there is nothing to choose from, which is what
+                # `waitlist.intro` says.
+                return _render("waitlist.html", {**context, "by_choice": False})
 
             session_types = []
             for st in await _active_session_types(session):
@@ -700,6 +707,21 @@ def build_router() -> APIRouter:
             return response
 
     # --- Waitlist -----------------------------------------------------------
+
+    @router.get("/waitlist", response_class=HTMLResponse, include_in_schema=False)
+    async def waitlist_page(request: Request) -> Response:
+        """§12.1: the waitlist beside the picker, not only instead of it.
+
+        `/book` renders this same form when `resolve_booking_mode` sends the
+        whole practice to the waitlist -- no times at all, or availability off.
+        This is the other way in, for the client who can see four times and
+        cannot make any of them. Same form, different first sentence: telling
+        somebody there is nothing free while they are looking at a list of free
+        times is worse than saying nothing.
+        """
+        async with unit_of_work() as session:
+            context = await _context(session, request)
+            return _render("waitlist.html", {**context, "by_choice": True})
 
     @router.post("/waitlist", include_in_schema=False)
     async def join_waitlist(
