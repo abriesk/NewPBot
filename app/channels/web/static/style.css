@@ -3,6 +3,19 @@
    with a cold cache. Light and dark are both painted explicitly, so nothing is
    ever borrowed from the browser's default palette.
 
+   `admin/base.html` loads this file too and layers `admin.css` on top, so the
+   shared names -- `.card`, `.choice`, `.prose`, `.thread`, `.uuid`, and every
+   bare element rule -- are changed conservatively or not at all. Anything that
+   only the client renders (`.topics`, `.steps`, `.times`, `.day`, `.notice`,
+   `.page-head`, `.held`, `.status`, `.flow`) is free.
+
+   Two rules that would otherwise reach the console are scoped
+   `body:not(.admin)` on purpose: blocking a labelled field, and styling
+   `datetime-local`. `admin.css` lays some of its fields out in rows, and the
+   admin request page has three time fields sitting beside their labels
+   deliberately. Restyling the console is its own decision, not a side effect
+   of this one.
+
    Order: tokens, elements, frame, components, utilities. */
 
 /* --- Tokens ---------------------------------------------------------- */
@@ -10,24 +23,24 @@
 :root {
   color-scheme: light;
 
-  --bg: #faf8f4;
-  --bg-tint: #f3efe8;          /* section fills, code, inert chips */
+  --bg: #f7f3ec;               /* a shade deeper than the card, so cards lift */
+  --bg-tint: #efeae1;          /* section fills, code, inert chips */
   --surface: #ffffff;
   --ink: #201d19;
   --ink-soft: #4a433c;
   --muted: #6b635b;
-  --line: #e6e0d7;
-  --line-strong: #d5cbbe;
+  --line: #e4ded4;             /* hairline dividers only */
+  --line-strong: #cdc3b5;      /* every border a pointer can aim at */
   --accent: #3d6b5e;
   --accent-hover: #33594f;
   --accent-ink: #ffffff;
-  --accent-soft: #eaf2ee;      /* selected choice, held slot, own turn */
+  --accent-soft: #e7f0eb;      /* selected choice, held slot, own turn */
   --ring: #3d6b5e;
 
   --radius: 14px;
   --radius-sm: 10px;
   --radius-pill: 999px;
-  --wrap: 48rem;
+  --wrap: 50rem;
 
   --shadow-sm: 0 1px 2px rgb(32 29 25 / .05);
   --shadow-md: 0 6px 20px -8px rgb(32 29 25 / .18);
@@ -46,12 +59,12 @@
 
     --bg: #16140f;
     --bg-tint: #201d18;
-    --surface: #1d1a16;
+    --surface: #1f1c17;
     --ink: #ece7e0;
     --ink-soft: #cfc7bd;
     --muted: #a2988d;
     --line: #322d27;
-    --line-strong: #453e36;
+    --line-strong: #4f473e;
     --accent: #83b6a5;
     --accent-hover: #96c4b4;
     --accent-ink: #142019;
@@ -88,7 +101,7 @@ body {
 
 h1, h2, h3 { font-family: var(--serif); font-weight: 600; letter-spacing: -.01em; }
 h1 { font-size: clamp(1.75rem, 1.35rem + 1.7vw, 2.4rem); line-height: 1.15; margin: 0 0 .75rem; }
-h2 { font-size: 1.3rem; line-height: 1.3; margin: 2.5rem 0 .75rem; }
+h2 { font-size: 1.35rem; line-height: 1.3; margin: 2.5rem 0 .75rem; }
 h3 { font-size: 1.05rem; margin: 1.5rem 0 .5rem; }
 
 p { margin: 0 0 1rem; }
@@ -100,9 +113,6 @@ a:hover { color: var(--accent-hover); }
 .wrap { width: 100%; max-width: var(--wrap); margin-inline: auto; padding-inline: 1.25rem; }
 
 header {
-  /* Sticky only once there is height to spare: on a phone the topic links wrap
-     into a block tall enough to cost a quarter of the viewport. */
-  z-index: 10;
   background: color-mix(in srgb, var(--surface) 88%, transparent);
   backdrop-filter: saturate(1.4) blur(10px);
   border-bottom: 1px solid var(--line);
@@ -111,52 +121,66 @@ header .wrap {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: .6rem 1.25rem;
-  padding-block: .85rem;
+  gap: .5rem .9rem;
+  padding-block: .8rem;
 }
 
+/* The brand is also the `h1` on the home page and the footer line. It earns
+   one voice in the header, not the widest column in it -- so it truncates
+   rather than wrapping, which is what used to push the language switch onto a
+   row of its own and make a two-line header three lines high. */
 .brand {
   display: inline-flex;
   align-items: center;
   gap: .55rem;
+  min-width: 0;
+  max-width: 18rem;
   margin-right: auto;
   font-family: var(--serif);
   font-size: 1.05rem;
   font-weight: 600;
   color: var(--ink);
   text-decoration: none;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .brand::before {
   content: "";
   flex: none;
-  width: .6rem;
-  height: .6rem;
+  width: .55rem;
+  height: .55rem;
   border-radius: 50%;
   background: var(--accent);
 }
 
-/* Narrow screens get one scrolling row of links under the brand; the row never
-   wraps, so the header stays two lines high however long the topic titles are. */
+/* Two rows at every width: identity and language above, navigation below. The
+   topics are content the therapist edits, so their number and length are not
+   knowable here -- a one-row header that fits four of them is a header that
+   breaks at seven. The row never wraps; on a narrow screen it scrolls, with a
+   fading right edge to say so, because a cut-off word is otherwise the only
+   clue and reads as a rendering fault. */
 header nav {
   display: flex;
   align-items: center;
-  gap: 1.1rem;
+  gap: 1rem;
   order: 3;
   width: 100%;
-  margin-top: .1rem;
-  padding-top: .2rem;
+  padding-top: .3rem;
   border-top: 1px solid var(--line);
   overflow-x: auto;
   scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(to right, #000 88%, transparent);
+          mask-image: linear-gradient(to right, #000 88%, transparent);
 }
 header nav::-webkit-scrollbar { display: none; }
 header nav a {
   flex: none;
-  padding-block: .35rem;
+  padding-block: .3rem;
   border-bottom: 2px solid transparent;
   color: var(--muted);
   text-decoration: none;
-  font-size: .95rem;
+  font-size: .92rem;
   white-space: nowrap;
 }
 header nav a:hover { color: var(--ink); border-bottom-color: var(--line-strong); }
@@ -165,49 +189,47 @@ header nav a.cta {
   /* First in the scrolling row, so the booking link is never the thing that
      has been scrolled out of sight. */
   order: -1;
-  min-height: 2.1rem;
-  padding: .35rem .85rem;
+  min-height: 2rem;
+  padding: .3rem .8rem;
   border-bottom: 0;
-  font-size: .9rem;
+  font-size: .88rem;
 }
 
-@media (min-width: 46rem) {
-  header { position: sticky; top: 0; }
+@media (min-width: 58rem) {
+  header { position: sticky; top: 0; z-index: 10; }
   header nav {
-    order: 0;
-    width: auto;
-    margin: 0 auto 0 1rem;
-    padding-top: 0;
-    border-top: 0;
     overflow: visible;
+    -webkit-mask-image: none;
+            mask-image: none;
   }
-  header nav a.cta { order: 0; margin-left: .5rem; }
-  .brand { margin-right: 0; }
 }
 
-/* Language switch: one joined pill, the current language inert. */
+/* Language switch: one joined pill. The current language is inert, and marked
+   by weight and a tinted fill rather than the accent -- a filled accent button
+   beside the booking link made two primary actions out of one. */
 .lang {
   display: flex;
-  border: 1px solid var(--line);
+  flex: none;
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-pill);
   overflow: hidden;
 }
 .lang button {
   min-height: 0;
-  padding: .32rem .75rem;
+  padding: .28rem .7rem;
   background: none;
   border: 0;
   border-radius: 0;
   color: var(--muted);
   font: inherit;
-  font-size: .82rem;
+  font-size: .8rem;
   cursor: pointer;
 }
-.lang button + button { border-left: 1px solid var(--line); }
+.lang button + button { border-left: 1px solid var(--line-strong); }
 .lang button:hover:not(:disabled) { background: var(--bg-tint); color: var(--ink); box-shadow: none; }
-.lang button:disabled { background: var(--accent); color: var(--accent-ink); cursor: default; }
+.lang button:disabled { background: var(--accent-soft); color: var(--accent); font-weight: 600; cursor: default; }
 
-main { flex: 1; padding-block: 2.5rem 4rem; }
+main { flex: 1; padding-block: 2.75rem 4.5rem; }
 
 footer {
   border-top: 1px solid var(--line);
@@ -220,16 +242,17 @@ footer p { margin: 0; }
 
 /* --- Page head ------------------------------------------------------- */
 
-.page-head { margin-bottom: 2rem; }
+.page-head { margin-bottom: 2.25rem; }
 .page-head > :last-child { margin-bottom: 0; }
+.page-head .prose { margin-top: 1rem; }
 
 .eyebrow {
   display: block;
-  margin-bottom: .5rem;
+  margin-bottom: .45rem;
   color: var(--muted);
   font-family: var(--sans);
-  font-size: .78rem;
-  letter-spacing: .09em;
+  font-size: .74rem;
+  letter-spacing: .1em;
   text-transform: uppercase;
 }
 
@@ -261,12 +284,20 @@ footer p { margin: 0; }
 }
 .prose pre code { padding: 0; background: none; }
 
+/* First paragraph after an `h1` is the standfirst, not body copy. Client
+   surface only: the admin has no such page. */
+body:not(.admin) .page-head .prose > p:first-child {
+  color: var(--ink);
+  font-size: 1.1rem;
+  line-height: 1.6;
+}
+
 /* --- Cards and notices ----------------------------------------------- */
 
 .card {
   margin: 1.5rem 0;
   padding: 1.5rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius);
   background: var(--surface);
   box-shadow: var(--shadow-sm);
@@ -277,29 +308,57 @@ footer p { margin: 0; }
 .notice {
   max-width: 34rem;
   margin-inline: auto;
-  padding: 2.25rem 1.75rem;
+  padding: 2.5rem 1.75rem;
   text-align: center;
+  box-shadow: var(--shadow-md);
 }
 .notice h1 { margin-bottom: .75rem; }
+.notice p { color: var(--ink-soft); }
 .notice .stack-actions { justify-content: center; }
+.notice .uuid { margin-top: 1.25rem; }
+
+/* --- Flow progress ---------------------------------------------------- */
+
+/* The three pages of §12.1 are one act, and until now each looked like a
+   separate errand. Three dots and a caption, no numbers to translate: the
+   caption is the step's own heading, which every page already has. */
+.flow {
+  display: flex;
+  align-items: center;
+  gap: .4rem;
+  margin: 0 0 1.25rem;
+  padding: 0;
+  list-style: none;
+}
+.flow li {
+  flex: 1;
+  height: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--line);
+}
+/* A notice page is a narrow column; the strip above it lines up with it. */
+.flow:has(+ .notice) { max-width: 34rem; margin-inline: auto; }
+.flow li.done { background: color-mix(in srgb, var(--accent) 45%, transparent); }
+.flow li[aria-current] { background: var(--accent); }
 
 /* --- Topic list ------------------------------------------------------- */
 
-.topics { display: grid; gap: .6rem; margin: 0; padding: 0; list-style: none; }
+.topics { display: grid; gap: .5rem; margin: 0; padding: 0; list-style: none; }
 .topics a {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 1rem 1.15rem;
-  border: 1px solid var(--line);
+  padding: .95rem 1.1rem;
+  border: 1px solid var(--line-strong);
+  border-left: 3px solid transparent;
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--ink);
   text-decoration: none;
   font-family: var(--serif);
   font-size: 1.05rem;
-  transition: border-color .15s ease, transform .15s ease, box-shadow .15s ease;
+  transition: border-color .15s ease, box-shadow .15s ease;
 }
 .topics a::after {
   content: "→";
@@ -308,9 +367,8 @@ footer p { margin: 0; }
   transition: transform .15s ease;
 }
 .topics a:hover {
-  border-color: var(--line-strong);
+  border-left-color: var(--accent);
   box-shadow: var(--shadow-md);
-  transform: translateY(-1px);
 }
 .topics a:hover::after { transform: translateX(3px); }
 
@@ -318,8 +376,13 @@ footer p { margin: 0; }
 
 label { display: block; margin: 0 0 1.1rem; color: var(--ink-soft); font-size: .95rem; }
 label > :where(input, textarea, select) { margin-top: .4rem; }
+/* A capped field is narrow enough to fit beside its own question, which is
+   where it then sat -- three fields, three different left edges. Block, so
+   every answer starts under its question and the column has one edge. Client
+   only: `admin.css` lays some of its fields out in rows on purpose. */
+body:not(.admin) label > :where(input, textarea, select) { display: block; }
 
-input[type=text], input[type=email], textarea, select {
+input[type=text], input[type=email], input[type=tel], textarea, select {
   width: 100%;
   padding: .7rem .85rem;
   border: 1px solid var(--line-strong);
@@ -329,14 +392,15 @@ input[type=text], input[type=email], textarea, select {
   font: inherit;
   transition: border-color .15s ease, box-shadow .15s ease;
 }
-input[type=text]:focus, input[type=email]:focus, textarea:focus, select:focus {
+input[type=text]:focus, input[type=email]:focus, input[type=tel]:focus,
+textarea:focus, select:focus {
   border-color: var(--accent);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
   outline: none;
 }
 /* A 700px-wide box for an email address reads as a mistake; prose fields keep
    the full column width. */
-label > input[type=text], label > input[type=email] { max-width: 26rem; }
+label > input[type=text], label > input[type=email], label > input[type=tel] { max-width: 26rem; }
 textarea { min-height: 6rem; resize: vertical; }
 select {
   appearance: none;
@@ -349,34 +413,66 @@ select {
 }
 ::placeholder { color: var(--muted); opacity: 1; }
 
-/* The booking form's steps: numbered, hairline-separated, no nested boxes. */
+/* The counter-offer's time field was a raw browser control standing beside
+   styled ones, because `datetime-local` was in none of the selectors above.
+   Client surface only: the admin request page has three of these, one of them
+   deliberately inline with its label, and restyling the console is its own
+   decision rather than a side effect of this one. Narrow enough to sit beside
+   its own label text, which is not where a field belongs -- so block, like
+   every other answer on these forms. */
+body:not(.admin) input[type=datetime-local] {
+  width: 100%;
+  padding: .7rem .85rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--bg);
+  color: var(--ink);
+  font: inherit;
+  transition: border-color .15s ease, box-shadow .15s ease;
+}
+body:not(.admin) input[type=datetime-local]:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+  outline: none;
+}
+body:not(.admin) label > input[type=datetime-local] { display: block; max-width: 16rem; }
+
+/* The booking form's steps: numbered, hairline-separated, no nested boxes.
+   The legend outranks the choices under it -- it used to be the smaller of the
+   two, which put the question below its own answers in the hierarchy. */
 .steps { counter-reset: step; }
-.steps fieldset { margin: 0 0 2rem; padding: 0; border: 0; }
+.steps fieldset { margin: 0 0 2.25rem; padding: 0; border: 0; }
 .steps fieldset:last-of-type { margin-bottom: 0; }
-.steps fieldset + fieldset { padding-top: 1.75rem; border-top: 1px solid var(--line); }
+/* No border on the fieldset. A `legend` notches its own parent's top border
+   and sits centred on it, which made the gap under step 1 and the gap under
+   step 2 different sizes for no reason a reader could see. The rule is the
+   legend's instead -- the same shape the day headings in the picker use. */
+.steps fieldset + fieldset { padding-top: 2rem; }
 .steps legend {
   counter-increment: step;
   display: flex;
   align-items: center;
-  gap: .6rem;
-  margin-bottom: .9rem;
+  gap: .65rem;
+  margin-bottom: 1rem;
   padding: 0;
+  width: 100%;
   color: var(--ink);
   font-family: var(--serif);
-  font-size: 1.05rem;
+  font-size: 1.2rem;
 }
+.steps legend::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 .steps legend::before {
   content: counter(step);
   display: grid;
   place-items: center;
   flex: none;
-  width: 1.6rem;
-  height: 1.6rem;
+  width: 1.75rem;
+  height: 1.75rem;
   border-radius: 50%;
-  background: var(--accent-soft);
-  color: var(--accent);
+  background: var(--accent);
+  color: var(--accent-ink);
   font-family: var(--sans);
-  font-size: .8rem;
+  font-size: .82rem;
   font-weight: 600;
 }
 
@@ -386,8 +482,8 @@ label.choice {
   align-items: center;
   gap: .65rem;
   margin: 0 0 .5rem;
-  padding: .75rem .9rem;
-  border: 1px solid var(--line);
+  padding: .8rem .95rem;
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--ink);
@@ -407,8 +503,12 @@ label.choice small {
   cursor: default;
 }
 
-label.choice:hover { border-color: var(--line-strong); }
-label.choice:has(input:checked) { border-color: var(--accent); background: var(--accent-soft); }
+label.choice:hover { border-color: var(--accent); }
+label.choice:has(input:checked) {
+  border-color: var(--accent);
+  box-shadow: inset 0 0 0 1px var(--accent);
+  background: var(--accent-soft);
+}
 label.choice:has(input:focus-visible) { outline: 2px solid var(--ring); outline-offset: 2px; }
 input[type=radio], input[type=checkbox] { flex: none; width: 1.05rem; height: 1.05rem; accent-color: var(--accent); }
 
@@ -435,12 +535,20 @@ button, .cta {
 button:hover, .cta:hover { background: var(--accent-hover); color: var(--accent-ink); box-shadow: var(--shadow-md); }
 button:active, .cta:active { transform: translateY(1px); box-shadow: none; }
 
-button.secondary {
+/* `.switch-modality` is the labelled control §12.1 requires when nothing is
+   free this way and something is free the other. It had no rule at all, so it
+   fell through to the primary above and was the loudest thing on a page whose
+   whole message is that there is nothing here. */
+button.secondary, button.switch-modality {
   background: var(--surface);
   border-color: var(--line-strong);
   color: var(--ink);
 }
-button.secondary:hover { background: var(--bg-tint); color: var(--ink); }
+button.secondary:hover, button.switch-modality:hover {
+  background: var(--bg-tint);
+  border-color: var(--accent);
+  color: var(--ink);
+}
 
 .link-back {
   display: inline-block;
@@ -454,31 +562,40 @@ button.secondary:hover { background: var(--bg-tint); color: var(--ink); }
 
 /* --- Slot picker ------------------------------------------------------ */
 
-.day + .day { margin-top: 1.25rem; }
+.day + .day { margin-top: 1.5rem; }
 .day h3 {
   display: flex;
   align-items: center;
   gap: .75rem;
-  margin: 0 0 .6rem;
+  margin: 0 0 .7rem;
   color: var(--muted);
   font-family: var(--sans);
-  font-size: .85rem;
+  font-size: .82rem;
   font-weight: 600;
-  letter-spacing: .04em;
+  letter-spacing: .05em;
   text-transform: uppercase;
 }
 .day h3::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 
-.times { display: flex; flex-wrap: wrap; gap: .5rem; }
+/* A grid, not a wrapped row. Times are the one thing on the site somebody
+   scans rather than reads, and equal columns let the eye go down a day as
+   well as across it; a flex wrap left every row a different ragged length. */
+.times {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr));
+  gap: .5rem;
+}
 .times form { display: contents; margin: 0; }
 .times button {
-  min-height: 2.4rem;
-  padding: .45rem .95rem;
+  width: 100%;
+  min-height: 2.75rem;
+  padding: .45rem .5rem;
   border-color: var(--line-strong);
-  border-radius: var(--radius-pill);
+  border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--ink);
   font-variant-numeric: tabular-nums;
+  font-weight: 500;
 }
 .times button:hover {
   border-color: var(--accent);
@@ -486,20 +603,44 @@ button.secondary:hover { background: var(--bg-tint); color: var(--ink); }
   color: var(--accent);
   box-shadow: none;
 }
+@media (min-width: 34rem) {
+  .times { grid-template-columns: repeat(auto-fill, minmax(6rem, 1fr)); }
+}
 
-/* A held slot is a countdown, so the notice on step 3 is loud. */
+/* The waitlist is offered beside the picker, not only instead of it (§12.1) --
+   so it needs a rule above it, or it reads as the last time in the last day. */
+.waitlist-out {
+  margin: 1.5rem 0 0;
+  padding-top: 1rem;
+  border-top: 1px solid var(--line);
+}
+
+/* A held slot is a countdown, so the notice on step 3 is loud. The instant it
+   is holding is the largest thing in it: that is the fact a client is being
+   asked to hurry about. */
 .held {
   display: flex;
-  align-items: center;
-  gap: .6rem;
-  padding: .85rem 1.1rem;
-  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: .25rem .6rem;
+  margin: 0 0 1.5rem;
+  padding: 1rem 1.15rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-left: 3px solid var(--accent);
   border-radius: var(--radius-sm);
   background: var(--accent-soft);
   color: var(--accent);
   font-weight: 500;
 }
-.held::before { content: "✓"; font-size: 1.05rem; }
+.held::before { content: "✓"; font-size: 1.05rem; align-self: center; }
+.held strong {
+  flex: 1 0 100%;
+  margin-left: 1.65rem;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 1.15rem;
+  font-weight: 600;
+}
 
 /* --- Request page ----------------------------------------------------- */
 
@@ -521,8 +662,11 @@ button.secondary:hover { background: var(--bg-tint); color: var(--ink); }
   border-radius: 50%;
   background: currentColor;
 }
-.meta { display: grid; gap: .35rem; margin-top: 1rem; color: var(--ink-soft); }
+.meta { display: grid; gap: .4rem; margin-top: 1.1rem; color: var(--ink-soft); }
 .meta p { margin: 0; }
+/* The appointment is the reason the page exists, not a row in a property
+   list. */
+.meta .when { font-size: 1.1rem; color: var(--ink); }
 .uuid code {
   padding: .15rem .45rem;
   border-radius: 5px;
@@ -543,7 +687,7 @@ button.secondary:hover { background: var(--bg-tint); color: var(--ink); }
   position: relative;
   margin: 0 0 .75rem;
   padding: .85rem 1.1rem;
-  border: 1px solid var(--line);
+  border: 1px solid var(--line-strong);
   border-radius: var(--radius-sm);
   background: var(--surface);
 }
@@ -558,7 +702,7 @@ button.secondary:hover { background: var(--bg-tint); color: var(--ink); }
   background: var(--line-strong);
 }
 .thread li.client {
-  border-color: color-mix(in srgb, var(--accent) 25%, transparent);
+  border-color: color-mix(in srgb, var(--accent) 30%, transparent);
   background: var(--accent-soft);
 }
 .thread li.client::before { background: var(--accent); }
@@ -566,10 +710,26 @@ button.secondary:hover { background: var(--bg-tint); color: var(--ink); }
 .thread time { margin-left: .5rem; color: var(--muted); font-size: .85rem; }
 .thread p { margin: .35rem 0 0; color: var(--ink-soft); }
 
-.actions { display: flex; flex-wrap: wrap; gap: .75rem; align-items: flex-start; margin-top: 1.5rem; }
+.actions { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin-top: 1.5rem; }
 .actions form { display: flex; gap: .5rem; margin: 0; }
-.actions form:has(input[type=text]) { flex: 1 1 20rem; }
-.actions input[type=text] { margin: 0; }
+
+/* The counter-proposal card. Named for what it is: it used to carry `counter`,
+   which is also the character-count utility below -- so the whole card
+   inherited `text-align: right` and `font-size: .85rem`, and every heading,
+   day and button in it was shunted to the right margin at four fifths size. */
+.counter-offer > h2:first-child { margin-top: 0; }
+.counter-offer .day:first-of-type { margin-top: 1.25rem; }
+
+/* The picker for a time of the client's own, and the waitlist that stands in
+   for it where §12.1 closes the words off. Either way it is a second offer
+   under the slot grid, and had no rule separating it from one. */
+.other-time {
+  margin-top: 1.75rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--line);
+}
+.other-time h3 { margin-top: 0; }
+.other-time label { max-width: 26rem; }
 
 /* --- Utilities -------------------------------------------------------- */
 
@@ -590,6 +750,7 @@ button.secondary:hover { background: var(--bg-tint); color: var(--ink); }
   padding: .75rem .9rem;
   border-radius: var(--radius-sm);
   border: 1px solid var(--line-strong);
+  border-left: 3px solid var(--accent);
   background: var(--surface);
   color: var(--ink);
 }
