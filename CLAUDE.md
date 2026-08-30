@@ -61,9 +61,11 @@ shared a name with the counter-offer card, which it had been drawing at the
 right margin at four fifths size. Beyond the defects: the practice name is no
 longer printed three times a page, the booking's three pages show as one act,
 and the hold notice names the instant it is holding. The console gained a
-**theme control** in its header (`IMPLEMENTATION.md` §12.2, DESIGN.md §15) —
-three states, stored in the browser under the admin guide's own key, and
-deliberately *not* a database setting. Clients stay on `prefers-color-scheme`.
+**theme control** on `/admin/settings` (`IMPLEMENTATION.md` §12.2, DESIGN.md
+§15) — three states, stored in the browser under the admin guide's own key. It
+is the one control on that page that is not a database setting, which is why it
+sits outside the form and says so in as many words. Clients stay on
+`prefers-color-scheme`.
 Two rules are scoped `body:not(.admin)` on purpose; `admin.css` has **no header
 rules at all**, so every bare `header nav` rule in `style.css` reaches the
 console.

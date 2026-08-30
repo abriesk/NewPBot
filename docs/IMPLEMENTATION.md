@@ -924,16 +924,17 @@ Uploads **MUST** be capped (5 MB) and rejected above it before parsing.
 - `ok` | `warn` | `fail` render as green, amber and red. The colour names appear only in the template, never in the data or the domain (§16.8).
 - The page **MUST** name what to do: carry on, or call whoever runs the server — and it links to the guide's troubleshooting section (§12.2's `/admin/help`) rather than restating it.
 
-`admin/base.html` also carries a **theme control** beside the dot, and it is deliberately the smallest thing that could work: no route, no column, no request.
+`/admin/settings` carries a **theme control** under a `Console` heading, and it is deliberately the smallest thing that could work: no route, no column, no request.
 
 - **Three states — system, light, dark.** Two cannot express "follow the system": a toggle leaves the default on first use and can never return to it.
+- It **MUST NOT** sit inside the settings form. It posts nowhere and `Save` has nothing to do with it; a field that the Save button appears to own and does not is worse than one in a card of its own. It is a separate `<section class="card">` after the form, and it says that it saves the moment it is picked.
+- It **MUST** say that it is remembered in **this browser only**. Every other control on that page is a database setting that follows the therapist between devices; the one that cannot is misleading unless it says so, and that sentence is what makes the placement honest (DESIGN.md §15).
 - The choice is written to `localStorage` under the **admin guide's own key**, `admin-guide-theme`. `/admin/help` has carried a theme toggle since it was written; a second key would mean setting dark in the console and opening the manual light. Absent means follow the system, which is what both surfaces do when nothing is stored. Neither may change the key without the other.
-- It is applied by a script in the `<head>` that is **not** deferred. An attribute set after first paint is a flash of the wrong palette on every load.
-- The control is rendered `hidden` and revealed by script, so a console with no JavaScript does not carry a dead one. `/admin/login` runs the applying script and offers no control: there is nothing to configure before signing in, and signing out must not flash back to the wrong palette.
+- It is applied by a script in the `<head>` of `admin/base.html` that is **not** deferred. An attribute set after first paint is a flash of the wrong palette on every load. That script runs on **every** admin page — the choice applies everywhere while the control itself is in one place.
+- The control is rendered `hidden` and revealed by script, so a console with no JavaScript carries neither a dead control nor the paragraph explaining one. `/admin/login` runs the applying script and offers no control: there is nothing to configure before signing in, and signing out must not flash back to the wrong palette.
 - `style.css` therefore paints dark **twice** — once under `@media (prefers-color-scheme: dark)` guarded as `:root:not([data-theme="light"])`, once under `:root[data-theme="dark"]` — because an explicit choice has to win in both directions and §2 leaves no build step to share the block. The two copies are kept in step by hand. `admin.css` does the same for its one dark rule.
 - The **client surface MUST be left on `prefers-color-scheme`**. Nothing there sets `data-theme`, and no stored practice-wide theme is offered: clients are strangers on every kind of device, and a stored override would force somebody's phone the wrong way.
-- The choice is **per browser**, which is what it is worth — one person on one or two devices. It is not on `/admin/settings`, which is the page of database settings: a control there that silently did not follow her to her phone would be the only one that didn't.
-- Adds **no** locale key. The console is English (§15), like `Sign out` beside it.
+- Adds **no** locale key. The console is English (§15), like `Sign out` in the header.
 
 `/admin/help` serves the admin guide from `app/channels/web/guides/admin-guide.<lang>.html`, session-authenticated like every other admin route. The guides are complete standalone documents — their own navigation, search, theme toggle, and print stylesheet — so they are returned as they are rather than rendered through `admin/base.html`.
 
