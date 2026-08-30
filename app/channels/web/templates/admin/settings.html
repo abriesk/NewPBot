@@ -94,4 +94,25 @@
 
   <button type="submit">Save</button>
 </form>
+
+{# The one thing on this page that is not a database setting, and therefore not
+   inside the form above: it posts to no route, and Save has nothing to do with
+   it. The script in `admin/base.html` writes it to this browser's storage the
+   moment it changes, which is why the wording below has to say so -- every
+   other control here follows her to her phone and this one cannot (§12.2). #}
+<section class="card" id="theme-panel" hidden>
+  <h2>Console</h2>
+  <label>Theme
+    <select class="theme" id="theme" aria-label="Theme">
+      <option value="system">System</option>
+      <option value="light">Light</option>
+      <option value="dark">Dark</option>
+    </select>
+  </label>
+  <p class="muted">Saved as soon as you pick it — there is no Save for this one.
+     <strong>Remembered in this browser only:</strong> it will not follow you to
+     your phone, and it changes nothing your clients see. <em>System</em> means
+     whatever this device is set to. The guide at
+     <a href="/admin/help">Help</a> uses the same choice.</p>
+</section>
 {% endblock %}

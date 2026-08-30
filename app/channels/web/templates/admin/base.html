@@ -47,16 +47,6 @@ try {
       <span class="dot dot-{{ health.state.value }}" aria-hidden="true"></span>
       <span class="sr-only">{{ t.nav_status }}: {{ health.state.value }}</span>
     </a>
-    {# Three states, not a toggle: two can leave "follow the system" and never
-       return to it. English like the rest of the console (§15), so it adds no
-       locale key -- the same treatment as `Sign out` below. Rendered hidden and
-       revealed by the script at the end of the page, so a console with no
-       script does not carry a dead control. #}
-    <select class="theme" id="theme" aria-label="Theme" hidden>
-      <option value="system">Theme: system</option>
-      <option value="light">Theme: light</option>
-      <option value="dark">Theme: dark</option>
-    </select>
   </nav>
   <form method="post" action="/admin/logout" class="lang">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -70,9 +60,13 @@ try {
 </main>
 
 <script>
-// The theme control. Nothing here reaches the server: the choice is this
-// browser's, which is what it is worth -- one person on one or two devices, and
-// no column, no migration and no route to keep in step with it.
+// The theme control, which lives on /admin/settings. This runs on every admin
+// page and finds nothing on all but one of them, because the script that
+// *applies* the choice is in the head above and has to run everywhere -- only
+// the control is in one place.
+//
+// Nothing here reaches the server: the choice is this browser's, which is what
+// it is worth. No column, no migration and no route to keep in step with it.
 (function () {
   var select = document.getElementById('theme');
   if (!select) { return; }
@@ -84,7 +78,11 @@ try {
   };
 
   select.value = stored();
-  select.hidden = false;
+
+  // Revealed only now, so a console with no script does not show a dead
+  // control -- nor the paragraph explaining one that isn't there.
+  var panel = document.getElementById('theme-panel');
+  if (panel) { panel.hidden = false; }
 
   select.addEventListener('change', function () {
     var choice = select.value;

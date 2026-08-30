@@ -2145,11 +2145,45 @@ def test_the_console_carries_a_three_state_theme_control(web: TestClient) -> Non
     default and never return to it.
     """
     _sign_in(web)
-    page = web.get("/admin/requests").text
+    page = web.get("/admin/settings").text
 
     assert 'id="theme"' in page
     for value in ('value="system"', 'value="light"', 'value="dark"'):
         assert value in page, f"the theme control offers no {value}"
+
+
+def test_the_theme_control_is_on_settings_and_nowhere_else(web: TestClient) -> None:
+    """It is a setting, so it lives on the settings page rather than in the
+    frame of every page. The script that *applies* the choice still runs
+    everywhere -- only the control is in one place.
+    """
+    _sign_in(web)
+
+    for path in ("/admin/requests", "/admin/slots", "/admin/clients"):
+        page = web.get(path).text
+        assert 'id="theme"' not in page, f"{path} carries the control"
+        assert "localStorage.getItem('admin-guide-theme')" in page, path
+
+
+def test_the_theme_control_is_not_posted_with_the_settings_form(web: TestClient) -> None:
+    """It writes to this browser and to no route. Inside the form it would be
+    a field that Save appears to own and does not.
+    """
+    _sign_in(web)
+    page = web.get("/admin/settings").text
+
+    form = page[page.index('action="/admin/settings"') : page.index("</form>")]
+    assert 'id="theme"' not in form
+
+
+def test_the_theme_control_says_it_will_not_follow_her(web: TestClient) -> None:
+    """Every other control on that page is a database setting that follows her
+    between devices. The one that cannot has to say so.
+    """
+    _sign_in(web)
+    page = web.get("/admin/settings").text
+
+    assert "this browser only" in page
 
 
 def test_the_theme_is_applied_before_the_page_is_painted(web: TestClient) -> None:
