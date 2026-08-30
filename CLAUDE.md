@@ -144,6 +144,24 @@ worker is the process that has to be restarted for it to be real.
 `pytest` does not have this problem — each `exec` is a fresh process — so a
 green suite is not evidence that either running process is current.
 
+**A stylesheet change does not arrive when the container has it.** The
+`cloudflared` profile puts Cloudflare in front, and the edge caches `/static/*`
+for four hours (`cache-control: max-age=14400`) while HTML comes back
+`cf-cache-status: DYNAMIC`. So a template change is live on the very next
+request and the stylesheet it needs is not — **new markup against old CSS**,
+which renders worse than either alone would: a flex list came back as a
+numbered one, and the header fell back to a layout the markup no longer
+matched. It looks like a broken change and is a stale asset.
+
+```bash
+curl -sS -D - -o /dev/null "$BASE_URL/static/style.css" | grep -i cf-cache-status
+```
+
+A `?v=<anything>` on the same URL always misses the cache, so fetching both and
+diffing them answers it in one step. Nothing versions the static URLs today —
+closing it properly is either a purge at the edge or a version query on the
+`<link>`, and neither is built.
+
 **Editing `locales/*.yaml` needs `docker compose restart web`.** The mount makes
 the files live, but seeding runs once at container start, so until you restart
 the `translation` rows still hold the old copy and the seed tests fail on a
