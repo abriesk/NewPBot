@@ -2,7 +2,6 @@
 {% block title %}{{ t.your_request }} — {{ practice.name }}{% endblock %}
 {% block content %}
 <div class="page-head">
-  <span class="eyebrow">{{ practice.name }}</span>
   <h1>{{ t.your_request }}</h1>
 </div>
 {# §12.2: the refusal has to be visible. Without it a rejected action looked
@@ -62,7 +61,7 @@
 {# §12.1: the slots first. One the practice is already holding open is the
    answer that needs no negotiation at all, and it saves a client guessing at a
    date format nobody told them about. #}
-<div class="card counter">
+<div class="card counter-offer">
   <h2>{{ t.counter }}</h2>
   {% if slot_days %}
     <p class="muted">{{ t.choose_slot }}</p>

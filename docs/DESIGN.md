@@ -380,6 +380,16 @@ Three things follow, each of which would otherwise be a quiet defect:
 - **Requests with no time yet are shown beside it, not on it.** A free-text request carries wording rather than an instant ("some evening next week?"), and there is no honest cell for it. Dropping it from the view would hide exactly the requests most in need of an answer, so they get their own list underneath.
 - **It is not calendar synchronisation.** §20 defers a subscribable feed of the therapist's whole schedule, and §1 puts external calendar sync out of scope. This is neither: nothing leaves the server, nothing is fetched, no external calendar is involved. It is a way of drawing rows the admin UI already reads.
 
+The console also carries a **theme control**, on `/admin/settings` under a Console heading. It is worth writing down why something this small has a paragraph, because the argument went one way and the decision went the other, and the reasoning is more useful than the outcome.
+
+Three different things get confused under one word. The console is read by one person on one or two devices, so her preference is hers and belongs in her browser. The client surface is read by strangers on every kind of device, where `prefers-color-scheme` is already the correct answer and a stored practice-wide override would force somebody's phone the wrong way — so clients are not offered this and nothing on their side writes the attribute. And the guide at `/admin/help` has had its own toggle since it was written, which is why the console writes the guide's key rather than a second one: two keys mean setting dark in the console and opening the manual light.
+
+*Where* it lives was the open question. The first version put it in the header beside the health dot, where the guide already keeps its own toggle and where a preference about how the page looks sits apart from settings about how the practice runs. The objection to `/admin/settings` was that every other control on that page is a database setting which follows her to her phone, and one that silently did not would be the only exception on it.
+
+It is on the settings page regardless, and the reason is simpler than the objection: that is where somebody goes to look for it. A person hunting for the theme opens Settings, not the frame. The exception is real, and the answer is to say it out loud rather than to hide the control somewhere it is more consistent and less findable — so it sits in its own card *outside* the settings form, saves the moment it is picked with no Save button of its own, and the wording under it says it is remembered in this browser only and will not follow her to her phone. An unexplained exception would have been the problem. A labelled one is a setting with a note on it.
+
+Three states rather than a toggle, for a reason that is easy to miss: two states can leave "follow the system" on first use and never return to it. The cost of all this is that dark is painted twice in the stylesheet — the media query and the explicit attribute cannot share a block without a build step, and §2 does not have one. That duplication is the whole price, and it is cheaper than a column.
+
 ---
 
 ## 16. Data protection
@@ -453,6 +463,7 @@ What would still be required to serve several therapists — and is therefore *n
 | Exceptions recorded as class and location | Message and traceback | An exception message can carry an email address or a fragment of problem text (§16) |
 | Staleness of the status file is the liveness check | A heartbeat column | Free, needs no migration, and catches a wedged worker as well as a dead one |
 | External uptime check for total failure | Alerting directly from the worker when the database is down | A direct send breaks the outbox rule and only ever runs on the worst day of the year |
+| The console's theme in `localStorage`, under the guide's key | A column on `practice` or on the admin row; a second key of its own | One person on one or two devices does not need a migration, a route and a form field to say she prefers dark; and a second key would mean setting dark in the console and opening the manual light |
 
 ---
 

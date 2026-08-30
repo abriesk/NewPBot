@@ -868,6 +868,74 @@ async def test_the_hold_notice_names_the_hold_window(
     assert "{minutes}" not in body
 
 
+async def test_the_hold_notice_names_the_instant_it_is_holding(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """§12.1: step 3 says which appointment it is holding, not merely that
+    something is held. It is the most anxious page in the flow and was the one
+    page in it that never named the time.
+    """
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+    starts_at = (
+        await committed.execute(select(Slot.starts_at).where(Slot.id == web_slot))
+    ).scalar_one()
+
+    web.get("/book")
+    web.post(
+        "/book/hold",
+        data={
+            "csrf_token": _csrf(web),
+            "slot_id": web_slot,
+            "session_type_id": session_type_id,
+            "modality": "online",
+            "tz": "Europe/Moscow",
+        },
+        follow_redirects=False,
+    )
+    body = web.get("/book/details").text
+    notice = re.search(r'<p class="held">(.*?)</p>', body, re.S)
+    assert notice is not None
+
+    # In the zone the client chose, like every other time on this surface --
+    # showing a Moscow client a Yerevan time with no label is how somebody
+    # misses a session by an hour (DESIGN.md §8).
+    local = starts_at.astimezone(ZoneInfo("Europe/Moscow"))
+    assert local.strftime("%Y-%m-%d %H:%M") in notice.group(1)
+    assert "Europe/Moscow" in notice.group(1)
+
+
+async def test_the_three_booking_pages_say_which_of_them_this_is(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """§12.1 is one act over three pages. The strip carries no text, so it adds
+    no locale key -- which is also why it is only assertable as markup.
+    """
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+
+    first = web.get("/book").text
+    assert first.count('<li aria-current="step">') == 1
+    assert first.count('<li class="done">') == 0
+
+    web.post(
+        "/book/hold",
+        data={
+            "csrf_token": _csrf(web),
+            "slot_id": web_slot,
+            "session_type_id": session_type_id,
+            "modality": "online",
+            "tz": "Europe/Moscow",
+        },
+        follow_redirects=False,
+    )
+    second = web.get("/book/details").text
+    assert second.count('<li aria-current="step">') == 1
+    assert second.count('<li class="done">') == 1
+
+
 async def test_the_free_text_fields_carry_the_cap_the_core_enforces(
     web: TestClient, web_slot: int, committed: AsyncSession
 ) -> None:
@@ -1281,6 +1349,9 @@ async def test_the_waitlist_page_still_submits(
         },
     )
     assert response.status_code == 200
+    # `done.html` answers a booking and a waitlist join with one template. A
+    # join is not the third page of §12.1's act and gets no progress strip.
+    assert 'class="flow"' not in response.text
 
     await committed.rollback()
     identity = (

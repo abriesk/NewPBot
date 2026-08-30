@@ -8,6 +8,22 @@
 <link rel="stylesheet" href="/static/style.css">
 <link rel="stylesheet" href="/static/admin.css">
 <script src="/static/htmx.min.js" defer></script>
+{# The console remembers a theme per browser (§12.2). Applied here, in the head
+   and without `defer`, because an attribute set after first paint is a flash of
+   the wrong palette on every page load.
+
+   The key is the admin guide's own. /admin/help has carried a theme toggle
+   since it was written, and a second key would mean setting dark in the console
+   and opening the manual light. No key stored means follow the system, which is
+   what both surfaces already did. #}
+<script>
+try {
+  var saved = localStorage.getItem('admin-guide-theme');
+  if (saved === 'dark' || saved === 'light') {
+    document.documentElement.dataset.theme = saved;
+  }
+} catch (e) { /* storage blocked: the system preference still applies */ }
+</script>
 </head>
 <body class="admin">
 <header>
@@ -42,5 +58,46 @@
   {% if flash %}<p class="flash">{{ flash }}</p>{% endif %}
   {% block content %}{% endblock %}
 </main>
+
+<script>
+// The theme control, which lives on /admin/settings. This runs on every admin
+// page and finds nothing on all but one of them, because the script that
+// *applies* the choice is in the head above and has to run everywhere -- only
+// the control is in one place.
+//
+// Nothing here reaches the server: the choice is this browser's, which is what
+// it is worth. No column, no migration and no route to keep in step with it.
+(function () {
+  var select = document.getElementById('theme');
+  if (!select) { return; }
+  var root = document.documentElement;
+
+  var stored = function () {
+    try { return localStorage.getItem('admin-guide-theme') || 'system'; }
+    catch (e) { return 'system'; }
+  };
+
+  select.value = stored();
+
+  // Revealed only now, so a console with no script does not show a dead
+  // control -- nor the paragraph explaining one that isn't there.
+  var panel = document.getElementById('theme-panel');
+  if (panel) { panel.hidden = false; }
+
+  select.addEventListener('change', function () {
+    var choice = select.value;
+    try {
+      if (choice === 'system') { localStorage.removeItem('admin-guide-theme'); }
+      else { localStorage.setItem('admin-guide-theme', choice); }
+    } catch (e) { /* the choice still applies to the page in front of her */ }
+
+    // `system` is the absence of a choice, so it removes the attribute rather
+    // than naming a third palette: the media query in `style.css` takes over
+    // again the moment nothing overrides it.
+    if (choice === 'system') { delete root.dataset.theme; }
+    else { root.dataset.theme = choice; }
+  });
+})();
+</script>
 </body>
 </html>
