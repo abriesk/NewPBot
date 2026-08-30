@@ -1,4 +1,22 @@
-"""Intent catalogue and message rendering (IMPLEMENTATION.md §9, §10, §13.4)."""
+"""Intent catalogue and message rendering (IMPLEMENTATION.md §9, §10, §13.4).
+
+The catalogue is the join between something happening and something a person
+reads, so the tests come in two halves. The first asserts the catalogue
+against §10 itself -- every intent has a spec, and every body, part, subject
+and action label it names exists in the English catalogue -- because a key
+missing here fails at delivery time, in the worker, for one recipient.
+
+The second half renders, and the risk there is per-channel divergence. The
+same intent must reach Telegram as HTML in the supported tag subset with
+callback data inside the 64-byte limit (measured in bytes, not characters),
+and reach email as a neutral subject with a tokenised link and no join
+information at all. The §13.5 attachment and the client-note path are here
+for the same reason: both are asserted once per channel.
+
+Routing -- which channel an intent goes to, and the §13.4 scrub that decides
+what may travel -- is tests/core/test_notifications.py. This file owns what
+the message looks like once routing has chosen it.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,16 @@
-"""Configuration loading (IMPLEMENTATION.md §4)."""
+"""Configuration loading (IMPLEMENTATION.md §4).
+
+Settings are validated as they load, so everything here is a boot-time
+failure rather than a runtime one -- which is the point. A service that
+starts with a two-character secret, or a UTC offset where an IANA name
+belongs, is worse than one that refuses to start.
+
+The defaults are asserted against §4 as literals, so changing one has to be
+a deliberate edit to a test. The rest are the constraints that only bite in
+deployment: SMTP_FROM required once SMTP_HOST is set, the base URL without
+its trailing slash, and the webhook path given an unguessable segment when
+unset and normalised to a leading slash when supplied.
+"""
 
 from __future__ import annotations
 

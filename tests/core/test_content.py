@@ -1,4 +1,17 @@
-"""Content blocks and revisions (IMPLEMENTATION.md §6.7, §10)."""
+"""Content blocks and revisions (IMPLEMENTATION.md §6.7, §10).
+
+What clients read and the therapist edits, with no deploy in between. The
+reading half is ordering and visibility: topics in sort order, blocks in
+position order, unpublished blocks hidden from clients, and a language the
+practice holds no copy for falling back to the default rather than rendering
+an empty page.
+
+The writing half is the safety net around a live editor. A body that fails
+validation is refused before it is written, never half-saved; every write
+stores the previous body first, so there is always something to roll back
+to; and the history is capped at twenty revisions per block, so a page she
+edits often cannot grow without bound.
+"""
 
 from __future__ import annotations
 

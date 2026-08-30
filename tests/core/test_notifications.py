@@ -1,4 +1,22 @@
-"""Notification routing and the email content restriction (§10, §13.3, §13.4)."""
+"""Notification routing and the email content restriction (§10, §13.3, §13.4).
+
+Hard rule 8 lives here. §13.4 forbids problem_text from reaching an email
+payload, and the scrub is asserted field by field -- including the cases
+where something adjacent is allowed to remain, such as an on-site location,
+so the rule cannot quietly be implemented as "drop everything".
+
+Hard rule 2 is the other half: rows are written in the same transaction as
+the domain change that caused them, and payloads carry identifiers rather
+than rendered text, leaving the wording to the worker.
+
+Between the two sits §13.3 routing -- Telegram preferred when a client has
+both channels, confirmations and reminders sent to both, an unverified
+address never a target, admin rows in English while client rows follow the
+client's own language -- and dedupe, which must refuse to republish an event
+that already has a row.
+
+What these rows look like once rendered is tests/channels/test_messages.py.
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,14 @@
-"""Health surface (IMPLEMENTATION.md §19, M0 acceptance)."""
+"""Health surface (IMPLEMENTATION.md §19, M0 acceptance).
+
+The liveness/readiness split, and nothing beyond it: /healthz answers without
+a database because it reports that the process is up, and /readyz answers 503
+without one because it reports that the process can do its work.
+
+The rest of the health story is elsewhere -- the thresholds in
+tests/core/test_status.py, the file the worker writes in
+tests/core/test_status_job.py, and the page the therapist reads in
+tests/e2e/test_health_page.py.
+"""
 
 from __future__ import annotations
 
