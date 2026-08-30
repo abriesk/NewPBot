@@ -6,7 +6,13 @@
   border-radius: var(--radius); padding: .6rem 1rem; color: var(--ink);
 }
 .error { color: #b3261e; }
-@media (prefers-color-scheme: dark) { .error { color: #f2b8b5; } }
+/* Painted twice, for the reason `style.css` gives where it does the same: the
+   console's theme control writes `data-theme`, and a deliberate choice has to
+   beat the system preference in both directions. */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .error { color: #f2b8b5; }
+}
+:root[data-theme="dark"] .error { color: #f2b8b5; }
 
 .filters { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
 .filters a {
@@ -96,6 +102,24 @@ a.health-dot.health-fail .dot { box-shadow: 0 0 0 3px color-mix(in srgb, current
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
+
+/* The theme control, beside the health dot. Small and quiet: it is a comfort
+   setting on a page opened to answer a request, not one of the console's
+   surfaces. Three states because two cannot express "follow the system" --
+   a toggle can leave, and never return to, the default. */
+select.theme {
+  width: auto;
+  min-height: 0;
+  margin-left: .35rem;
+  padding: .2rem 1.6rem .2rem .5rem;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background-color: transparent;
+  background-position: right .7rem center, right .45rem center;
+  color: var(--muted);
+  font-size: .8rem;
+}
+select.theme:hover { color: var(--ink); border-color: var(--line-strong); }
 
 .health-verdict { padding: .6rem .85rem; border-radius: var(--radius); border: 1px solid var(--line); }
 .health-verdict.health-ok   { border-color: #2e7d32; }

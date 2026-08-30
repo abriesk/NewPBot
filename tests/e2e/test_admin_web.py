@@ -2135,3 +2135,63 @@ async def test_a_language_left_empty_writes_no_row(
 
     await committed.execute(delete(AdminSession))
     await committed.commit()
+
+
+# --- The theme control (§12.2) ----------------------------------------------
+
+
+def test_the_console_carries_a_three_state_theme_control(web: TestClient) -> None:
+    """Two states cannot express "follow the system": a toggle can leave the
+    default and never return to it.
+    """
+    _sign_in(web)
+    page = web.get("/admin/requests").text
+
+    assert 'id="theme"' in page
+    for value in ('value="system"', 'value="light"', 'value="dark"'):
+        assert value in page, f"the theme control offers no {value}"
+
+
+def test_the_theme_is_applied_before_the_page_is_painted(web: TestClient) -> None:
+    """An attribute set after first paint is a flash of the wrong palette on
+    every load, so the script that reads the choice runs in the head and is not
+    deferred.
+    """
+    _sign_in(web)
+    page = web.get("/admin/requests").text
+
+    head = page[: page.index("</head>")]
+    assert "localStorage.getItem('admin-guide-theme')" in head
+    assert "dataset.theme" in head
+
+
+def test_the_console_and_the_guide_share_one_theme_key() -> None:
+    """Two keys would mean setting dark in the console and opening the manual
+    light. The guide's toggle predates this control and keeps its own key; this
+    is the test that notices if either one wanders off it.
+    """
+    from app.channels.web.help import HELP_LANGUAGES, help_guide
+
+    for lang in HELP_LANGUAGES:
+        assert "admin-guide-theme" in help_guide(lang), f"{lang} guide changed its key"
+
+
+def test_signing_in_honours_a_theme_already_chosen(web: TestClient) -> None:
+    """The sign-in page offers no control -- there is nothing to configure
+    before signing in -- but logging out must not flash back to the wrong
+    palette.
+    """
+    page = web.get("/admin/login").text
+
+    assert "localStorage.getItem('admin-guide-theme')" in page
+    assert 'id="theme"' not in page
+
+
+def test_the_client_surface_is_left_on_the_system_preference(web: TestClient) -> None:
+    """Clients are strangers on every kind of device. Nothing on their side
+    writes `data-theme`, so `prefers-color-scheme` still decides there.
+    """
+    page = web.get("/").text
+
+    assert "admin-guide-theme" not in page
+    assert "dataset.theme" not in page

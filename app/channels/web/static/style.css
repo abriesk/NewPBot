@@ -53,8 +53,18 @@
           "Helvetica Neue", sans-serif;
 }
 
+/* Dark is painted twice, on purpose. The console carries a three-state control
+   -- System, Light, Dark -- which writes `data-theme` on the root, and an
+   explicit choice has to win in both directions: the guard below keeps a system
+   preference for dark from overriding a deliberate Light, and the block after
+   it turns dark on where the system is light. With no build step (§2) the two
+   cannot share a body, so they are kept in step by hand. Nothing else in this
+   file reads either.
+
+   The client surface never sets the attribute -- nothing there offers the
+   control -- so a client stays on `prefers-color-scheme` exactly as before. */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
 
     --bg: #16140f;
@@ -74,6 +84,28 @@
     --shadow-sm: 0 1px 2px rgb(0 0 0 / .3);
     --shadow-md: 0 8px 24px -10px rgb(0 0 0 / .6);
   }
+}
+
+/* The second copy. Keep in step with the block above. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --bg: #16140f;
+  --bg-tint: #201d18;
+  --surface: #1f1c17;
+  --ink: #ece7e0;
+  --ink-soft: #cfc7bd;
+  --muted: #a2988d;
+  --line: #322d27;
+  --line-strong: #4f473e;
+  --accent: #83b6a5;
+  --accent-hover: #96c4b4;
+  --accent-ink: #142019;
+  --accent-soft: #1e2a25;
+  --ring: #83b6a5;
+
+  --shadow-sm: 0 1px 2px rgb(0 0 0 / .3);
+  --shadow-md: 0 8px 24px -10px rgb(0 0 0 / .6);
 }
 
 /* --- Elements -------------------------------------------------------- */
@@ -170,6 +202,13 @@ header nav {
   border-top: 1px solid var(--line);
   overflow-x: auto;
   scrollbar-width: none;
+}
+/* The fade is the client header's alone. `admin.css` has no header rules, so
+   every bare `header nav` rule here reaches the console too -- and the console
+   ends its row with the health dot, which is the one thing on that page nobody
+   should have to notice is there. Fading it out is the opposite of §12.2's
+   reason for putting it in the frame at all. */
+body:not(.admin) header nav {
   -webkit-mask-image: linear-gradient(to right, #000 88%, transparent);
           mask-image: linear-gradient(to right, #000 88%, transparent);
 }
@@ -197,8 +236,8 @@ header nav a.cta {
 
 @media (min-width: 58rem) {
   header { position: sticky; top: 0; z-index: 10; }
-  header nav {
-    overflow: visible;
+  header nav { overflow: visible; }
+  body:not(.admin) header nav {
     -webkit-mask-image: none;
             mask-image: none;
   }

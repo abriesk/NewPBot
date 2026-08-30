@@ -5,6 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>{{ t.login_title }}</title>
 <link rel="stylesheet" href="/static/style.css">
+{# The sign-in page is the console too. It offers no control -- there is
+   nothing to configure before signing in -- but it honours a choice already
+   made, so logging out is not a flash back to the wrong palette. #}
+<script>
+try {
+  var saved = localStorage.getItem('admin-guide-theme');
+  if (saved === 'dark' || saved === 'light') {
+    document.documentElement.dataset.theme = saved;
+  }
+} catch (e) { /* storage blocked: the system preference still applies */ }
+</script>
 </head>
 <body>
 <main>

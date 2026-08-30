@@ -380,6 +380,14 @@ Three things follow, each of which would otherwise be a quiet defect:
 - **Requests with no time yet are shown beside it, not on it.** A free-text request carries wording rather than an instant ("some evening next week?"), and there is no honest cell for it. Dropping it from the view would hide exactly the requests most in need of an answer, so they get their own list underneath.
 - **It is not calendar synchronisation.** §20 defers a subscribable feed of the therapist's whole schedule, and §1 puts external calendar sync out of scope. This is neither: nothing leaves the server, nothing is fetched, no external calendar is involved. It is a way of drawing rows the admin UI already reads.
 
+The console also carries a **theme control** in its header, beside the health dot. It is worth saying why something this small is written down at all: the obvious place to put it was `/admin/settings`, and that would have been wrong.
+
+Three different things get confused under one word. The console is read by one person on one or two devices, so her preference is hers and belongs in her browser. The client surface is read by strangers on every kind of device, where `prefers-color-scheme` is already the correct answer and a stored practice-wide override would force somebody's phone the wrong way — so clients are not offered this and nothing on their side writes the attribute. And the guide at `/admin/help` has had its own toggle since it was written, which is why the console writes the guide's key rather than a second one: two keys mean setting dark in the console and opening the manual light.
+
+Being in the browser is what keeps it off `/admin/settings`. Every other control on that page is a database setting that follows her to her phone; one that silently did not would be the only exception, and unexplained. The header is where the guide put its own toggle and where the health dot already lives, so it is the honest place for a preference about how the page looks rather than about how the practice runs.
+
+Three states rather than a toggle, for a reason that is easy to miss: two states can leave "follow the system" on first use and never return to it. The cost of all this is that dark is painted twice in the stylesheet — the media query and the explicit attribute cannot share a block without a build step, and §2 does not have one. That duplication is the whole price, and it is cheaper than a column.
+
 ---
 
 ## 16. Data protection
@@ -453,6 +461,7 @@ What would still be required to serve several therapists — and is therefore *n
 | Exceptions recorded as class and location | Message and traceback | An exception message can carry an email address or a fragment of problem text (§16) |
 | Staleness of the status file is the liveness check | A heartbeat column | Free, needs no migration, and catches a wedged worker as well as a dead one |
 | External uptime check for total failure | Alerting directly from the worker when the database is down | A direct send breaks the outbox rule and only ever runs on the worst day of the year |
+| The console's theme in `localStorage`, under the guide's key | A column on `practice` or on the admin row; a second key of its own | One person on one or two devices does not need a migration, a route and a form field to say she prefers dark; and a second key would mean setting dark in the console and opening the manual light |
 
 ---
 
