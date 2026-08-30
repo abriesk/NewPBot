@@ -1,7 +1,12 @@
 {% extends "base.html" %}
 {% block content %}
+{# §12.1 is one act spread over three pages, and each of them looked like a
+   separate errand. Three segments and no numerals: nothing here needs
+   translating, and the caption is the page's own heading, which it already
+   has. Not to be read against the numbered legends below -- those count the
+   questions on this page, this counts the pages. #}
+<ol class="flow"><li aria-current="step"></li><li></li><li></li></ol>
 <div class="page-head">
-  <span class="eyebrow">{{ practice.name }}</span>
   <h1>{{ t.consultation }}</h1>
 </div>
 
