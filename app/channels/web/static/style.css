@@ -574,9 +574,14 @@ button.secondary:hover { background: var(--bg-tint); color: var(--ink); }
 /* --- Utilities -------------------------------------------------------- */
 
 /* Only ever visible in the last tenth of a capped field (§17). Right-aligned
-   under its input so it reads as a property of that field, not a new one. */
-.counter { display: block; text-align: right; color: var(--muted); font-size: .85rem; margin-top: .2rem; }
-.counter[hidden] { display: none; }
+   under its input so it reads as a property of that field, not a new one.
+
+   Named `charcount`, not `counter`: `base.html` sets this class from script,
+   and `counter` was also the class on the counter-proposal card in
+   `request.html` -- so the card inherited this rule and every heading, day and
+   button inside it rendered right-aligned and muted at four fifths size. */
+.charcount { display: block; text-align: right; color: var(--muted); font-size: .85rem; margin-top: .2rem; }
+.charcount[hidden] { display: none; }
 
 /* A refused action, on the client request page. Not an error page -- the page
    is fine, the action was not. */
