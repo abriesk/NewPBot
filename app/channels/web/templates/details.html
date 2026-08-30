@@ -6,7 +6,7 @@
   <h1>{{ t.consultation }}</h1>
 </div>
 
-<p class="held">{{ t.slot_held }}</p>
+<p class="held">{{ t.slot_held }}{% if held_when %}<strong>{{ held_when }}</strong>{% endif %}</p>
 
 {# §12.1 step 3. Everything here is optional except the email, which is how a
    client without Telegram is reached at all (§4, DESIGN.md §5.1). #}

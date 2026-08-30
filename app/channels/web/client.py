@@ -546,11 +546,22 @@ def build_router() -> APIRouter:
             client = await _session_client(session, request)
             zone = tz or _timezone(request, practice.timezone)
 
+            # §12.1: step 3 names the instant it is holding, so the instant is
+            # kept beside the choice rather than looked up again on every
+            # render of that page. A slot is created, blocked or deleted and
+            # never moved, so `starts_at` for a given id cannot drift away from
+            # this copy. The `hold_expires_at` beside it already sets the
+            # precedent for a derived time living in this dict.
+            starts_at = (
+                await session.execute(select(Slot.starts_at).where(Slot.id == slot_id))
+            ).scalar_one_or_none()
+
             reservation = {
                 "slot_id": slot_id,
                 "session_type_id": session_type_id,
                 "modality": modality,
                 "tz": zone,
+                "starts_at": starts_at.isoformat() if starts_at else None,
                 "hold_expires_at": hold_expiry(practice).isoformat(),
             }
 
@@ -591,11 +602,24 @@ def build_router() -> APIRouter:
                 ),
             }
 
+            # §12.1: the notice names the instant it is holding, not merely
+            # that something is held. Step 3 is the most anxious page in the
+            # flow and was the one page that never said which appointment it
+            # was about. A reservation made before this field existed carries
+            # no time, and the banner renders exactly as it did.
+            held_raw = reservation.get("starts_at")
+            held_when = (
+                _format(datetime.fromisoformat(held_raw), context, reservation.get("tz"))
+                if held_raw
+                else None
+            )
+
             return _render(
                 "details.html",
                 {
                     **context,
                     "t": labels,
+                    "held_when": held_when,
                     "signed_in": client is not None,
                     # §12.1: both prefills need a session. At this step an
                     # unsigned visitor has not identified themselves -- the
