@@ -54,6 +54,20 @@ missing free-text time request, the calendar file a moved session cannot update,
 the retention of an abandoned `flow_state`, and the test database. Take them
 **one entry at a time**, in the order written, and read the entry first.
 
+**A UI pass on the client surface landed after that**, not a milestone. Four
+classes were in the markup and in no stylesheet — including the two controls
+§12.1 requires to read a particular way — and the character-counter utility
+shared a name with the counter-offer card, which it had been drawing at the
+right margin at four fifths size. Beyond the defects: the practice name is no
+longer printed three times a page, the booking's three pages show as one act,
+and the hold notice names the instant it is holding. The console gained a
+**theme control** in its header (`IMPLEMENTATION.md` §12.2, DESIGN.md §15) —
+three states, stored in the browser under the admin guide's own key, and
+deliberately *not* a database setting. Clients stay on `prefers-color-scheme`.
+Two rules are scoped `body:not(.admin)` on purpose; `admin.css` has **no header
+rules at all**, so every bare `header nav` rule in `style.css` reaches the
+console.
+
 Milestones run M0 → M13 (`IMPLEMENTATION.md` §19). Work them **in order**. Each
 one's acceptance criteria must pass before starting the next. Do not implement
 later milestones early — the ordering exists so the core is fully testable before

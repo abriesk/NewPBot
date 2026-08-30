@@ -803,6 +803,8 @@ The renderer **MUST** have golden tests including: Russian text containing `.`, 
 
 Timezone is detected client-side and posted with the booking; a visible selector allows override. On-site selection **MUST** show `clinic_onsite_url`.
 
+**The hold notice on step 3 MUST name the instant it is holding**, in the client's own timezone, and not merely say that something is held for N minutes. It is the most anxious page in the flow and was the only one in it that never named the appointment. The instant is recorded on the reservation when the hold is taken rather than read again on each render: a slot is created, blocked or deleted and never moved, so `starts_at` for a given id cannot drift from the copy, and `hold_expires_at` beside it already keeps a derived time there. A reservation made before that field existed carries no time and the notice renders without one.
+
 **Step 3 remembers what the client has already said.** `client.display_name` is filled by the first submission that supplies a name and is **not** overwritten afterwards — a later booking may carry a different name, but a typo on one request must not rename the person everywhere, and correcting a client is the therapist's to do. `contact_note` is prefilled from the client's most recent request that carried one; unlike the name it stays per-request, because "phone after six" is situational rather than a fact about the person.
 
 Both prefills require a **session**, never a typed address: at step 3 an unsigned visitor has not identified themselves — the email arrives at submit — so prefilling from a typed address would confirm to anyone who guessed it that the address is known here and whom it belongs to (DESIGN.md §5.1).
