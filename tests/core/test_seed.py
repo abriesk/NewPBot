@@ -58,6 +58,15 @@ async def test_session_types_topics_and_timezones_are_seeded(db: AsyncSession) -
     assert {row["iana_name"] for row in TIMEZONE_OPTIONS} <= stored_zones
 
 
+async def test_the_home_topic_is_hidden_from_the_menu(db: AsyncSession) -> None:
+    """§12.1: it is the front page, not a section of it. In the menu it would
+    be a link back to the page the client is already on."""
+    show = (
+        await db.execute(select(ContentTopic.show_in_menu).where(ContentTopic.code == "home"))
+    ).scalar_one()
+    assert show is False
+
+
 async def test_references_topic_is_hidden_from_the_menu(db: AsyncSession) -> None:
     """§20: it is sent with waitlist confirmations, not browsed."""
     show = (

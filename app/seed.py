@@ -50,14 +50,26 @@ SESSION_TYPES = (
     {"code": "couple", "duration_min": 60, "sort_order": 1},
 )
 
-#: §20. `references` is not in the menu -- it is sent with waitlist
-#: confirmations. Titles are not a column; they come from the translation key
-#: `content.topic.<code>.title`.
+#: §20. Two are out of the menu for different reasons: `home` is the front page
+#: itself (§12.1), and `references` is sent with waitlist confirmations rather
+#: than browsed. Titles are not a column; they come from the translation key
+#: `content.topic.<code>.title`. Every topic is seeded empty -- what a section
+#: says is the therapist's.
 CONTENT_TOPICS = (
+    # The front page's own words (§12.1). Out of the menu because it *is* the
+    # front page rather than a section of it, and first in the admin's list
+    # because it is the one a visitor reads before anything else.
+    {"code": "home", "sort_order": -1, "show_in_menu": False},
     {"code": "work_terms", "sort_order": 0, "show_in_menu": True},
     {"code": "qualification", "sort_order": 1, "show_in_menu": True},
     {"code": "about_psychotherapy", "sort_order": 2, "show_in_menu": True},
     {"code": "references", "sort_order": 3, "show_in_menu": False},
+    # §12.1: shown where a client chooses to meet online, the way the clinic
+    # address is shown to whoever chooses to come in person. Reported by a
+    # tester: picking "online" with no idea whether you and the therapist share
+    # a platform is a question mark left hanging exactly where a nervous person
+    # cannot afford one.
+    {"code": "online_platforms", "sort_order": 4, "show_in_menu": False},
 )
 
 #: §20. IANA names with friendly labels, never UTC offsets -- offsets break at
