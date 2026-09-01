@@ -1,5 +1,11 @@
 {% extends "base.html" %}
 {% block content %}
+{# The end of §12.1's three pages -- but this template also answers a
+   waitlist join, which is not the third step of a booking and gets no strip.
+   `request_uuid` is set by the booking render and by nothing else. #}
+{% if request_uuid %}
+<ol class="flow"><li class="done"></li><li class="done"></li><li aria-current="step"></li></ol>
+{% endif %}
 <div class="card notice">
   <h1>{{ heading }}</h1>
   <p>{{ message }}</p>

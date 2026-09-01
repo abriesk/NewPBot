@@ -54,6 +54,22 @@ missing free-text time request, the calendar file a moved session cannot update,
 the retention of an abandoned `flow_state`, and the test database. Take them
 **one entry at a time**, in the order written, and read the entry first.
 
+**A UI pass on the client surface landed after that**, not a milestone. Four
+classes were in the markup and in no stylesheet — including the two controls
+§12.1 requires to read a particular way — and the character-counter utility
+shared a name with the counter-offer card, which it had been drawing at the
+right margin at four fifths size. Beyond the defects: the practice name is no
+longer printed three times a page, the booking's three pages show as one act,
+and the hold notice names the instant it is holding. The console gained a
+**theme control** on `/admin/settings` (`IMPLEMENTATION.md` §12.2, DESIGN.md
+§15) — three states, stored in the browser under the admin guide's own key. It
+is the one control on that page that is not a database setting, which is why it
+sits outside the form and says so in as many words. Clients stay on
+`prefers-color-scheme`.
+Two rules are scoped `body:not(.admin)` on purpose; `admin.css` has **no header
+rules at all**, so every bare `header nav` rule in `style.css` reaches the
+console.
+
 **§20.4 is the third round, asked for on 2026-08-31 — interface rather than
 defects. All seven are settled.** Six were built: the front page is a `home`
 content block she writes, an email link greets whoever follows it, the language
@@ -70,13 +86,13 @@ than from her: inside those thirty days nothing caps the Telegram picker, which
 builds one inline button per slot, so a densely filled month can exceed what
 Telegram will render. Read the entry before starting.
 
-Two things recorded there are **not** in §20.4 and are worth knowing before the
-next front-end change. Static assets are served without a version in the URL and
-Cloudflare caches them for four hours, so a CSS fix is invisible for that long
-and looks like a fix that did not work. And the suite still shares the
-deployment's database (§20.3's last entry), so a handful of `test_booking.py`
-schedule assertions and one seed assertion fail on rows nobody wrote
-deliberately; they fail on a clean checkout too.
+One more thing is worth knowing before the next session, and it is not in
+§20.4: the suite still shares the deployment's database (§20.3's last entry),
+so six `test_booking.py` schedule assertions and one seed assertion fail on
+rows nobody wrote deliberately. They fail on a clean checkout too, and the
+count **grows on its own** — an eighth went red the day "eight days from now"
+rolled onto a request left behind in August. The stale-asset trap is under
+Commands below, and closing it is still not built.
 
 Milestones run M0 → M13 (`IMPLEMENTATION.md` §19). Work them **in order**. Each
 one's acceptance criteria must pass before starting the next. Do not implement
@@ -153,6 +169,24 @@ worker is the process that has to be restarted for it to be real.
 
 `pytest` does not have this problem — each `exec` is a fresh process — so a
 green suite is not evidence that either running process is current.
+
+**A stylesheet change does not arrive when the container has it.** The
+`cloudflared` profile puts Cloudflare in front, and the edge caches `/static/*`
+for four hours (`cache-control: max-age=14400`) while HTML comes back
+`cf-cache-status: DYNAMIC`. So a template change is live on the very next
+request and the stylesheet it needs is not — **new markup against old CSS**,
+which renders worse than either alone would: a flex list came back as a
+numbered one, and the header fell back to a layout the markup no longer
+matched. It looks like a broken change and is a stale asset.
+
+```bash
+curl -sS -D - -o /dev/null "$BASE_URL/static/style.css" | grep -i cf-cache-status
+```
+
+A `?v=<anything>` on the same URL always misses the cache, so fetching both and
+diffing them answers it in one step. Nothing versions the static URLs today —
+closing it properly is either a purge at the edge or a version query on the
+`<link>`, and neither is built.
 
 **Editing `locales/*.yaml` needs `docker compose restart web`.** The mount makes
 the files live, but seeding runs once at container start, so until you restart
