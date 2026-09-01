@@ -37,6 +37,7 @@ common:
   error.expired_link: "Այս հղումն այլևս վավեր չէ։ Խնդրում ենք նորը պահանջել։"   # TODO: review
   error.not_found: "Չի գտնվել։"                  # TODO: review
   error.rate_limited: "Չափազանց շատ փորձեր։ Խնդրում ենք փորձել մի փոքր ուշ։"   # TODO: review
+  error.captcha: "Ձևը չհաջողվեց ստուգել։ Թարմացրեք էջը և ուղարկեք նորից — ստուգման համար անհրաժեշտ է միացված JavaScript։"   # TODO: review
 
 date:
   weekday.0: "Երկ"                               # TODO: review
@@ -68,10 +69,12 @@ menu:
   appointments.item: "{status} — {time}\n{session_type}, {modality}"   # TODO: review
 
 content:
+  topic.home.title: "Գլխավոր էջ"                 # TODO: review
   topic.work_terms.title: "Աշխատանքի պայմաններ"
   topic.qualification.title: "Մասնագետի որակավորում"
   topic.about_psychotherapy.title: "Հոգեթերապիայի մասին"
   topic.references.title: "Այլ մասնագետներ"      # TODO: review
+  topic.online_platforms.title: "Որտեղ են անցկացվում առցանց հանդիպումները"   # TODO: review
   empty: "Տեղեկատվությունը դեռ ավելացված չէ:"
 
 booking:
@@ -109,6 +112,7 @@ booking:
   contact.email_sent: "Հաստատման հղումն ուղարկվեց {email} հասցեին։ Բացեք այն, և հաստատումներն ու հիշեցումները կհասնեն նաև էլ. փոստով։"   # TODO: review
   submitted: "Շնորհակալություն։ Ձեր հայտն ուղարկված է, համարը՝ {uuid}։ Շուտով կկապվեմ ձեզ հետ։"   # TODO: review
   check_email: "Մուտքի հղումը ուղարկվել է ձեր փոստին։ Անցեք այդ հղումով՝ այս հայտը բացելու և հիշեցումներ ստանալու համար։"   # TODO: review
+  captcha_wait: "Մեկ վայրկյան — ավարտում ենք արագ ստուգումը։"   # TODO: review
   cancelled_by_user: "Ամրագրումը չեղարկվեց: Դուք վերադարձել եք գլխավոր մենյու:"
   unavailable: "Այս պահին նոր գրանցումները փակ են։"   # TODO: review
 
@@ -132,6 +136,8 @@ auth:
   email_label: "Ձեր էլ. փոստի հասցեն"            # TODO: review
   send_link: "Ուղարկել ինձ հղում"                # TODO: review
   link_sent: "Եթե այդ հասցեն հայտնի է այստեղ, մուտքի հղումն ուղարկվել է։"   # TODO: review
+  greeting: "Բարև Ձեզ, {name}։"                  # TODO: review
+  greeting_unnamed: "Բարև Ձեզ, հարգելի հաճախորդ։"   # TODO: review
 
 request:
   title: "Ձեր հայտը"                             # TODO: review

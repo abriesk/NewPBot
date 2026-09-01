@@ -23,7 +23,7 @@ from fastapi.templating import Jinja2Templates
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.channels.web import ratelimit
+from app.channels.web import captcha, ratelimit
 from app.channels.web.security import (
     CSRF_FIELD,
     csrf_ok,
@@ -39,6 +39,7 @@ from app.core.models import (
     BookingRequest,
     Client,
     NegotiationMessage,
+    Practice,
     SessionType,
     Slot,
     TimezoneOption,
@@ -76,6 +77,17 @@ TEMPLATES = Jinja2Templates(directory="app/channels/web/templates")
 
 #: How far ahead the slot picker looks.
 SLOT_WINDOW = timedelta(days=30)
+
+#: §12.1: the front page's own blocks, and what a client reads when they choose
+#: to meet online. Both are content topics reached by name; the codes are core's
+#: (`app/core/services/content.py`), since Telegram reaches for the same two.
+HOME_TOPIC = content.HOME_TOPIC
+ONLINE_PLATFORMS_TOPIC = content.ONLINE_PLATFORMS_TOPIC
+
+#: §12.1: set on the redirect out of an email link, and nowhere else. A
+#: greeting keyed on the session would follow a returning client around for a
+#: fortnight.
+WELCOME_PARAM = "welcome"
 
 #: Set client-side from Intl.DateTimeFormat (DESIGN.md §8).
 TZ_COOKIE = "pb_tz"
@@ -203,6 +215,8 @@ async def _labels(session: AsyncSession, lang: str) -> dict[str, str]:
         "error": "common.error.generic",
         "expired_link": "common.error.expired_link",
         "not_found": "common.error.not_found",
+        "captcha_failed": "common.error.captcha",
+        "captcha_wait": "booking.captcha_wait",
     }
     return {name: await get_text(session, lang, key) for name, key in keys.items()}
 
@@ -242,6 +256,54 @@ async def _context(
         # before the server tells them no. The refusal is still the core's.
         "text_max": CLIENT_TEXT_MAX_CHARS,
     }
+
+
+def _challenge(practice: Practice) -> str | None:
+    """§17: a proof-of-work challenge for a form that needs one, `None` while
+    the therapist has the gate switched off — which is its default."""
+    if not practice.captcha_on:
+        return None
+    return captcha.issue(practice.captcha_difficulty)
+
+
+def _challenge_ok(practice: Practice, challenge: str, solution: str) -> bool:
+    """Whether a submission may proceed. Trivially true with the gate off, so
+    the two write paths read the same either way."""
+    if not practice.captcha_on:
+        return True
+    return captcha.verify(challenge, solution)
+
+
+async def _greeting(
+    session: AsyncSession,
+    request: Request,
+    lang: str,
+    *,
+    client: Client | None = None,
+    arrived_by_token: bool = False,
+) -> str | None:
+    """§12.1: the line a client reads on the page their email link opened.
+
+    `None` on every other visit. The two ways in are the same arrival from the
+    same inbox: the `welcome` marker the login callback redirects with, and a
+    `view_request` token spent on the page it was sent about.
+
+    A client who never gave a name gets a whole sentence of its own rather than
+    a noun substituted into this one -- "Hello, {name}" filled with a word for
+    "client" reads in Russian and Armenian like a form somebody abandoned.
+    """
+    if not arrived_by_token and request.query_params.get(WELCOME_PARAM) != "1":
+        return None
+
+    if client is None:
+        client = await _session_client(session, request)
+    if client is None:
+        return None
+
+    name = (client.display_name or "").strip()
+    if not name:
+        return await get_text(session, lang, "auth.greeting_unnamed")
+    return await get_text(session, lang, "auth.greeting", name=name)
 
 
 def _chosen_language(request: Request) -> str | None:
@@ -330,7 +392,19 @@ def build_router() -> APIRouter:
     async def home(request: Request) -> Response:
         async with unit_of_work() as session:
             context = await _context(session, request)
-            return _render("home.html", {**context, "intro": None})
+            # §12.1: the practice's own words, written at /admin/content like
+            # any other topic. The topic list stays as the fallback while she
+            # has not written them -- an empty front page would be worse than
+            # the duplicated navigation it replaces.
+            blocks = await content.get_topic_blocks(session, HOME_TOPIC, context["lang"])
+            return _render(
+                "home.html",
+                {
+                    **context,
+                    "intro": [to_web_html(block.body_md) for block in blocks],
+                    "greeting": await _greeting(session, request, context["lang"]),
+                },
+            )
 
     @router.get("/t/{topic_code}", response_class=HTMLResponse, include_in_schema=False)
     async def topic_page(request: Request, topic_code: str) -> Response:
@@ -381,7 +455,10 @@ def build_router() -> APIRouter:
             if resolved.path is BookingPath.waitlist:
                 # Not by choice: there is nothing to choose from, which is what
                 # `waitlist.intro` says.
-                return _render("waitlist.html", {**context, "by_choice": False})
+                return _render(
+                    "waitlist.html",
+                    {**context, "by_choice": False, "captcha": _challenge(practice)},
+                )
 
             session_types = []
             for st in await _active_session_types(session):
@@ -424,6 +501,13 @@ def build_router() -> APIRouter:
                 ),
             }
 
+            # §12.1: the twin of the on-site rule below it. Someone choosing to
+            # meet online is told which platforms that means, where the choice
+            # is made rather than in the confirmation afterwards.
+            platforms = await content.get_topic_blocks(
+                session, ONLINE_PLATFORMS_TOPIC, context["lang"]
+            )
+
             return _render(
                 "book.html",
                 {
@@ -433,6 +517,7 @@ def build_router() -> APIRouter:
                     "timezones": timezones,
                     "tz": tz,
                     "negotiation": resolved.path is BookingPath.negotiation,
+                    "online_info": [to_web_html(block.body_md) for block in platforms],
                 },
             )
 
@@ -606,6 +691,7 @@ def build_router() -> APIRouter:
                     "contact_note": await booking.last_contact_note(session, client.id)
                     if client
                     else None,
+                    "captcha": _challenge(context["practice"]),
                 },
             )
 
@@ -617,6 +703,8 @@ def build_router() -> APIRouter:
         contact: str = Form(""),
         email: str = Form(""),
         csrf_token: str = Form("", alias=CSRF_FIELD),
+        pow_challenge: str = Form(""),
+        pow_solution: str = Form(""),
     ) -> Response:
         """§12.1: submit; returns the confirmation with the request UUID."""
         if not csrf_ok(request, csrf_token):
@@ -624,6 +712,19 @@ def build_router() -> APIRouter:
 
         async with unit_of_work() as session:
             context = await _context(session, request)
+            # §17: before anything is created. A refused submission must cost
+            # the practice a row, a notification and an email less than an
+            # accepted one, which is the entire point of the gate.
+            if not _challenge_ok(context["practice"], pow_challenge, pow_solution):
+                return _render(
+                    "error.html",
+                    {
+                        **context,
+                        "heading": context["t"]["error"],
+                        "message": context["t"]["captcha_failed"],
+                    },
+                    status_code=400,
+                )
             client = await _session_client(session, request)
             # Whether this browser had already proved who it belongs to. A
             # session now comes only from consuming a token, so it is proof;
@@ -751,7 +852,14 @@ def build_router() -> APIRouter:
         """
         async with unit_of_work() as session:
             context = await _context(session, request)
-            return _render("waitlist.html", {**context, "by_choice": True})
+            return _render(
+                "waitlist.html",
+                {
+                    **context,
+                    "by_choice": True,
+                    "captcha": _challenge(await get_practice(session)),
+                },
+            )
 
     @router.post("/waitlist", include_in_schema=False)
     async def join_waitlist(
@@ -760,12 +868,27 @@ def build_router() -> APIRouter:
         contact: str = Form(""),
         email: str = Form(""),
         csrf_token: str = Form("", alias=CSRF_FIELD),
+        pow_challenge: str = Form(""),
+        pow_solution: str = Form(""),
     ) -> Response:
         if not csrf_ok(request, csrf_token):
             return Response(status_code=403)
 
         async with unit_of_work() as session:
             context = await _context(session, request)
+            # §17: the same gate as `POST /book`, for the same reason -- this
+            # path also writes a row and notifies her, and a client costs one
+            # address.
+            if not _challenge_ok(context["practice"], pow_challenge, pow_solution):
+                return _render(
+                    "error.html",
+                    {
+                        **context,
+                        "heading": context["t"]["error"],
+                        "message": context["t"]["captcha_failed"],
+                    },
+                    status_code=400,
+                )
             client = await _session_client(session, request)
             if client is None:
                 if not email:
@@ -887,6 +1010,13 @@ def build_router() -> APIRouter:
                     if booking_request.status.value == "confirmed"
                     else None,
                     "thread": thread,
+                    "greeting": await _greeting(
+                        session,
+                        request,
+                        context["lang"],
+                        client=client,
+                        arrived_by_token=arrived_by_token,
+                    ),
                     "refused": request.query_params.get("refused") == "1",
                     "can_respond": turn is SenderType.client,
                     "can_note": booking_request.status in booking.NOTE_STATUSES,
@@ -1068,7 +1198,9 @@ def build_router() -> APIRouter:
                 except ValueError:
                     logger.info("login token carried an unreadable request reference")
 
-            response = RedirectResponse(target, status_code=303)
+            # §12.1: the arrival is what greets, so the marker rides on this
+            # redirect and not in the session it also issues.
+            response = RedirectResponse(f"{target}?{WELCOME_PARAM}=1", status_code=303)
             issue_client_session(response, result.client_id)
             issue_csrf(response, csrf_token_for(request))
             return response

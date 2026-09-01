@@ -19,6 +19,7 @@
   <label>{{ t.email_label }}
     <input type="email" name="email" required>
   </label>
+  {% if captcha %}{% include "partials/pow.html" %}{% endif %}
   <button type="submit">{{ t.submit }}</button>
 </form>
 {% endblock %}

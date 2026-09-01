@@ -1,11 +1,21 @@
 {% extends "base.html" %}
 {% block content %}
+{# §12.1: shown on the page an emailed link opened, and on no other visit. #}
+{% if greeting %}<p class="greeting">{{ greeting }}</p>{% endif %}
 <div class="page-head">
   <h1>{{ practice.name }}</h1>
-  {% if intro %}<div class="prose">{{ intro | safe }}</div>{% endif %}
 </div>
-<ul class="topics">
-  {% for topic in topics %}<li><a href="/t/{{ topic.code }}">{{ topic.title }}</a></li>{% endfor %}
-</ul>
+{% if intro %}
+  {# Her own words, written at /admin/content and sanitised by the web
+     emitter's allowlist (§11.3). #}
+  {% for html in intro %}<div class="prose">{{ html | safe }}</div>{% endfor %}
+{% else %}
+  {# §12.1: nothing written yet, so the menu stands in rather than a blank
+     page. It is the same list the header carries, which is why it goes as
+     soon as there is anything to say instead. #}
+  <ul class="topics">
+    {% for topic in topics %}<li><a href="/t/{{ topic.code }}">{{ topic.title }}</a></li>{% endfor %}
+  </ul>
+{% endif %}
 <div class="stack-actions"><a class="cta" href="/book">{{ t.consultation }}</a></div>
 {% endblock %}

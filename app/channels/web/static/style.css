@@ -107,19 +107,28 @@ header {
   backdrop-filter: saturate(1.4) blur(10px);
   border-bottom: 1px solid var(--line);
 }
+/* A grid, not a wrapping flex row. The switch has a named cell in the top
+   right and keeps it at every width: as a flex item it was simply the last
+   thing on the line, so a long enough set of topic titles pushed it onto a
+   second row where nothing right-aligned it, and which titles did that
+   depended on the language and the window. */
 header .wrap {
-  display: flex;
-  flex-wrap: wrap;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-areas:
+    "brand lang"
+    "nav   nav";
   align-items: center;
   gap: .6rem 1.25rem;
   padding-block: .85rem;
 }
 
 .brand {
+  grid-area: brand;
   display: inline-flex;
   align-items: center;
   gap: .55rem;
-  margin-right: auto;
+  justify-self: start;
   font-family: var(--serif);
   font-size: 1.05rem;
   font-weight: 600;
@@ -138,10 +147,10 @@ header .wrap {
 /* Narrow screens get one scrolling row of links under the brand; the row never
    wraps, so the header stays two lines high however long the topic titles are. */
 header nav {
+  grid-area: nav;
   display: flex;
   align-items: center;
   gap: 1.1rem;
-  order: 3;
   width: 100%;
   margin-top: .1rem;
   padding-top: .2rem;
@@ -173,20 +182,34 @@ header nav a.cta {
 
 @media (min-width: 46rem) {
   header { position: sticky; top: 0; }
+  header .wrap {
+    /* One row: brand, links, switch. The middle column is what absorbs a long
+       menu -- the links wrap inside it and the header grows downwards, rather
+       than the row wrapping and taking the switch with it. */
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    grid-template-areas: "brand nav lang";
+    align-items: start;
+  }
   header nav {
-    order: 0;
+    flex-wrap: wrap;
     width: auto;
-    margin: 0 auto 0 1rem;
+    margin: 0 0 0 1rem;
     padding-top: 0;
     border-top: 0;
     overflow: visible;
   }
   header nav a.cta { order: 0; margin-left: .5rem; }
-  .brand { margin-right: 0; }
+  /* Top-aligned, so the corner stays the corner when the links take two
+     lines. The nudge is the difference between a link's padding and the
+     switch's, and keeps them on one baseline while the menu fits on one. */
+  .brand, .lang { margin-top: .07rem; }
 }
 
-/* Language switch: one joined pill, the current language inert. */
+/* Language switch: one joined pill, the current language inert. Its cell is
+   the header's top right at every width (see `header .wrap`). */
 .lang {
+  grid-area: lang;
+  justify-self: end;
   display: flex;
   border: 1px solid var(--line);
   border-radius: var(--radius-pill);
@@ -215,13 +238,59 @@ footer {
   color: var(--muted);
   font-size: .9rem;
 }
-footer .wrap { padding-block: 1.75rem; }
+footer .wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .6rem 1.5rem;
+  padding-block: 1.75rem;
+}
 footer p { margin: 0; }
+
+/* §12.1: her links. A row that wraps into a column on a narrow screen rather
+   than scrolling, since nothing here is worth hiding off the edge. */
+.social {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1.1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.social a {
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 1px solid var(--line-strong);
+  padding-bottom: .1rem;
+}
+.social a:hover { color: var(--ink); border-bottom-color: var(--accent); }
 
 /* --- Page head ------------------------------------------------------- */
 
 .page-head { margin-bottom: 2rem; }
 .page-head > :last-child { margin-bottom: 0; }
+
+/* §12.1: which platforms an online session is held on, read at the moment of
+   choosing one. A tinted note rather than another paragraph: it answers a
+   question somebody is holding, so it has to be findable at a glance. */
+.platforms {
+  margin: 0 0 1rem;
+  padding: .85rem 1rem;
+  border-radius: var(--radius-sm);
+  background: var(--bg-tint);
+  font-size: .95rem;
+}
+.platforms > :last-child { margin-bottom: 0; }
+
+/* §12.1: the line an emailed link lands on. Above the page's own heading and
+   quieter than it -- it greets the person, it does not title the page. */
+.greeting {
+  margin: 0 0 1.25rem;
+  color: var(--muted);
+  font-family: var(--serif);
+  font-size: 1.05rem;
+}
 
 .eyebrow {
   display: block;

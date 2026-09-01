@@ -31,6 +31,7 @@ common:
   error.expired_link: "Ссылка больше не действует. Запросите новую."   # TODO
   error.not_found: "Не найдено."                                        # TODO
   error.rate_limited: "Слишком много попыток. Попробуйте позже."        # TODO
+  error.captcha: "Не удалось проверить форму. Обновите страницу и отправьте её ещё раз — для проверки нужен включённый JavaScript."   # TODO: review
 
 date:
   weekday.0: "пн"
@@ -62,10 +63,12 @@ menu:
   appointments.item: "{status} — {time}\n{session_type}, {modality}"
 
 content:
+  topic.home.title: "Главная страница"           # TODO: review
   topic.work_terms.title: "Условия работы"
   topic.qualification.title: "Квалификация"
   topic.about_psychotherapy.title: "О психотерапии"
   topic.references.title: "Другие специалисты"   # TODO: confirm wording
+  topic.online_platforms.title: "Где проходят онлайн-сессии"   # TODO: review
   empty: "Информация пока не добавлена."
 
 booking:
@@ -103,6 +106,7 @@ booking:
   contact.email_sent: "Я отправила ссылку для подтверждения на {email}. Откройте её — и подтверждения и напоминания будут приходить также на почту."
   submitted: "Спасибо. Ваш запрос отправлен, номер {uuid}. Я свяжусь с вами в ближайшее время."
   check_email: "На вашу почту отправлена ссылка для входа. Перейдите по ней, чтобы открыть эту заявку и получать напоминания."
+  captcha_wait: "Секунду — заканчиваем быструю проверку."   # TODO: review
   cancelled_by_user: "Запись отменена. Вы вернулись в главное меню."
   unavailable: "Сейчас запись закрыта."                                        # TODO
 
@@ -126,6 +130,8 @@ auth:
   email_label: "Ваш адрес электронной почты"     # TODO: review
   send_link: "Прислать ссылку"                   # TODO: review
   link_sent: "Если этот адрес здесь известен, ссылка для входа уже отправлена."   # TODO: review
+  greeting: "Здравствуйте, {name}."               # TODO: review
+  greeting_unnamed: "Здравствуйте, уважаемый клиент."   # TODO: review
 
 request:
   title: "Ваша заявка"                           # TODO: review

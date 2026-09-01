@@ -566,6 +566,25 @@ async def _send_topic(session: AsyncSession, client: Client, topic_code: str) ->
     return Reply(parts[0], extra=parts[1:])
 
 
+async def _online_platforms(session: AsyncSession, client: Client) -> list[str]:
+    """§13.1: what a client reads when they choose to meet online.
+
+    The twin of the on-site rule below -- choosing to come in person shows the
+    clinic address, choosing to meet online shows which platforms that means.
+    Empty while the therapist has written nothing, and silence is the right
+    answer then: an invented list would be worse than none.
+    """
+    from app.render.markdown import to_telegram
+
+    blocks = await content.get_topic_blocks(
+        session, content.ONLINE_PLATFORMS_TOPIC, client.language
+    )
+    parts: list[str] = []
+    for block in blocks:
+        parts.extend(to_telegram(block.body_md))
+    return parts
+
+
 # --- Consultation -----------------------------------------------------------
 
 
@@ -799,7 +818,12 @@ async def _ask_modality(session: AsyncSession, client: Client) -> Reply:
         await flow.remember(
             session, client.id, Channel.telegram, modality=Modality.online.value
         )
-        return await _ask_session_type(session, client)
+        reply = await _ask_session_type(session, client)
+        # The question is gone but the answer is still online, and this is the
+        # client who was never given the chance to ask about it (§13.1).
+        for index, part in enumerate(await _online_platforms(session, client)):
+            reply.extra.insert(index, part)
+        return reply
 
     labels = [
         (
@@ -1082,6 +1106,11 @@ async def _callback(session: AsyncSession, client: Client, update: Update) -> Re
             return await _ask_timezone(session, client)
 
         reply = await _ask_session_type(session, client)
+        if argument == Modality.online.value:
+            # §13.1: the twin of the on-site rule under it. Said here, at the
+            # choice, rather than in the confirmation two steps later.
+            for index, part in enumerate(await _online_platforms(session, client)):
+                reply.extra.insert(index, part)
         if argument == Modality.onsite.value:
             practice = await get_practice(session)
             if practice.clinic_onsite_url:

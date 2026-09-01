@@ -70,6 +70,60 @@
   </fieldset>
 
   <fieldset>
+    <legend>Abuse</legend>
+    {# §17: off by default. It costs every client a moment of their phone and
+       locks out a browser with JavaScript off, which is a price worth paying
+       only while the forms are actually being abused. #}
+    <label class="choice">
+      <input type="checkbox" name="captcha_on" value="1"
+             {% if practice.captcha_on %}checked{% endif %}>
+      Check that the booking and waitlist forms are filled in by a person
+      <small>Their browser does a small piece of arithmetic while the form is
+        being filled in — nothing to click, nothing to read. Turn this on if
+        you start getting requests nobody made; leave it off otherwise.
+        Someone whose browser has JavaScript switched off cannot send the form
+        while this is on, and Telegram is unaffected either way.</small>
+    </label>
+    <label>Difficulty
+      <input type="number" name="captcha_difficulty" min="8" max="24"
+             value="{{ practice.captcha_difficulty }}">
+    </label>
+    <p class="muted">Every step up doubles the work, so the numbers climb
+       faster than they look. Measured on a laptop: <strong>16</strong> (the
+       default) takes about half a second, <strong>20</strong> about seven
+       seconds, and <strong>24</strong> a couple of minutes — several times
+       that on an old phone, and most people will give up long before it
+       finishes. Move it one step at a time, and put it back afterwards.
+       Below 8 or above 24 is refused.</p>
+  </fieldset>
+
+  <fieldset>
+    <legend>Footer links</legend>
+    {# §12.1: the bottom of every page on the client site, in this order. The
+       blank rows are how one is added; clearing both fields is how one goes. #}
+    <p class="muted">Shown at the bottom of every page of your site, in the order
+       they are listed here. Telegram, Instagram, a channel — whatever you want
+       people to be able to find. To remove one, clear both of its fields.
+       An address needs the <code>https://</code> in front of it.</p>
+    {% for link in practice.social_links %}
+      <div class="row">
+        <label>Name
+          <input type="text" name="social_label" maxlength="40" value="{{ link.label }}">
+        </label>
+        <label>Address
+          <input type="text" name="social_url" maxlength="300" value="{{ link.url }}">
+        </label>
+      </div>
+    {% endfor %}
+    {% for _ in range(3) %}
+      <div class="row">
+        <label>Name <input type="text" name="social_label" maxlength="40" value=""></label>
+        <label>Address <input type="text" name="social_url" maxlength="300" value=""></label>
+      </div>
+    {% endfor %}
+  </fieldset>
+
+  <fieldset>
     <legend>Timing</legend>
     <div class="row">
       <label>Slot hold (min)

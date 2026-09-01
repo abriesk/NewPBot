@@ -30,7 +30,21 @@
 
 <main><div class="wrap">{% block content %}{% endblock %}</div></main>
 
-<footer><div class="wrap"><p>{{ practice.name }}</p></div></footer>
+<footer>
+  <div class="wrap">
+    <p>{{ practice.name }}</p>
+    {# §12.1: hers, from the settings page, in the order she put them in. The
+       scheme is checked at save time, so nothing unfollowable reaches an href
+       here (§6.1). #}
+    {% if practice.social_links %}
+      <ul class="social">
+        {% for link in practice.social_links %}
+          <li><a href="{{ link.url }}" target="_blank" rel="noopener noreferrer">{{ link.label }}</a></li>
+        {% endfor %}
+      </ul>
+    {% endif %}
+  </div>
+</footer>
 
 <script>
 // DESIGN.md §8: the browser is the only automatic source of a client's zone.

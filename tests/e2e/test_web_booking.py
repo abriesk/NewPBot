@@ -27,6 +27,8 @@ from app.core.models import (
     AuthToken,
     BookingRequest,
     Client,
+    ContentBlock,
+    ContentTopic,
     Identity,
     OutboxMessage,
     Practice,
@@ -191,6 +193,47 @@ def web(email_enabled: None) -> Iterator[TestClient]:
 def _csrf(client: TestClient) -> str:
     """The double-submit token, read from the cookie the last page set."""
     return client.cookies.get(CSRF_COOKIE, "")
+
+
+@pytest_asyncio.fixture
+async def captcha_on(committed: AsyncSession) -> AsyncIterator[None]:
+    """§17's gate, switched on for one test and off again afterwards.
+
+    Off is the default and every other test in this file relies on it, so this
+    restores rather than assuming.
+    """
+    from app.channels.web import captcha
+
+    captcha.reset()
+    await committed.execute(update(Practice).values(captcha_on=True))
+    await committed.commit()
+    try:
+        yield
+    finally:
+        await committed.rollback()
+        await committed.execute(update(Practice).values(captcha_on=False))
+        await committed.commit()
+        captcha.reset()
+
+
+def _challenge_from(html: str) -> str:
+    found = re.search(r'name="pow_challenge" value="([^"]+)"', html)
+    assert found, "the form carried no challenge"
+    return found.group(1)
+
+
+async def _hold_a_slot(web: TestClient, slot_id: int, session_type_id: int) -> None:
+    web.get("/book")
+    web.post(
+        "/book/hold",
+        data={
+            "csrf_token": _csrf(web),
+            "slot_id": slot_id,
+            "session_type_id": session_type_id,
+            "modality": "online",
+            "tz": "Europe/Moscow",
+        },
+    )
 
 
 # --- The acceptance path ----------------------------------------------------
@@ -679,6 +722,290 @@ def test_the_home_page_lists_the_menu_topics(web: TestClient) -> None:
     assert "/t/work_terms" in response.text
     # `references` is not in the menu (§20).
     assert "/t/references" not in response.text
+
+
+async def test_the_home_page_leads_with_the_practices_own_words(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """§12.1: the front page is a content block she writes, and the topic list
+    is only what stands in until she has written one.
+
+    Both directions in one test because the fallback is only observable while
+    nothing is published, and the pair is the actual rule.
+    """
+    from app.core.services.settings import get_practice
+
+    practice = await get_practice(committed)
+    topic = (
+        await committed.execute(select(ContentTopic).where(ContentTopic.code == "home"))
+    ).scalar_one()
+    lang = practice.default_language
+
+    published = (
+        (
+            await committed.execute(
+                select(ContentBlock).where(
+                    ContentBlock.topic_id == topic.id,
+                    ContentBlock.lang == lang,
+                    ContentBlock.is_published.is_(True),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if published:
+        # The suite shares the deployment's database (DESIGN.md §20.3). A
+        # practice that has written its front page is not a failing one.
+        pytest.skip("this practice has a front page written; the fallback cannot be observed")
+
+    assert 'class="topics"' in web.get("/").text
+
+    block = ContentBlock(
+        practice_id=practice.id,
+        topic_id=topic.id,
+        lang=lang,
+        position=0,
+        body_md="A sentence only this test would write.",
+        is_published=True,
+    )
+    committed.add(block)
+    await committed.commit()
+    try:
+        body = web.get("/").text
+        assert "A sentence only this test would write." in body
+        # Her words replace the duplicated navigation rather than joining it,
+        # and the header goes on carrying the menu.
+        assert 'class="topics"' not in body
+        assert "/t/work_terms" in body
+    finally:
+        await committed.execute(delete(ContentBlock).where(ContentBlock.id == block.id))
+        await committed.commit()
+
+
+async def test_the_booking_form_carries_no_challenge_while_the_gate_is_off(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """§17: off is the default, and off means nothing is asked of anybody."""
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+    await _hold_a_slot(web, web_slot, session_type_id)
+
+    assert "pow_challenge" not in web.get("/book/details").text
+    assert "pow_challenge" not in web.get("/waitlist").text
+
+
+async def test_a_booking_passes_the_gate_by_doing_the_work(
+    web: TestClient, web_slot: int, committed: AsyncSession, captcha_on: None
+) -> None:
+    """§17: the client does not see it; their browser pays for it."""
+    from app.channels.web import captcha
+
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+    await _hold_a_slot(web, web_slot, session_type_id)
+
+    challenge = _challenge_from(web.get("/book/details").text)
+    solution = captcha.solve(challenge)
+    assert solution is not None
+
+    done = web.post(
+        "/book",
+        data={
+            "csrf_token": _csrf(web),
+            "problem": "",
+            "name": "",
+            "contact": "",
+            "email": EMAIL,
+            "pow_challenge": challenge,
+            "pow_solution": solution,
+        },
+    )
+    assert done.status_code == 200
+
+    # Everything this created hangs off `web_slot`, whose teardown releases the
+    # slot before deleting the request -- §6.4's CHECK refuses it in the other
+    # order, which is what a hand-rolled cleanup here got wrong.
+    await committed.rollback()
+    request = (
+        await committed.execute(select(BookingRequest).order_by(BookingRequest.id.desc()).limit(1))
+    ).scalar_one()
+    assert str(request.uuid) in done.text
+
+
+@pytest.mark.parametrize("solution", ["", "1"])
+async def test_a_submission_that_did_not_do_the_work_writes_nothing(
+    web: TestClient,
+    web_slot: int,
+    committed: AsyncSession,
+    captcha_on: None,
+    solution: str,
+) -> None:
+    """The empty case is a browser with JavaScript off; the wrong case is a
+    script. §17 refuses both **before** a row, a notification or an email
+    exists, which is the entire point of the gate."""
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+    await _hold_a_slot(web, web_slot, session_type_id)
+
+    challenge = _challenge_from(web.get("/book/details").text)
+    address = "gate-refused@example.test"
+    response = web.post(
+        "/book",
+        data={
+            "csrf_token": _csrf(web),
+            "problem": "",
+            "name": "",
+            "contact": "",
+            "email": address,
+            "pow_challenge": challenge,
+            "pow_solution": solution,
+        },
+    )
+    assert response.status_code == 400
+
+    await committed.rollback()
+    assert not (
+        (await committed.execute(select(Identity).where(Identity.external_id == address)))
+        .scalars()
+        .all()
+    ), "a refused submission created a client"
+
+
+async def test_the_waitlist_is_behind_the_same_gate(
+    web: TestClient, committed: AsyncSession, captcha_on: None
+) -> None:
+    """It writes a row and notifies her too, and a client costs one address."""
+    address = "waitlist-gate@example.test"
+    web.get("/waitlist")
+    response = web.post(
+        "/waitlist",
+        data={"csrf_token": _csrf(web), "problem": "", "contact": "", "email": address},
+    )
+    assert response.status_code == 400
+
+    await committed.rollback()
+    assert not (
+        (await committed.execute(select(Identity).where(Identity.external_id == address)))
+        .scalars()
+        .all()
+    )
+
+
+async def test_choosing_online_says_which_platforms_that_means(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """§12.1: the twin of the on-site rule, which shows the clinic address.
+
+    Read at the moment of choosing, not in the confirmation two steps later —
+    a client wondering whether they and the therapist share a platform is
+    wondering about it while they pick, and the note is what settles it.
+    """
+    from app.core.services.content import ONLINE_PLATFORMS_TOPIC
+    from app.core.services.settings import get_practice
+
+    practice = await get_practice(committed)
+    topic = (
+        await committed.execute(
+            select(ContentTopic).where(ContentTopic.code == ONLINE_PLATFORMS_TOPIC)
+        )
+    ).scalar_one()
+
+    # After whatever she has already written, not instead of it: the position is
+    # unique per (topic, language) and this suite runs against a practice in
+    # use (DESIGN.md §20.3). The silent case is asserted on the Telegram side,
+    # where it can be guarded properly.
+    taken = (
+        (
+            await committed.execute(
+                select(ContentBlock.position).where(
+                    ContentBlock.topic_id == topic.id,
+                    ContentBlock.lang == practice.default_language,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    block = ContentBlock(
+        practice_id=practice.id,
+        topic_id=topic.id,
+        lang=practice.default_language,
+        position=max(taken, default=-1) + 1,
+        body_md="Zoom, Google Meet, Telemost.",
+        is_published=True,
+    )
+    committed.add(block)
+    await committed.commit()
+    try:
+        assert "Zoom, Google Meet, Telemost." in web.get("/book").text
+    finally:
+        await committed.execute(delete(ContentBlock).where(ContentBlock.id == block.id))
+        await committed.commit()
+
+
+async def test_an_emailed_link_greets_the_client_who_followed_it(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """§12.1: the arrival greets, not the session."""
+    from app.core.services.clients import issue_token, resolve_client
+    from app.core.services.translations import get_text
+
+    address = "greeted@example.test"
+    client = await resolve_client(committed, Channel.email, address)
+    client.display_name = "Nina"
+    raw = await issue_token(
+        committed, TokenPurpose.login, client_id=client.id, payload={"email": address}
+    )
+    await committed.commit()
+    expected = await get_text(committed, client.language, "auth.greeting", name="Nina")
+
+    try:
+        callback = web.get("/auth/callback", params={"token": raw}, follow_redirects=False)
+        assert callback.status_code == 303
+        assert "welcome=1" in callback.headers["location"]
+        assert expected in web.get(callback.headers["location"]).text
+
+        # The session is a fortnight long (§17); the welcome is not.
+        assert expected not in web.get("/").text
+    finally:
+        web.cookies.delete(CLIENT_COOKIE)
+        await committed.execute(delete(AuthToken).where(AuthToken.client_id == client.id))
+        await committed.execute(delete(Identity).where(Identity.client_id == client.id))
+        await committed.execute(delete(Client).where(Client.id == client.id))
+        await committed.commit()
+
+
+async def test_a_client_who_never_gave_a_name_is_greeted_all_the_same(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """`display_name` is nullable — booking by email asks for a name and takes
+    no for an answer — and "Hello, ." is not a greeting."""
+    from app.core.services.clients import issue_token, resolve_client
+    from app.core.services.translations import get_text
+
+    address = "nameless@example.test"
+    client = await resolve_client(committed, Channel.email, address)
+    client.display_name = None
+    raw = await issue_token(
+        committed, TokenPurpose.login, client_id=client.id, payload={"email": address}
+    )
+    await committed.commit()
+    expected = await get_text(committed, client.language, "auth.greeting_unnamed")
+
+    try:
+        callback = web.get("/auth/callback", params={"token": raw}, follow_redirects=False)
+        assert expected in web.get(callback.headers["location"]).text
+    finally:
+        web.cookies.delete(CLIENT_COOKIE)
+        await committed.execute(delete(AuthToken).where(AuthToken.client_id == client.id))
+        await committed.execute(delete(Identity).where(Identity.client_id == client.id))
+        await committed.execute(delete(Client).where(Client.id == client.id))
+        await committed.commit()
 
 
 def test_an_unknown_topic_is_a_404(web: TestClient) -> None:
@@ -1192,7 +1519,9 @@ async def test_the_login_link_from_a_booking_lands_on_that_booking(
 
     callback = web.get("/auth/callback", params={"token": raw}, follow_redirects=False)
     assert callback.status_code == 303
-    assert callback.headers["location"] == f"/r/{request.uuid}"
+    # §12.1: the request it was sent about, and the marker that greets whoever
+    # followed the link there.
+    assert callback.headers["location"] == f"/r/{request.uuid}?welcome=1"
 
     # And the page it lands on is really theirs.
     assert web.get(f"/r/{request.uuid}").status_code == 200
@@ -1218,7 +1547,7 @@ async def test_a_login_link_with_no_booking_behind_it_still_lands_on_the_front_p
 
     callback = web.get("/auth/callback", params={"token": raw}, follow_redirects=False)
     assert callback.status_code == 303
-    assert callback.headers["location"] == "/"
+    assert callback.headers["location"] == "/?welcome=1"
 
     await committed.execute(
         delete(OutboxMessage).where(OutboxMessage.client_id == identity.client_id)
