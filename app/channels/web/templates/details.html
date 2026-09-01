@@ -26,6 +26,7 @@
       <input type="email" name="email" required>
     </label>
   {% endif %}
+  {% if captcha %}{% include "partials/pow.html" %}{% endif %}
   <button type="submit">{{ t.submit }}</button>
 </form>
 <a class="link-back" href="/book">{{ t.back }}</a>

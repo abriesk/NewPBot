@@ -276,14 +276,64 @@ footer {
   color: var(--muted);
   font-size: .9rem;
 }
-footer .wrap { padding-block: 1.75rem; }
+footer .wrap {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: .6rem 1.5rem;
+  padding-block: 1.75rem;
+}
 footer p { margin: 0; }
+
+/* §12.1: her links, from the settings page. A row that wraps into a column on
+   a narrow screen rather than scrolling: the header's row can afford to scroll
+   because its first item is the booking link, and nothing here ranks. */
+.social {
+  display: flex;
+  flex-wrap: wrap;
+  gap: .5rem 1.1rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.social a {
+  color: var(--muted);
+  text-decoration: none;
+  border-bottom: 1px solid var(--line-strong);
+  padding-bottom: .1rem;
+}
+.social a:hover { color: var(--ink); border-bottom-color: var(--accent); }
 
 /* --- Page head ------------------------------------------------------- */
 
 .page-head { margin-bottom: 2.25rem; }
 .page-head > :last-child { margin-bottom: 0; }
 .page-head .prose { margin-top: 1rem; }
+
+/* §12.1: the line an emailed link lands on. Above the page's own heading and
+   quieter than it -- it greets the person, it does not title the page. */
+.greeting {
+  margin: 0 0 1.25rem;
+  color: var(--muted);
+  font-family: var(--serif);
+  font-size: 1.05rem;
+}
+
+/* §12.1: which platforms an online session is held on, read at the moment of
+   choosing one. It borrows `.held`'s shape on purpose -- same job on the same
+   flow, which is to answer a worry rather than to ask for something. On a plain
+   tint it read as a disabled field sitting between two questions. */
+.platforms {
+  margin: 0 0 1rem;
+  padding: .85rem 1.15rem;
+  border: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+  border-left: 3px solid var(--accent);
+  border-radius: var(--radius-sm);
+  background: var(--accent-soft);
+  font-size: .95rem;
+}
+.platforms > :last-child { margin-bottom: 0; }
 
 .eyebrow {
   display: block;

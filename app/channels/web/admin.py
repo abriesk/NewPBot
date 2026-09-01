@@ -1895,6 +1895,7 @@ _BOOLEAN_SETTINGS = (
     "negotiation_enabled",
     "auto_confirm_slots",
     "online_only",
+    "captcha_on",
 )
 
 _INT_SETTINGS = (
@@ -1902,6 +1903,7 @@ _INT_SETTINGS = (
     "pending_expiry_hours",
     "cancel_window_hours",
     "retention_months",
+    "captcha_difficulty",
 )
 
 
@@ -1929,6 +1931,19 @@ def _settings_changes(form: Any) -> dict[str, Any]:
     for field in ("clinic_onsite_url", "online_meeting_url"):
         if field in form:
             changes[field] = str(form.get(field) or "") or None
+
+    # §12.1's footer. The form always posts every row it rendered, blanks
+    # included, so "absent" cannot mean "unchanged" here -- a link is removed by
+    # clearing its two fields, and that has to reach the core as a shorter list.
+    # Paired positionally; core drops the empty rows and refuses the half-filled
+    # ones.
+    if "social_label" in form:
+        labels = form.getlist("social_label")
+        urls = form.getlist("social_url")
+        changes["social_links"] = [
+            {"label": str(label), "url": str(url)}
+            for label, url in zip(labels, urls, strict=False)
+        ]
 
     offsets = form.get("reminder_offsets_min")
     if offsets is not None:

@@ -1482,6 +1482,49 @@ async def test_the_first_question_is_how_not_when(
     assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_session_type
 
 
+async def test_choosing_online_says_which_platforms_that_means(
+    db: AsyncSession, session_type_id: int
+) -> None:
+    """§13.1: the twin of the on-site rule — choosing to come in person shows
+    the address, choosing to meet online shows where online is.
+
+    Reported by a tester: picking "online" while not knowing whether you and
+    the therapist share a platform leaves a question hanging exactly where an
+    anxious person cannot afford one.
+    """
+    topic = await content.get_topic(db, content.ONLINE_PLATFORMS_TOPIC)
+    await content.upsert_block(
+        db,
+        topic_id=topic.id,
+        lang="ru",
+        position=0,
+        body_md="Zoom, Google Meet или Telemost — как вам удобнее.",
+    )
+
+    await _to_the_modality_question(db)
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
+
+    assert reply is not None
+    assert any("Zoom" in part for part in reply.extra), reply.extra
+
+
+async def test_nothing_is_said_about_platforms_until_she_has_written_it(
+    db: AsyncSession, session_type_id: int
+) -> None:
+    """Silence beats an invented list: the blocks are the only source, and an
+    unwritten topic has nothing to say."""
+    if await content.get_topic_blocks(db, content.ONLINE_PLATFORMS_TOPIC, "ru"):
+        # The suite shares the deployment's database (DESIGN.md §20.3), and a
+        # practice that has written the note is not a failing one.
+        pytest.skip("this practice has written its platforms; silence cannot be observed")
+
+    await _to_the_modality_question(db)
+    reply = await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:online"))
+
+    assert reply is not None
+    assert reply.extra == []
+
+
 async def test_an_on_site_client_is_never_asked_for_a_timezone(
     db: AsyncSession, practice: Practice, session_type_id: int, future_slot: Slot
 ) -> None:

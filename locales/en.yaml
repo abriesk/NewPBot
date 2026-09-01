@@ -36,6 +36,9 @@ common:
   error.expired_link: "This link has expired. Please request a new one."
   error.not_found: "That was not found."
   error.rate_limited: "Too many attempts. Please try again later."
+  # §17. Covers both ways this fails: a check that did not pass, and a browser
+  # with JavaScript switched off, which cannot run it at all.
+  error.captcha: "This form could not be checked. Please reload the page and send it again — the check needs JavaScript to be on."
 
 # Day and month names for the slot pickers. Abbreviated on purpose: a full
 # month name has to decline in Russian and Armenian ("27 августа", not
@@ -72,10 +75,15 @@ menu:
   appointments.item: "{status} — {time}\n{session_type}, {modality}"
 
 content:
+  # The front page's own blocks (§12.1). Not in the menu, so the title is read
+  # on /admin/content rather than by a client.
+  topic.home.title: "Front page"
   topic.work_terms.title: "How I work"
   topic.qualification.title: "Qualifications"
   topic.about_psychotherapy.title: "About psychotherapy"
   topic.references.title: "Other specialists"
+  # Read where a client chooses to meet online, not browsed as a page.
+  topic.online_platforms.title: "Where online sessions are held"
   empty: "This section has not been filled in yet."
 
 booking:
@@ -116,6 +124,9 @@ booking:
   contact.email_sent: "I have sent a confirmation link to {email}. Open it and confirmations and reminders will reach you by email as well."
   submitted: "Thank you. Your request has been sent, number {uuid}. I will get back to you shortly."
   check_email: "A sign-in link is on its way to your address. Follow it to open this request and to receive reminders."
+  # §17. Seen only when somebody submits faster than their browser finished the
+  # check, which is rare and lasts about a second.
+  captcha_wait: "One moment — finishing a quick check."
   cancelled_by_user: "Booking cancelled. You are back at the main menu."
   unavailable: "New bookings are closed at the moment."
 
@@ -146,6 +157,11 @@ auth:
   email_label: "Your email address"
   send_link: "Send me a link"
   link_sent: "If that address is known here, a sign-in link is on its way."
+  # Shown once, on the page an emailed link lands on (§12.1). The unnamed line
+  # is a whole sentence rather than a word standing in for {name}: a client who
+  # booked by email and skipped the name field has none.
+  greeting: "Hello, {name}."
+  greeting_unnamed: "Hello, client."
 
 request:
   title: "Your request"

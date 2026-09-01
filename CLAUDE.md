@@ -70,6 +70,30 @@ Two rules are scoped `body:not(.admin)` on purpose; `admin.css` has **no header
 rules at all**, so every bare `header nav` rule in `style.css` reaches the
 console.
 
+**§20.4 is the third round, asked for on 2026-08-31 — interface rather than
+defects. All seven are settled.** Six were built: the front page is a `home`
+content block she writes, an email link greets whoever follows it, the language
+switch has a grid cell of its own, the footer carries her links from
+`practice.social_links`, choosing "online" shows the `online_platforms` blocks
+the way choosing on-site has always shown the address, and the booking and
+waitlist forms can be put behind a proof-of-work gate (`practice.captcha_on`,
+default off, difficulty 8–24 in `app/channels/web/captcha.py`). The seventh —
+how many slots a client is shown — was answered rather than built: thirty days
+is the horizon and she is content with it.
+
+**One entry is open under that heading**, and it came out of the work rather
+than from her: inside those thirty days nothing caps the Telegram picker, which
+builds one inline button per slot, so a densely filled month can exceed what
+Telegram will render. Read the entry before starting.
+
+One more thing is worth knowing before the next session, and it is not in
+§20.4: the suite still shares the deployment's database (§20.3's last entry),
+so six `test_booking.py` schedule assertions and one seed assertion fail on
+rows nobody wrote deliberately. They fail on a clean checkout too, and the
+count **grows on its own** — an eighth went red the day "eight days from now"
+rolled onto a request left behind in August. The stale-asset trap is under
+Commands below, and closing it is still not built.
+
 Milestones run M0 → M13 (`IMPLEMENTATION.md` §19). Work them **in order**. Each
 one's acceptance criteria must pass before starting the next. Do not implement
 later milestones early — the ordering exists so the core is fully testable before

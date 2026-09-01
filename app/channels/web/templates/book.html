@@ -38,14 +38,18 @@
       <input type="radio" name="modality" value="online" checked
              hx-get="/book/slots" hx-target="#slots" hx-include="#booking"
              onchange="document.getElementById('onsite-info').hidden = true;
-                       document.getElementById('tz-field').hidden = false">
+                       document.getElementById('tz-field').hidden = false;
+                       if (document.getElementById('online-info'))
+                         document.getElementById('online-info').hidden = false;">
       {{ t.modality_online }}
     </label>
     <label class="choice">
       <input type="radio" name="modality" value="onsite"
              hx-get="/book/slots" hx-target="#slots" hx-include="#booking"
              onchange="document.getElementById('onsite-info').hidden = false;
-                       document.getElementById('tz-field').hidden = true">
+                       document.getElementById('tz-field').hidden = true;
+                       if (document.getElementById('online-info'))
+                         document.getElementById('online-info').hidden = true;">
       {{ t.modality_onsite }}
     </label>
     {# §12.1: on-site selection MUST show clinic_onsite_url. #}
@@ -55,6 +59,16 @@
       {% else %}{{ t.onsite_no_address }}{% endif %}
     </p>
   </fieldset>
+
+  {# §12.1: the twin of the rule above. Outside the modality fieldset on
+     purpose -- with the practice online only that fieldset is hidden, and this
+     is exactly the client who still needs to read it. Visible from the start,
+     because online is the answer already checked. #}
+  {% if online_info %}
+    <div id="online-info" class="platforms prose">
+      {% for html in online_info %}{{ html | safe }}{% endfor %}
+    </div>
+  {% endif %}
 
   <fieldset id="tz-field">
     <legend>{{ t.choose_timezone }}</legend>

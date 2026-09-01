@@ -39,6 +39,13 @@ MAX_REVISIONS = 20
 #: a client as literal `[^1]` text. Rejecting it at save time says so plainly.
 FOOTNOTE = re.compile(r"\[\^[^\]]+\]")
 
+#: Topics a flow reaches for **by name** rather than through the menu, which is
+#: why the codes live here and not as a string in each channel. Both are
+#: `show_in_menu = false` (§20): one is the front page (§12.1), the other is
+#: what a client reads at the moment they choose to meet online (§12.1, §13.1).
+HOME_TOPIC = "home"
+ONLINE_PLATFORMS_TOPIC = "online_platforms"
+
 
 class MarkdownNotAllowed(DomainError):
     """A construct outside the §11.1 subset.

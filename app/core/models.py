@@ -99,6 +99,20 @@ class Practice(Base):
     #: "in-person bookings are off".
     online_only: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
     online_meeting_url: Mapped[str | None] = mapped_column(Text)
+    #: §6.1: the footer's links, in the order they are shown -- a list of
+    #: `{"label": ..., "url": ...}`. A column rather than a table: half a dozen
+    #: pairs with no relationships, nothing to join, and no life of their own
+    #: apart from the practice that has them.
+    social_links: Mapped[list[dict[str, str]]] = mapped_column(
+        JSONB, nullable=False, server_default="[]"
+    )
+    #: §17: the proof-of-work gate in front of the two unauthenticated write
+    #: paths. Off by default -- it is what she turns on when the forms are
+    #: being abused, not a toll every client pays for a flood that never came.
+    captcha_on: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    #: Leading zero bits of SHA-256 the browser must find. Each step doubles
+    #: the work; see `app/channels/web/captcha.py` for what the numbers cost.
+    captcha_difficulty: Mapped[int] = mapped_column(Integer, nullable=False, server_default="16")
     availability_on: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     booking_mode: Mapped[BookingMode] = mapped_column(
         pg_enum(BookingMode), nullable=False, server_default="slots"

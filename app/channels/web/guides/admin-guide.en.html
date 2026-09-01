@@ -5,8 +5,8 @@
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Psychobooking — Admin user guide</title>
 <!-- The commit this guide was last checked against. See the footer. -->
-<meta name="guide-revision" content="22d028a">
-<meta name="guide-revised" content="2026-08-30">
+<meta name="guide-revision" content="2079741">
+<meta name="guide-revised" content="2026-09-02">
 <style>
   :root {
     --bg: #f6f1ea;
@@ -517,6 +517,14 @@
         <li><strong>Slot hold</strong> (minutes), <strong>pending expiry</strong> (hours), <strong>cancellation window</strong>, <strong>retention</strong> (months — free text is later cleared, rows stay).</li>
         <li><strong>Reminder offsets</strong> in minutes, comma-separated, e.g. <code>1440, 60</code>. Empty = no reminders.</li>
       </ul>
+      <h3>Abuse</h3>
+      <p><strong>Check that the forms are filled in by a person</strong> is off, and should stay off until you need it. With it on, a visitor's browser quietly does a small piece of arithmetic while they fill the booking or waitlist form in — nothing to click, nothing to read, and about half a second on the default setting.</p>
+      <p>Turn it on if requests start arriving that nobody made, or if sign-in emails start going to addresses that never asked for one. <strong>Difficulty</strong> is how much work the browser does; each step up doubles it, so 16 is about half a second, 20 about seven, and 24 a couple of minutes. Move it one step at a time and put it back when the trouble stops — a client on an old phone pays several times what a laptop does.</p>
+      <div class="callout warn">While this is on, somebody whose browser has JavaScript switched off cannot send either form at all. That is the reason it is off by default. Telegram is unaffected, and stays open either way.</div>
+
+      <h3>Footer links</h3>
+      <p>Name and address, one pair per row — Telegram, Instagram, a channel, anything you want people to be able to find. They appear at the bottom of every page of your site, in the order listed here, and are the same in all three languages. Three blank rows are always offered; fill one in to add a link, clear both fields of a row to remove it. Eight at most.</p>
+      <p>An address must start with <code>https://</code> — <code>t.me/yourname</code> without it is refused, because a browser would read it as a page on your own site rather than as Telegram. If a save comes back saying <em>rejected</em>, that is almost always what it means.</p>
       <h3>Console</h3>
       <p>At the bottom of the page, in a box of its own: <strong>Theme</strong> — <em>system</em>, <em>light</em> or <em>dark</em>. <em>System</em> follows whatever this computer or phone is set to, and is what you get until you choose otherwise.</p>
       <p>It is the one setting on this page with no Save button: it takes effect the moment you pick it. It is also the one that is <strong>remembered in this browser only</strong> — everything else here follows you between devices and this does not, so choosing dark on your laptop leaves your phone as it was. It changes nothing your clients see; their side follows their own device, as it always has. The guide you are reading uses the same choice, so turning dark on there turns it on here.</p>    </section>
@@ -547,12 +555,16 @@
       <table>
         <thead><tr><th>Topic</th><th>In client menu?</th><th>Typical use</th></tr></thead>
         <tbody>
+          <tr><td><code>home</code></td><td>No</td><td><strong>The front page itself</strong> — the first thing a visitor reads</td></tr>
           <tr><td><code>work_terms</code></td><td>Yes</td><td>Fees, format, cancellation</td></tr>
           <tr><td><code>qualification</code></td><td>Yes</td><td>Training and approach</td></tr>
           <tr><td><code>about_psychotherapy</code></td><td>Yes</td><td>What to expect</td></tr>
           <tr><td><code>references</code></td><td>No</td><td>Sent with waitlist confirmations</td></tr>
+          <tr><td><code>online_platforms</code></td><td>No</td><td><strong>Shown the moment a client chooses “online”</strong> — which platforms you work on</td></tr>
         </tbody>
       </table>
+      <div class="callout">Worth writing early: <code>online_platforms</code> is read by somebody deciding whether you and they have a way to meet at all, and until it is written they find out only when the link arrives. A line is enough — “Zoom, Google Meet or Telemost, whichever suits you”. It appears beside the choice on the website and in the bot, in the language they are using, and it is not a page anyone can browse to.</div>
+      <div class="callout">Until you publish a <code>home</code> block, the front page shows the list of section links and nothing else. Write two or three sentences there — who you are, what a visitor can read here, and that they can book — and the links give way to them. The menu at the top of the page carries those links anyway.</div>
       <ol>
         <li>Edit Markdown.</li>
         <li>Tick <strong>published</strong> when clients may see it.</li>
@@ -569,6 +581,7 @@
         <li>Missing strings are marked. Fallback: practice default language, then English.</li>
         <li>Grouped by where they appear. Save per row.</li>
         <li>A software update never overwrites a string you already changed.</li>
+        <li>Under <strong>Pages the client sees</strong>: <code>auth.greeting</code> is the hello a client reads on the page their email link opens, and <code>auth.greeting_unnamed</code> is what stands in when they never gave a name. Keep <code>{name}</code> in the first one — it is where their name goes.</li>
       </ul>
     </section>
 
@@ -641,7 +654,7 @@
     <section class="card" id="clients-view">
       <h2>17. What clients experience</h2>
       <ul>
-        <li><strong>Web</strong> — your content, language switcher, booking form, email magic link (if SMTP is on) or Telegram sign-in.</li>
+        <li><strong>Web</strong> — your content, language switcher, booking form, email magic link (if SMTP is on) or Telegram sign-in. The front page is the <code>home</code> block you write; whoever follows a link from their email is greeted by name on the page it opens.</li>
         <li><strong>Telegram</strong> — <code>/start</code>, topic menu, the same booking flow, action buttons on notifications.</li>
         <li><strong>Email</strong> — login links and “open your request page”. No meeting URL in the body.</li>
       </ul>
@@ -737,10 +750,10 @@ docker compose up -d --build</code></pre>
     <footer>
       Shipped with the service. This page is served from your own installation at <code>/admin/help</code>, so it always matches the version you are running.
       <br><br>
-      <strong>Written against commit <code>22d028a</code>, 2026-08-30.</strong>
+      <strong>Written against commit <code>2079741</code>, 2026-09-02.</strong>
       That is the last state of the service this guide was checked against. After
       updating the server, whoever ran the update can list what has changed since with
-      <code>git log 22d028a..HEAD -- app/ locales/</code> — anything in that list a
+      <code>git log 2079741..HEAD -- app/ locales/</code> — anything in that list a
       therapist would notice belongs in here, and the stamp moves with it.
     </footer>
   </main>
