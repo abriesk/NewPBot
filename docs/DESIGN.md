@@ -843,6 +843,182 @@ import tests already were — a count of everything is a test of the environment
 Neither is difficult; both are here rather than done because the first changes
 the documented workflow, and the workflow is in CLAUDE.md.
 
+### 20.4 Interface refinements, third round
+
+Asked for on 2026-08-31, after the front end had been lived with rather than
+tested. Seven, sorted by what each one costs rather than by how it was listed,
+because three of them are an afternoon and one of them changes the deployment.
+Six are done and one was answered rather than built; all seven are described
+here, and what is left under this heading came out of the work rather than from
+the report.
+
+**The front page is hers to write.** `/` was a list of links to the four topic
+pages — the same list the header carries on every page, so the body of the front
+door was a second copy of its own navigation and said nothing about the
+practice. It is now the published blocks of a `home` content topic, written at
+`/admin/content` beside the others, with the link list kept only while she has
+not written one. Two things were decided rather than assumed. The copy is not
+seeded: a paragraph introducing a therapist, written by an implementer, would be
+wrong in a way she might not notice for weeks, and the empty topic is a question
+she can answer instead. And the fallback stays: her install is already serving
+clients, so the changeover has to be the moment she saves, not the moment this
+deploys.
+
+`home` is a topic rather than a new table or a settings field because everything
+a front page needs already exists around topics — three languages, Markdown
+validated at save time, previews per channel, twenty revisions and a rollback.
+The alternative considered was a translation key, which is a single unformatted
+paragraph with no history, editable in the place meant for buttons and errors.
+Text that reads as practice *policy* belongs in a block; §15 has said so since
+it was written.
+
+**Somebody following a link from their email is greeted by name.** The email
+says "open your booking", the link proves who they are, and the page it opened
+said nothing to them at all. `auth.greeting` carries `{name}`; a client who
+booked by email and skipped the name field gets `auth.greeting_unnamed`, which
+is a whole sentence rather than the word "client" substituted into the first —
+"Hello, {name}" filled with a noun reads in Russian and Armenian like a form
+somebody abandoned, and both lines are hers to reword on `/admin/translations`.
+
+The marker rides on the **redirect**, not on the session. Greeting whoever holds
+a client cookie would put "Hello, Anna" on every page for the fortnight that
+cookie lasts (§17), which is wallpaper; greeting the *arrival* is the thing that
+was actually missing.
+
+**The language switch has a corner of its own.** It was the last item in a
+wrapping flex row, so a long enough set of topic titles — which is to say
+Russian, at some window widths and not others — pushed it onto a second line
+where nothing right-aligned it. The header is now a grid with a named cell for
+each of brand, menu and switch: below 46rem the menu keeps its scrolling row
+underneath, above it the three sit in one row and the *links* wrap inside their
+own column while the switch stays where it was. The header can still grow to two
+lines; what it can no longer do is decide, per window width and per language,
+which control gets displaced.
+
+**The footer carries her links.** It held the practice name and nothing else,
+so a visitor who wanted to see whether this person exists elsewhere had to be
+told the address by hand. `practice.social_links` is a JSONB list of
+`{label, url}` filled in on the settings page, shown at the bottom of every
+client page in the order she listed them.
+
+A column rather than a table, and that was the decision worth writing down. A
+`social_link` table is the more orthodox answer and would buy ordering and
+per-row activation, for the price of a CRUD page, a section in the
+configuration file, and an import merge policy — for at most eight pairs that
+have no relationships, are joined to nothing, and have no life apart from the
+practice that owns them. As a column they are one fieldset and they travel with
+the export for free, because §16.7 exports whatever is in `MUTABLE_FIELDS`.
+
+Validation is in `update_settings` rather than in the route, for the reason
+this codebase keeps rediscovering: the configuration import writes settings
+too, so a rule enforced in the form is a rule a file can walk around. What it
+enforces is mostly obvious — strip whitespace, drop the blank rows the form
+always posts, refuse half a pair in either direction — and one part is not: the
+address has to parse as `http` or `https` **with a host**. `javascript:` is the
+reason anyone checks a scheme, but the likelier mistake by far is `t.me/name`
+pasted without the `https://`, which a browser reads as a path on the practice's
+own site and which would otherwise land in the footer as a link to a 404.
+
+**A client choosing "online" is told what online means.** The clearest report
+of the round, and it came from the second tester rather than from the
+specification: someone anxious enough to be booking therapy picks "online" and
+is shown a list of times, having never been told whether they and the therapist
+share a platform at all. The doubt sits exactly where a nervous person can least
+afford one, and the service did not answer it until a link arrived in the
+confirmation — after they had committed.
+
+The rule that fixes it already existed, with one half missing. §12.1 has always
+required that choosing **on-site** show the clinic address, "said where the
+choice is made rather than four questions later". Choosing **online** now shows
+the `online_platforms` blocks in the same place, on both channels. Symmetry was
+the whole design: no new mechanism, and the code reads as one rule with two
+sides instead of a special case.
+
+Two things were settled to get there. It is a **statement, not a choice** —
+which of the two readings was meant had to be asked, because they are not the
+same size. A list she writes is an afternoon; a platform the *client* picks
+means a column on the request, the question in both flows, and a third link in
+§10's `request.meeting_url` → `practice.online_meeting_url` chain, which is a
+specification change. And it is a **content block, not a settings field**, for a
+reason §15 had already decided: the site serves three languages, and text that
+reads as practice policy belongs in a block rather than in a translation key or
+a single-language column. So it costs no new machinery at all — a sixth topic,
+out of the menu, written where she writes everything else, with the preview and
+the rollback she already has. Unwritten, it says nothing, which is the correct
+answer for a list nobody but her can supply.
+
+**The booking and waitlist forms can be put behind proof of work.** Off by
+default, switched on and tuned from the settings page.
+
+Reading the code first moved the target twice. `/book/hold` looked like the
+worst exposure and is not one — it writes nothing durable, the reservation
+living in a signed cookie until submit. And `POST /book` turned out to be
+limited after all, five an hour, in `submit_slot_request` rather than in
+`ratelimit.py`. What is actually open is narrower and worse than the report
+guessed: those limits are **per client**, and a client costs one email address.
+A script with a fresh address each time is not limited at all, and each
+submission writes a row, notifies her, and sends one sign-in email *from her
+domain to an address the script chose*. The damage is not downtime; it is her
+mail reputation and a queue she has to read.
+
+**Why not Turnstile.** It was the obvious answer and the wrong one here. A
+hosted captcha needs a Cloudflare account and per-install keys, and it loads a
+third-party script into the one page a client fills in about their mental
+health. The deciding argument is the deployment: this service runs behind a
+Cloudflare tunnel *or* on a bare VPS with the `plain` profile, and the second is
+both the one with no CDN in front of it and the reason a gate was asked for at
+all. Answering it with a Cloudflare dependency would leave the case it exists
+for depending on the thing it does not have. §12.2 already says a practice
+server may have no outbound network; the client surface already loads no
+external asset.
+
+**Why proof of work and not pictures.** The client here is frequently anxious,
+and this session had just finished removing doubt from the moment of booking. A
+puzzle in front of the button would put it back. The browser pays instead — 0.4s
+of hashing at the default difficulty, started when the form renders and finished
+long before anyone has described their problem. Someone who submits early gets a
+line saying so and their form goes as soon as the work does.
+
+Three things decided in the building. The nonce is **spent on use**, because
+without that a script solves one puzzle and replays the answer forever, which is
+the difference between a gate and a formality. The difficulty is **inside the
+signed payload**, so raising it mid-flood does not invalidate the form somebody
+already has open. And verification happens **before anything is created**: a
+refused submission has to cost less than an accepted one, or the gate feeds the
+flood it is there to stop.
+
+What it costs, stated plainly because it is the reason the default is off: with
+the gate on, a browser with JavaScript disabled cannot book on the web at all.
+Telegram is unaffected. The hashing is hand-written JavaScript rather than
+`crypto.subtle`, which does not exist on a non-secure origin — the `plain`
+profile again.
+
+Left in the backlog, and not built: per-IP limits on the two submission paths,
+a honeypot field, and a minimum fill time. All three are cheap; none of them is
+needed while the gate exists and the practice is not under attack. Per-IP limits
+also need `ratelimit.client_ip()` audited first — behind a tunnel the client
+address arrives in a header, and a limit that trusts the wrong one either counts
+every visitor as one person or trusts something anyone can forge.
+
+**The seventh was asked and answered rather than built.** The report asked
+whether clients are shown too many slots when the therapist has filled three
+months ahead. They are not shown too many: `SLOT_WINDOW` is thirty days,
+hardcoded identically in `app/channels/web/client.py` and
+`app/channels/telegram/router.py`, so month two and month three are simply
+invisible. Told that, she settled it on 2026-08-31 — thirty days is the right
+horizon and needs no setting.
+
+One thing found while answering it is **not** settled and is the only entry
+left under this heading. **Inside the window nothing is capped.** The web
+prints every day it finds, which is merely long; Telegram builds one inline
+button per slot, and a densely filled month can push a keyboard past what
+Telegram will render, which is not long but broken. `slot_keyboard` has no
+ceiling and no test covers a full month. It wants the paging `_admin_requests`
+already does, moved to the picker, or at minimum a cap with a "more times"
+row. It is a latent failure rather than a reported one, which is why it is here
+and not urgent — but it fails at the moment the practice is busiest, which is
+the worst moment to discover it.
+
 ---
 
 ## 21. Portable configuration and backups

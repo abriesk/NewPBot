@@ -199,6 +199,9 @@ CREATE TABLE practice (
     clinic_onsite_url       TEXT,
     online_only             BOOLEAN NOT NULL DEFAULT FALSE,
     online_meeting_url      TEXT,                                    -- default room for online sessions
+    social_links            JSONB NOT NULL DEFAULT '[]'::jsonb,      -- [{label, url}], the footer, in order
+    captcha_on              BOOLEAN NOT NULL DEFAULT FALSE,          -- §17's gate on the two client forms
+    captcha_difficulty      INTEGER NOT NULL DEFAULT 16,             -- leading zero bits; 8..24
     availability_on         BOOLEAN NOT NULL DEFAULT TRUE,
     booking_mode            booking_mode NOT NULL DEFAULT 'slots',
     fallback_to_negotiation BOOLEAN NOT NULL DEFAULT TRUE,
@@ -215,6 +218,10 @@ CREATE TABLE practice (
 ```
 
 Exactly one row is seeded at install. `reminder_offsets_min` replaces v1.0's two booleans; an empty array disables reminders.
+
+`social_links` is a column and **not** a table. A `social_link` table would buy ordering and per-row activation at the price of a CRUD page, a `config_io` section, and an import merge policy, for at most a handful of pairs that have no relationships and no life apart from the practice that has them. As a settings field it is one fieldset on `/admin/settings` and it travels with the configuration export for free, since §16.7 exports `MUTABLE_FIELDS`.
+
+What may go in one is decided in `app/core/services/settings.py`, at save time: `update_settings` normalises the list, and every writer goes through it — the settings form and the configuration import both do, and a rule enforced in one adapter is a rule the other walks around. Whitespace is stripped, entirely empty pairs are dropped (the form always posts its blank rows, which is how a link is added), and a **half** pair is refused in either direction — a label with nowhere to go and an address with nothing to click are both broken in the footer. The URL **MUST** parse as `http` or `https` with a host: an `href` is followed by a browser, so `javascript:` and a scheme-less `t.me/x` — which a browser reads as a relative path on this site — are refused rather than rendered. At most eight, which keeps a footer a footer.
 
 ### 6.2 Clients and identity
 
@@ -785,7 +792,7 @@ The renderer **MUST** have golden tests including: Russian text containing `.`, 
 
 | Method | Path | Purpose |
 |---|---|---|
-| GET | `/` | Home; topic menu; language switcher |
+| GET | `/` | Home; the practice's own words, then the topic menu; language switcher |
 | GET | `/t/{topic_code}` | Rendered topic page |
 | GET | `/book` | Step 1 — session type and modality |
 | GET | `/book/slots` | Step 2 — slots in the client's timezone (HTMX partial) |
@@ -802,6 +809,20 @@ The renderer **MUST** have golden tests including: Russian text containing `.`, 
 | GET | `/auth/callback?token=` | Consume a login token |
 
 Timezone is detected client-side and posted with the booking; a visible selector allows override. On-site selection **MUST** show `clinic_onsite_url`.
+
+**Online selection MUST show where online is**, which is the same rule and was missing its other half. The published blocks of the `online_platforms` topic (§20) are rendered beside the choice — Zoom, Meet, Telemost, whatever she works on — because a client picking "online" is deciding whether they and the therapist share a way to meet, and until now nothing answered that until the confirmation arrived. Reported by a tester in exactly those terms: a nervous person choosing online is holding a question the page never addresses.
+
+It is **prose she writes**, per language, at `/admin/content`, and not a settings field: the site serves three languages, and §15 already puts anything reading as practice policy in a content block rather than a translation key. It appears **where the choice is made** and not in the confirmation, which is what makes it reassurance rather than logistics. With `online_only` set the modality question is not asked at all (§13.1), and the note is shown regardless — that client is precisely the one who was never given the chance to ask. An unwritten topic shows nothing: silence is a better answer than a list an implementer invented.
+
+**The home page leads with the practice's own words.** `/` renders the published blocks of the `home` topic (§20) in the client's language, through §11.3's emitter. They replace the list of topic links the page used to be, which was a duplicate of the navigation the header already carries on every page — somebody arriving at the front door was shown the same four links twice and not one sentence saying whose practice this is. The blocks are hers to write at `/admin/content`; the seed creates the topic and no copy, because a front page invented by an implementer is worse than one that is late.
+
+The topic list **MUST** remain as the fallback while no block is published — an empty front page is a regression for a practice already serving clients — and gives way the moment she saves one. The topic is `show_in_menu = false`: it is the front page, not a section of it.
+
+**Every client page carries the practice's own links in its footer.** `practice.social_links` (§6.1), in the order she listed them, opened in a new tab with `rel="noopener noreferrer"`. They are the same on every page and in every language: the name of a network is a name, not copy, so they are settings rather than translation keys — a `hy` visitor looking for her Telegram is looking for the same Telegram.
+
+**A client arriving from an email link is greeted by name.** Consuming a login token (§6.2) redirects carrying `welcome=1`, and `/` and `/r/{uuid}` then render `auth.greeting` with the client's `display_name`, or `auth.greeting_unnamed` where there is none. A `view_request` token consumed on `/r/{uuid}` greets for the same reason: it is the same arrival from the same inbox.
+
+The marker is in the **redirect**, not in the session. A greeting tied to the cookie would meet a client returning a week later with "Hello, Anna" at the top of every page for a fortnight, which is wallpaper rather than a welcome. `display_name` is nullable — a client who booked by email and skipped the name field has none — so the unnamed case is a **whole sentence** and not a substituted noun: `"Hello, {name}"` with a fallback word standing in for `{name}` reads in Russian and Armenian like a form somebody forgot to finish.
 
 **Step 3 remembers what the client has already said.** `client.display_name` is filled by the first submission that supplies a name and is **not** overwritten afterwards — a later booking may carry a different name, but a typo on one request must not rename the person everywhere, and correcting a client is the therapist's to do. `contact_note` is prefilled from the client's most recent request that carried one; unlike the name it stays per-request, because "phone after six" is situational rather than a fact about the person.
 
@@ -950,6 +971,8 @@ Uploads **MUST** be capped (5 MB) and rejected above it before parsing.
    With `practice.online_only` set, the modality question is **skipped rather than asked**: there is one answer, and asking for it would be a question whose other answer the flow then has to refuse. The modality is recorded as `online` and the picker filters to it, so in-person slots already created stop being offered — they are **not** deleted, and come back when the setting is cleared. Deliberately its own column rather than "`clinic_onsite_url` is empty": she may keep the address while not working there this month, and a blank address means "not filled in", not "in-person bookings are off". Where nothing is free, no switch is offered either — pointing at times nobody is being shown would be an invitation the flow would have to refuse.
 
 5. Consultation → `resolve_booking_mode()`, then **ask how before asking when**. Modality first, then session type, on both the slot path and the free-text one. Which path was resolved **MUST** be remembered on the flow rather than re-derived after those two questions: `resolve_booking_mode` reads the slot inventory, and a slot appearing while somebody answers would otherwise move them onto a picker they never asked for. The waitlist path is unchanged and goes straight to its own questions.
+
+   **Choosing online sends the `online_platforms` blocks, exactly as choosing on-site sends the address** (§12.1 states the rule; it holds on both channels). Where `online_only` skips the question, they are sent with the session-type question instead — that client never had the chance to ask. Nothing is sent while the topic is unwritten.
 
    The order used to be slot → type → modality, which is wrong twice. The picker cannot filter by answers it has not collected, so `slot.modality` and `slot_session_type` were both dead on this channel — every slot was offered to everybody. And the client learned only after committing to a time whether it was ever an online time, which is the reported fault.
 6. Slot picker: inline keyboard grouped by day, times in the client's timezone, **filtered by the modality and session type already chosen**; timezone chosen from `timezone_option` if unknown.
@@ -1433,6 +1456,17 @@ The dot is only useful to somebody looking at it. A transition **into** `fail` w
 - Admin session cookie: `HttpOnly`, `Secure`, `SameSite=Lax`, rotated on login.
 - CSRF token on every mutating admin and client form.
 - Rate limits: admin login 5 per 15 min per IP; magic-link issuance 3 per hour per email and 10 per hour per IP; booking submission 5 per hour per client.
+- **A proof-of-work gate MAY be switched on in front of `POST /book` and `POST /waitlist`** (`practice.captcha_on`, default **off**; `practice.captcha_difficulty`, 8–24, default 16). It exists because the limit above is per *client* and a client costs one email address: a script with a fresh address each time is not limited at all, and every submission it makes writes a row, notifies the therapist, and sends one sign-in email **from her domain to an address the script chose**.
+
+  The form carries a challenge — `nonce.expires.difficulty.signature`, HMAC-SHA256 over the first three with `SECRET_KEY` — and the browser must find a counter whose `SHA-256("<nonce>.<counter>")` opens with `difficulty` zero bits. The server re-signs, checks freshness, checks the work, and **MUST** spend the nonce: without single use a script solves one puzzle and replays the answer indefinitely, and the gate is decoration. Spent nonces are process-local, for the reason §17's per-IP windows already are — one ASGI process serves this deployment.
+
+  The difficulty travels **inside** the signed payload rather than being read from settings at verification time, so a form somebody already has open stays solvable at the price it was issued at when she turns the dial up mid-flood.
+
+  Verification **MUST** happen before anything is created — a refused submission must cost the practice less than an accepted one, which is the whole point.
+
+  **Not a hosted captcha, deliberately.** Turnstile and its equivalents need an account and per-install keys, load a third-party script into the one page a client fills in about their mental health, and call out to a verifier while somebody waits on a form — and §12.2 already states that a practice server may have no outbound network at all. The gate has to work identically on the `plain` profile, which is the deployment that has no CDN in front of it and therefore needs it most. For the same reason the browser hashes in plain JavaScript rather than through `crypto.subtle`, which does not exist on a non-secure origin.
+
+  The cost is real and is why it defaults to off: a browser with JavaScript disabled cannot submit either form while it is on. Telegram is unaffected — a chat id is already an identity, so the bot is not the flood vector.
 - Telegram webhook secret header checked before body parsing.
 - Client free text is capped at **4096 characters** — `problem_text`, `contact_note`, negotiation bodies, notes. The number is Telegram's message limit rather than a taste of ours: a lower cap would accept text one channel could not carry, and a higher one would take an essay on the web and refuse it on the bot. One cap, every field, both channels.
 - **An over-long field MUST be refused, never truncated.** Silently storing the first *n* characters loses what somebody wrote and tells neither them nor the therapist that anything is missing — and the half that goes missing is the end, which is where people put the thing they were working up to. The web form carries `maxlength` so the typing stops at the limit, and a counter appears for the last tenth of it so a field going quiet is explained rather than mysterious. The cap is enforced in the core regardless: a form is a courtesy, not a guarantee.
@@ -1523,7 +1557,7 @@ Each milestone ends with its acceptance criteria passing in CI.
 - One `practice` row from `PRACTICE_*` environment variables.
 - One `admin_user` from `ADMIN_USERNAME` / `ADMIN_PASSWORD`, hashed; the plaintext **MUST NOT** be persisted or logged.
 - `session_type`: `individual` (60 min), `couple` (60 min), both active, no price until the therapist sets one.
-- `content_topic`: `work_terms`, `qualification`, `about_psychotherapy`, `references` — the last with `show_in_menu = false` (it is sent with waitlist confirmations). Topic titles are **not** a column; they come from translation keys `content.topic.<code>.title`.
+- `content_topic`: `home`, `work_terms`, `qualification`, `about_psychotherapy`, `references`, `online_platforms` — three with `show_in_menu = false`, for three different reasons: `home` is the front page itself (§12.1), `references` is sent with waitlist confirmations, and `online_platforms` is read where a client chooses to meet online (§12.1, §13.1). Topic titles are **not** a column; they come from translation keys `content.topic.<code>.title`. The topics are seeded **empty**: what a section says is the therapist's, and shipping placeholder copy would put an implementer's words on her front page.
 - `timezone_option`: `Asia/Yerevan`, `Europe/Moscow`, `Europe/Kyiv`, `Europe/Berlin`, `Europe/London`, `America/New_York`, `America/Los_Angeles` — IANA names with friendly display labels, **not** UTC offsets.
 - `translation`: every key from `locales/*.yaml`.
 - No slots, no clients, no requests.

@@ -54,6 +54,30 @@ missing free-text time request, the calendar file a moved session cannot update,
 the retention of an abandoned `flow_state`, and the test database. Take them
 **one entry at a time**, in the order written, and read the entry first.
 
+**§20.4 is the third round, asked for on 2026-08-31 — interface rather than
+defects. All seven are settled.** Six were built: the front page is a `home`
+content block she writes, an email link greets whoever follows it, the language
+switch has a grid cell of its own, the footer carries her links from
+`practice.social_links`, choosing "online" shows the `online_platforms` blocks
+the way choosing on-site has always shown the address, and the booking and
+waitlist forms can be put behind a proof-of-work gate (`practice.captcha_on`,
+default off, difficulty 8–24 in `app/channels/web/captcha.py`). The seventh —
+how many slots a client is shown — was answered rather than built: thirty days
+is the horizon and she is content with it.
+
+**One entry is open under that heading**, and it came out of the work rather
+than from her: inside those thirty days nothing caps the Telegram picker, which
+builds one inline button per slot, so a densely filled month can exceed what
+Telegram will render. Read the entry before starting.
+
+Two things recorded there are **not** in §20.4 and are worth knowing before the
+next front-end change. Static assets are served without a version in the URL and
+Cloudflare caches them for four hours, so a CSS fix is invisible for that long
+and looks like a fix that did not work. And the suite still shares the
+deployment's database (§20.3's last entry), so a handful of `test_booking.py`
+schedule assertions and one seed assertion fail on rows nobody wrote
+deliberately; they fail on a clean checkout too.
+
 Milestones run M0 → M13 (`IMPLEMENTATION.md` §19). Work them **in order**. Each
 one's acceptance criteria must pass before starting the next. Do not implement
 later milestones early — the ordering exists so the core is fully testable before
