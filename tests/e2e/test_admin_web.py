@@ -390,9 +390,20 @@ async def test_the_m7_acceptance_path(
         },
     )
     await _fresh(committed)
+    # Scoped to the topic this test edits. Without the join it asked for "the
+    # `ru` block at position 0" across every topic, which was one row only
+    # while `work_terms` was the only topic anyone had written in -- a practice
+    # with a front page (§12.1) gives that query two.
+    topic_id = (
+        await committed.execute(select(ContentTopic.id).where(ContentTopic.code == "work_terms"))
+    ).scalar_one()
     block = (
         await committed.execute(
-            select(ContentBlock).where(ContentBlock.lang == "ru", ContentBlock.position == 0)
+            select(ContentBlock).where(
+                ContentBlock.topic_id == topic_id,
+                ContentBlock.lang == "ru",
+                ContentBlock.position == 0,
+            )
         )
     ).scalar_one()
     assert block.body_md == "Испорченная вставка."
@@ -800,6 +811,89 @@ async def test_settings_refuses_a_field_that_is_not_settable(
     assert "secret_key" not in MUTABLE_FIELDS
 
     _sign_in(web)
+    await committed.rollback()
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
+async def test_footer_links_are_saved_from_the_settings_form_and_shown_to_clients(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """§12.1: she fills them in on the settings page and they appear at the
+    bottom of every client page, in her order.
+
+    The form posts its blank rows too; they are dropped rather than refused.
+    """
+    _sign_in(web)
+    web.get("/admin/settings")
+    response = web.post(
+        "/admin/settings",
+        data={
+            "csrf_token": _csrf(web),
+            "availability_on": "1",
+            "booking_mode": "slots",
+            "name": "Practice",
+            "timezone": "Asia/Yerevan",
+            "default_language": "ru",
+            "reminder_offsets_min": "1440, 60",
+            "social_label": ["Telegram", "Instagram", ""],
+            "social_url": [
+                "https://t.me/example_practice",
+                "https://instagram.com/example_practice",
+                "",
+            ],
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "rejected" not in response.headers["location"], response.headers["location"]
+
+    await _fresh(committed)
+    practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
+    assert practice.social_links == [
+        {"label": "Telegram", "url": "https://t.me/example_practice"},
+        {"label": "Instagram", "url": "https://instagram.com/example_practice"},
+    ]
+
+    body = web.get("/").text
+    assert "https://t.me/example_practice" in body
+    assert "Instagram" in body
+
+    await committed.rollback()
+    await committed.execute(delete(AdminSession))
+    await committed.commit()
+
+
+async def test_a_footer_link_that_is_not_a_web_address_is_refused(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """An `href` is followed by a browser, so what may go in one is decided at
+    save time — in front of her, with a reason, rather than in front of a
+    client."""
+    _sign_in(web)
+    web.get("/admin/settings")
+    response = web.post(
+        "/admin/settings",
+        data={
+            "csrf_token": _csrf(web),
+            "availability_on": "1",
+            "booking_mode": "slots",
+            "name": "Practice",
+            "timezone": "Asia/Yerevan",
+            "default_language": "ru",
+            "reminder_offsets_min": "1440, 60",
+            "social_label": ["Somewhere"],
+            "social_url": ["javascript:alert(1)"],
+        },
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert "rejected" in response.headers["location"], response.headers["location"]
+
+    await _fresh(committed)
+    practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
+    assert all(link["url"] != "javascript:alert(1)" for link in practice.social_links)
+
     await committed.rollback()
     await committed.execute(delete(AdminSession))
     await committed.commit()
