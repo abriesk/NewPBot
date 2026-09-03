@@ -94,6 +94,30 @@ count **grows on its own** — an eighth went red the day "eight days from now"
 rolled onto a request left behind in August. The stale-asset trap is under
 Commands below, and closing it is still not built.
 
+**The waitlist page was the next thing looked at**, after the third round and
+not part of it. Two things were wrong with it and only one was visible: it
+showed `contact_note` — the client's own sentence, optional and often empty —
+and never the identities, which are one page away under Clients and always
+true. It now shows both, which is §20.2's option 1 for that page; the contact
+column on `/admin/requests` is untouched and its question stays open.
+
+The other was that **`contacted` sent nothing**. Nothing was wired to: no
+transition emitted an event, and underneath that the route never called
+`notifications.publish` at all, so anything collected there would have been
+dropped at commit whatever fired it. Both are fixed, and marking an entry
+contacted now sends what she typed — `waitlist.contacted.client`, §10. An
+empty box still sends nothing, deliberately. Note the payload field is
+`message`: `EMAIL_FORBIDDEN_FIELDS` strips anything called `note`, so the one
+name that looked obvious is the one that silently drops it from email.
+
+On the shared-database entry above: the suite is **green against a separate
+database** — `psychobooking_test` exists on the same server, and
+`docker compose run --rm -e DATABASE_URL=…/psychobooking_test web pytest`
+passes all of it, with none of the seven failures the deployment database
+produces. That is not the fix (nothing points the suite there by default, and
+`docker compose exec web pytest` still uses the deployment's), but it says the
+failures really are shared state and nothing else.
+
 Milestones run M0 → M13 (`IMPLEMENTATION.md` §19). Work them **in order**. Each
 one's acceptance criteria must pass before starting the next. Do not implement
 later milestones early — the ordering exists so the core is fully testable before
