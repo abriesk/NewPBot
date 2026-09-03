@@ -592,6 +592,7 @@ def build_router() -> APIRouter:
                     return Response(status_code=404)
             except DomainError:
                 return _back("/admin/waitlist", "refused")
+            await notifications.publish(session)
             return _back("/admin/waitlist", "done")
 
     # --- Slots --------------------------------------------------------------

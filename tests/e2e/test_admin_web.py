@@ -36,6 +36,7 @@ from app.core.models import (
     SessionType,
     Slot,
     Translation,
+    WaitlistEntry,
 )
 from app.core.services.translations import invalidate_cache
 from app.main import create_app
@@ -1613,6 +1614,114 @@ async def test_cancel_on_a_negotiation_is_greyed_with_its_reason(
     await committed.rollback()
     await committed.execute(delete(AdminSession))
     await committed.commit()
+
+
+# --- Waitlist (§12.2): what a "contacted" note does -------------------------
+
+WAITLIST_CLIENT_TG = "700800901"
+
+
+@pytest_asyncio.fixture
+async def waitlist_scratch(committed: AsyncSession) -> AsyncIterator[dict[str, object]]:
+    """A client with a verified Telegram identity and a waitlist entry."""
+    practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
+
+    stale = (
+        (
+            await committed.execute(
+                select(Identity.client_id).where(Identity.external_id == WAITLIST_CLIENT_TG)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if stale:
+        await committed.execute(delete(OutboxMessage).where(OutboxMessage.client_id.in_(stale)))
+        await committed.execute(delete(WaitlistEntry).where(WaitlistEntry.client_id.in_(stale)))
+        await committed.execute(delete(Identity).where(Identity.client_id.in_(stale)))
+        await committed.execute(delete(Client).where(Client.id.in_(stale)))
+        await committed.commit()
+
+    client = Client(practice_id=practice.id, language="ru", display_name="Waitlist Client")
+    committed.add(client)
+    await committed.flush()
+    committed.add(
+        Identity(
+            practice_id=practice.id,
+            client_id=client.id,
+            channel=Channel.telegram,
+            external_id=WAITLIST_CLIENT_TG,
+            verified_at=datetime.now(UTC),
+        )
+    )
+    entry = WaitlistEntry(
+        practice_id=practice.id,
+        client_id=client.id,
+        contact_note="телеграм после шести",
+    )
+    committed.add(entry)
+    await committed.flush()
+    await committed.commit()
+
+    yield {"entry_id": entry.id, "client_id": client.id}
+
+    await committed.rollback()
+    await committed.execute(delete(OutboxMessage).where(OutboxMessage.client_id == client.id))
+    await committed.execute(delete(WaitlistEntry).where(WaitlistEntry.client_id == client.id))
+    await committed.execute(delete(Identity).where(Identity.client_id == client.id))
+    await committed.execute(delete(Client).where(Client.id == client.id))
+    await committed.commit()
+
+
+async def test_marking_contacted_with_a_note_queues_a_client_notification(
+    web: TestClient, committed: AsyncSession, waitlist_scratch: dict[str, object]
+) -> None:
+    _sign_in(web)
+    response = web.post(
+        f"/admin/waitlist/{waitlist_scratch['entry_id']}/contacted",
+        data={"note": "I have an opening Thursday", "csrf_token": _csrf(web)},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/waitlist?flash=done"
+
+    await _fresh(committed)
+    row = (
+        await committed.execute(
+            select(OutboxMessage).where(
+                OutboxMessage.client_id == waitlist_scratch["client_id"],
+                OutboxMessage.intent_key == "waitlist.contacted.client",
+            )
+        )
+    ).scalar_one()
+    assert row.payload["message"] == "I have an opening Thursday"
+
+
+async def test_marking_contacted_with_no_note_queues_nothing(
+    web: TestClient, committed: AsyncSession, waitlist_scratch: dict[str, object]
+) -> None:
+    _sign_in(web)
+    response = web.post(
+        f"/admin/waitlist/{waitlist_scratch['entry_id']}/contacted",
+        data={"note": "", "csrf_token": _csrf(web)},
+        follow_redirects=False,
+    )
+    assert response.status_code == 303
+
+    await _fresh(committed)
+    rows = (
+        (
+            await committed.execute(
+                select(OutboxMessage).where(
+                    OutboxMessage.client_id == waitlist_scratch["client_id"],
+                    OutboxMessage.intent_key == "waitlist.contacted.client",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert not rows
 
 
 # --- The practice's people, and §16's paperwork (§12.2) ---------------------
