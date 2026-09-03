@@ -554,6 +554,11 @@ def build_router() -> APIRouter:
                 .scalars()
                 .all()
             )
+            found = await identities_for_many(session, [row.client_id for row in rows])
+            identities = {
+                str(row.client_id): _identity_contacts(found.get(row.client_id, []))
+                for row in rows
+            }
             return _render(
                 "admin/waitlist.html",
                 await _context(
@@ -562,6 +567,7 @@ def build_router() -> APIRouter:
                     admin,
                     rows=rows,
                     actions=("contacted", "converted", "closed"),
+                    identities=identities,
                 ),
             )
 

@@ -1616,7 +1616,7 @@ async def test_cancel_on_a_negotiation_is_greyed_with_its_reason(
     await committed.commit()
 
 
-# --- Waitlist (§12.2): what a "contacted" note does -------------------------
+# --- Waitlist (§12.2): who to reach, and what "contacted" sends ------------
 
 WAITLIST_CLIENT_TG = "700800901"
 
@@ -1671,6 +1671,16 @@ async def waitlist_scratch(committed: AsyncSession) -> AsyncIterator[dict[str, o
     await committed.execute(delete(Identity).where(Identity.client_id == client.id))
     await committed.execute(delete(Client).where(Client.id == client.id))
     await committed.commit()
+
+
+async def test_admin_waitlist_page_shows_identities_alongside_contact_note(
+    web: TestClient, waitlist_scratch: dict[str, object]
+) -> None:
+    _sign_in(web)
+    page = web.get("/admin/waitlist")
+    assert page.status_code == 200
+    assert "Contact: телеграм после шести" in page.text
+    assert f"telegram: {WAITLIST_CLIENT_TG}" in page.text
 
 
 async def test_marking_contacted_with_a_note_queues_a_client_notification(

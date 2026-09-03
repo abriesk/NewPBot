@@ -1,4 +1,5 @@
 {% extends "admin/base.html" %}
+{% from "admin/partials/contact.html" import contact_link %}
 {% block title %}{{ t.nav_waitlist }}{% endblock %}
 {% block content %}
 <h1>{{ t.nav_waitlist }}</h1>
@@ -8,6 +9,10 @@
        <span class="badge {{ e.status.value }}">{{ e.status.value }}</span></p>
     {% if e.problem_text %}<p class="problem">{{ e.problem_text }}</p>{% endif %}
     {% if e.contact_note %}<p>Contact: {{ e.contact_note }}</p>{% endif %}
+    <p class="muted">
+      Reachable at:
+      {% for c in identities[e.client_id | string] %}{{ contact_link(c) }}<br>{% else %}—{% endfor %}
+    </p>
     {% if e.admin_note %}<p class="muted">Note: {{ e.admin_note }}</p>{% endif %}
     <div class="admin-actions">
       {% for action in actions %}
