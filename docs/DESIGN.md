@@ -626,6 +626,29 @@ spoken to them. **This is interim.** Replying to a client belongs somewhere of
 its own rather than in a table cell, and that is a question for the UI pass, not
 for a column.
 
+`/admin/waitlist` took option 1 ("both") rather than waiting for the column to
+be lived with. A waitlist card is far shorter than a request card — no
+proposed time, no thread, no session type — so the width trade-off that
+motivated deferring the choice above does not apply the same way here. This is
+a decision for that one page, not a resolution of the question above: the
+contact column on `/admin/requests` stays on option "identities alone" until
+it is revisited on its own terms.
+
+**Marking a waitlist entry "contacted" can now send the client a message.**
+`admin_note` was already a form field on that page; it just went nowhere. Two
+choices worth recording:
+
+- The `Envelope` payload key is `message`, not `note`, even though the HTML
+  form field itself is still `note`. `EMAIL_FORBIDDEN_FIELDS` (§13.4) already
+  strips any field literally named `note` from every email envelope — that
+  name is spoken for by negotiation-thread bodies, which are deliberately kept
+  out of email. Reusing it here would have silently dropped the message for
+  every email recipient, defeating the point.
+- The notification fires only when the typed text is non-empty. A "contacted"
+  ping with nothing typed would say only "I've been in touch" — no more than
+  the phone call itself already told the client — so it is skipped rather than
+  sent as a content-free confirmation.
+
 **One person can still be two rows, and nothing here can join them.** A client
 whose Telegram and email were never linked is two `client` rows with two
 histories, because the service does not know they are one human. The clients
