@@ -229,6 +229,11 @@ intent:
 
   waitlist.joined.client.body: "You are on the waiting list. I will be in touch when a place opens up."
 
+  waitlist.contacted.client.body: "I've been in touch about your waitlist request."
+  # No label, same reasoning as request.rejected.client.reason above: her words
+  # stand as their own paragraph rather than being introduced as a "Message:".
+  waitlist.contacted.client.message: "{message}"
+
   auth.login_link.client.subject: "Your sign-in link"
   auth.login_link.client.body: "Use this link to open your booking. It works once and expires in {minutes} minutes."
   auth.login_link.client.action.open: "Open my booking"

@@ -59,6 +59,7 @@ def test_every_intent_in_section_10_has_a_spec() -> None:
         "request.accepted.admin",
         "waitlist.joined.client",
         "waitlist.joined.admin",
+        "waitlist.contacted.client",
         "auth.login_link.client",
         "auth.link_channel.client",
         "request.note.admin",
@@ -339,6 +340,31 @@ async def test_an_optional_part_appears_only_when_its_field_is_present(
     )
     assert "Reason" not in without.text
     assert "not taking new clients" in with_reason.text
+
+
+async def test_waitlist_contacted_message_appears_only_when_present(
+    db: AsyncSession,
+) -> None:
+    without = await render(
+        db,
+        intent_key="waitlist.contacted.client",
+        payload={"uuid": "abc", "message": None},
+        locale="en",
+        channel=Channel.telegram,
+        tz="UTC",
+        base_url="https://example.test",
+    )
+    with_message = await render(
+        db,
+        intent_key="waitlist.contacted.client",
+        payload={"uuid": "abc", "message": "I have an opening next week"},
+        locale="en",
+        channel=Channel.telegram,
+        tz="UTC",
+        base_url="https://example.test",
+    )
+    assert "I have an opening next week" not in without.text
+    assert "I have an opening next week" in with_message.text
 
 
 # --- Email transport (§4) ---------------------------------------------------

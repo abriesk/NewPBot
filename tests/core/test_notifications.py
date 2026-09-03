@@ -633,6 +633,32 @@ async def test_the_waitlist_way_out_is_not_reported_as_a_rejection(
     assert await _rows(db, "waitlist.joined.admin")
 
 
+async def test_marking_contacted_with_a_note_notifies_the_client(
+    db: AsyncSession, client: Client
+) -> None:
+    entry = await waitlist.join_waitlist(db, client_id=client.id)
+    await notifications.publish(db)  # drain the join event first
+
+    await waitlist.mark_contacted(db, entry.id, admin_note="I have an opening next week")
+    await notifications.publish(db)
+
+    rows = await _rows(db, "waitlist.contacted.client")
+    assert rows
+    assert rows[0].payload["message"] == "I have an opening next week"
+
+
+async def test_marking_contacted_with_no_note_sends_nothing(
+    db: AsyncSession, client: Client
+) -> None:
+    entry = await waitlist.join_waitlist(db, client_id=client.id)
+    await notifications.publish(db)
+
+    await waitlist.mark_contacted(db, entry.id, admin_note=None)
+    await notifications.publish(db)
+
+    assert not await _rows(db, "waitlist.contacted.client")
+
+
 async def test_a_decline_by_a_client_with_no_name_does_not_open_on_a_blank(
     db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
 ) -> None:

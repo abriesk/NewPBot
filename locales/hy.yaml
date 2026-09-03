@@ -195,6 +195,9 @@ intent:
 
   waitlist.joined.client.body: "Դուք սպասման ցուցակում եք։ Կկապվեմ ձեզ հետ, երբ տեղ ազատվի։"   # TODO: review
 
+  waitlist.contacted.client.body: "Կապվել եմ ձեզ հետ՝ ձեր սպասման ցուցակի հայտի կապակցությամբ։"   # TODO: review
+  waitlist.contacted.client.message: "{message}"
+
   auth.login_link.client.subject: "Ձեր մուտքի հղումը"   # TODO: review
   auth.login_link.client.body: "Այս հղումով կարող եք բացել ձեր ամրագրումը։ Այն գործում է մեկ անգամ և վավեր է {minutes} րոպե։"   # TODO: review
   auth.login_link.client.action.open: "Բացել իմ ամրագրումը"   # TODO: review
