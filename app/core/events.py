@@ -171,6 +171,23 @@ class WaitlistJoined(DomainEvent):
     intent_key: str = field(init=False, default="waitlist.joined")
 
 
+@dataclass(frozen=True, slots=True)
+class WaitlistContacted(DomainEvent):
+    """The therapist reached out and typed something worth sending on.
+
+    `message` rides on the event rather than being re-read from
+    `WaitlistEntry.admin_note` at envelope-build time: that column is shared
+    with `close_entry` (`_transition` sets it for either), so a later action in
+    the same session could overwrite it before this drains. Mirrors
+    `RequestNote.note`, not `RequestRejected`'s re-queried `reason`.
+    """
+
+    entry_id: int
+    entry_uuid: UUID
+    message: str
+    intent_key: str = field(init=False, default="waitlist.contacted")
+
+
 def collect(session: AsyncSession, event: DomainEvent) -> None:
     """Queue an event for the notification service to turn into outbox rows."""
     session.info.setdefault(_SESSION_KEY, []).append(event)

@@ -42,6 +42,7 @@ from app.core.events import (
     RequestRejected,
     RequestRescheduled,
     RequestSubmitted,
+    WaitlistContacted,
     WaitlistJoined,
     drain,
 )
@@ -390,6 +391,16 @@ async def envelopes_for(session: AsyncSession, event: DomainEvent) -> list[Envel
                     "contact_note": entry.contact_note,
                 },
                 dedupe_scope=f"waitlist-admin:{entry.id}",
+            ),
+        ]
+
+    if isinstance(event, WaitlistContacted):
+        return [
+            Envelope(
+                "waitlist.contacted.client",
+                Recipient.client,
+                {"uuid": str(event.entry_uuid), "message": event.message},
+                dedupe_scope=f"waitlist-contacted-client:{event.entry_id}",
             ),
         ]
 

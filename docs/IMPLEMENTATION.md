@@ -738,6 +738,7 @@ Each intent has a key, a recipient, a payload schema, and available actions. Tra
 | `waitlist.joined.client` | client | — | — |
 | `request.note.admin` | admin | uuid, name, note | — |
 | `waitlist.joined.admin` | admin | uuid, problem, contact note | — |
+| `waitlist.contacted.client` | client | uuid, message | — |
 | `auth.login_link.client` | client (email) | login url, telegram deep link | open |
 | `auth.link_channel.client` | client | telegram deep link | open |
 | `system.delivery_failed.admin` | admin | intent, address, error | — |

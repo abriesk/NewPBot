@@ -189,6 +189,9 @@ intent:
 
   waitlist.joined.client.body: "Вы в листе ожидания. Я напишу, когда появится место."   # TODO
 
+  waitlist.contacted.client.body: "Я на связи по вашей заявке в листе ожидания."   # TODO: review
+  waitlist.contacted.client.message: "{message}"
+
   auth.login_link.client.subject: "Ссылка для входа"                            # TODO
   auth.login_link.client.body: "По этой ссылке вы откроете свою заявку. Она действует один раз, {minutes} минут."   # TODO
   auth.login_link.client.action.open: "Открыть заявку"                          # TODO

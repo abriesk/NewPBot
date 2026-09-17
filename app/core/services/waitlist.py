@@ -19,7 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import ActorType, WaitlistStatus
 from app.core.errors import InvalidTransition, NotFound, RateLimited
-from app.core.events import WaitlistJoined, collect
+from app.core.events import WaitlistContacted, WaitlistJoined, collect
 from app.core.models import AuditLog, WaitlistEntry
 from app.core.policies import check_client_text, now_utc
 from app.core.services.settings import get_practice
@@ -144,9 +144,17 @@ async def _transition(
 async def mark_contacted(
     session: AsyncSession, entry_id: int, *, admin_note: str | None = None
 ) -> WaitlistEntry:
-    return await _transition(
+    entry = await _transition(
         session, entry_id, WaitlistStatus.contacted, "waitlist.contact", admin_note=admin_note
     )
+    # Only when she actually typed something: a bare status ping tells the
+    # client nothing the phone call itself didn't already say.
+    if admin_note:
+        collect(
+            session,
+            WaitlistContacted(entry_id=entry.id, entry_uuid=entry.uuid, message=admin_note),
+        )
+    return entry
 
 
 async def mark_converted(session: AsyncSession, entry_id: int) -> WaitlistEntry:

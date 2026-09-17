@@ -127,6 +127,12 @@ CATALOGUE: dict[str, IntentSpec] = {
         body_key="intent.waitlist.joined.client.body",
         email_subject_key="email.subject.request_update",
     ),
+    "waitlist.contacted.client": IntentSpec(
+        key="waitlist.contacted.client",
+        body_key="intent.waitlist.contacted.client.body",
+        optional_parts=(("message", "intent.waitlist.contacted.client.message"),),
+        email_subject_key="email.subject.request_update",
+    ),
     # §12.1: a client walking away from a negotiation reached her as silence,
     # because both sides emitted the same rejection event and neither carried an
     # admin envelope. No actions: `rejected` is terminal in §7.1, and no admin
