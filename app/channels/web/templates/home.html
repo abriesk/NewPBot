@@ -1,21 +1,54 @@
 {% extends "base.html" %}
+{% from "partials/art.html" import portrait %}
 {% block content %}
 {# §12.1: shown on the page an emailed link opened, and on no other visit. #}
 {% if greeting %}<p class="greeting">{{ greeting }}</p>{% endif %}
-<div class="page-head">
-  <h1>{{ t.welcome }}</h1>
-</div>
+
+{# NP4b: who is on the other side first. Her photo (or a plain illustration when she has not added
+   one), her name, and her own few words if she has written them -- nothing here is written for her. #}
+<section class="intro">
+  <div class="portrait">
+    {% if photo_version %}
+      <img src="/media/photo?v={{ photo_version }}" alt="{{ practice.name }}" width="280" height="280" fetchpriority="high">
+    {% else %}{{ portrait() }}{% endif %}
+  </div>
+  <div class="intro-text">
+    <p class="eyebrow">{{ practice.name }}</p>
+    <h1>{{ t.welcome }}</h1>
+    {% if bio %}<div class="prose">{{ bio | safe }}</div>{% endif %}
+    {% if bio_more %}<p><a class="link-back" href="/t/about_me">{{ t.more_about_me }}</a></p>{% endif %}
+  </div>
+</section>
+
+{% if facts %}
+<dl class="facts">
+  {% for fact in facts %}
+    <div><dt>{{ fact.label }}</dt>{% for line in fact.lines %}<dd>{{ line }}</dd>{% endfor %}</div>
+  {% endfor %}
+</dl>
+{% endif %}
+
+<div class="stack-actions"><a class="cta" href="/book">{{ t.consultation }}</a></div>
+
+<section class="how">
+  <h2>{{ t.next_title }}</h2>
+  <ol class="how-steps">
+    <li>{{ t.next_1 }}</li>
+    <li>{{ t.next_2 }}</li>
+    <li>{{ t.next_3 }}</li>
+  </ol>
+</section>
+
 {% if intro %}
   {# Her own words, written at /admin/content and sanitised by the web
      emitter's allowlist (§11.3). #}
+  <section class="her-words">
   {% for html in intro %}<div class="prose">{{ html | safe }}</div>{% endfor %}
-{% else %}
-  {# §12.1: nothing written yet, so the menu stands in rather than a blank
-     page. It is the same list the header carries, which is why it goes as
-     soon as there is anything to say instead. #}
+  </section>
+{% elif topics %}
+  {# §12.1: nothing written yet, so the menu stands in rather than a blank page. #}
   <ul class="topics">
     {% for topic in topics %}<li><a href="/t/{{ topic.code }}">{{ topic.title }}</a></li>{% endfor %}
   </ul>
 {% endif %}
-<div class="stack-actions"><a class="cta" href="/book">{{ t.consultation }}</a></div>
 {% endblock %}

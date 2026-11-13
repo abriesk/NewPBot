@@ -89,6 +89,10 @@ SLOT_WINDOW = timedelta(days=30)
 #: (`app/core/services/content.py`), since Telegram reaches for the same two.
 HOME_TOPIC = content.HOME_TOPIC
 ONLINE_PLATFORMS_TOPIC = content.ONLINE_PLATFORMS_TOPIC
+#: NP4b: her short bio (beside the photo), the cancellation rule and the privacy page.
+ABOUT_ME_TOPIC = content.ABOUT_ME_TOPIC
+CANCELLATION_TOPIC = content.CANCELLATION_TOPIC
+PRIVACY_TOPIC = content.PRIVACY_TOPIC
 
 #: §12.1: set on the redirect out of an email link, and nowhere else. A
 #: greeting keyed on the session would follow a returning client around for a
@@ -419,8 +423,52 @@ async def _labels(session: AsyncSession, lang: str) -> dict[str, str]:
         "not_found": "common.error.not_found",
         "captcha_failed": "common.error.captcha",
         "captcha_wait": "booking.captcha_wait",
+        # NP4b
+        "next_title": "home.next.title",
+        "next_1": "home.next.1",
+        "next_2": "home.next.2",
+        "next_3": "home.next.3",
+        "more_about_me": "home.more_about_me",
+        "facts_sessions": "home.facts.sessions",
+        "facts_format": "home.facts.format",
+        "facts_languages": "home.facts.languages",
+        "privacy_link": "privacy.link",
     }
     return {name: await get_text(session, lang, key) for name, key in keys.items()}
+
+
+async def _facts(session: AsyncSession, context: dict[str, Any]) -> list[dict[str, Any]]:
+    """The three facts under her name: sessions (length, and price only where she stored one), how
+    we meet, and the languages she wrote. A fact with nothing true to say is left out."""
+    t = context["t"]
+    lang = context["lang"]
+    practice = context["practice"]
+    sessions = []
+    for st in await _active_session_types(session):
+        name = await session_type_name(session, lang, st.code)
+        price = price_text(st)
+        sessions.append(
+            await get_text(
+                session,
+                lang,
+                "booking.type.with_price" if price else "booking.type.without_price",
+                name=name,
+                duration=st.duration_min,
+                **({"price": price} if price else {}),
+            )
+        )
+    meet = (
+        [t["modality_online"]]
+        if practice.online_only
+        else [t["modality_online"], t["modality_onsite"]]
+    )
+    facts: list[dict[str, Any]] = []
+    if sessions:
+        facts.append({"label": t["facts_sessions"], "lines": sessions})
+    facts.append({"label": t["facts_format"], "lines": [" · ".join(meet)]})
+    if practice.languages:
+        facts.append({"label": t["facts_languages"], "lines": [practice.languages]})
+    return facts
 
 
 async def _context(
@@ -665,11 +713,18 @@ def build_router() -> APIRouter:
             # has not written them -- an empty front page would be worse than
             # the duplicated navigation it replaces.
             blocks = await content.get_topic_blocks(session, HOME_TOPIC, context["lang"])
+            bio = await content.get_topic_blocks(session, ABOUT_ME_TOPIC, context["lang"])
             return _render(
                 "home.html",
                 {
                     **context,
                     "intro": [to_web_html(block.body_md) for block in blocks],
+                    # Hers or nothing: the first block of her bio beside the photo, a link to the
+                    # rest when she wrote more. No block, no biography.
+                    "bio": to_web_html(bio[0].body_md) if bio else "",
+                    "bio_more": len(bio) > 1,
+                    "photo_version": await photo_service.photo_version(session),
+                    "facts": await _facts(session, context),
                     "greeting": await _greeting(session, request, context["lang"]),
                 },
             )

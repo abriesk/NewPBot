@@ -45,6 +45,11 @@ FOOTNOTE = re.compile(r"\[\^[^\]]+\]")
 #: what a client reads at the moment they choose to meet online (§12.1, §13.1).
 HOME_TOPIC = "home"
 ONLINE_PLATFORMS_TOPIC = "online_platforms"
+#: NP4b: hers and shown by name: the short bio beside her photo, the cancellation rule the
+#: "what happens next" block quotes, and the client privacy page.
+ABOUT_ME_TOPIC = "about_me"
+CANCELLATION_TOPIC = "cancellation"
+PRIVACY_TOPIC = "privacy"
 
 
 class MarkdownNotAllowed(DomainError):

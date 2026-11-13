@@ -85,6 +85,9 @@ content:
   topic.about_psychotherapy.title: "Հոգեթերապիայի մասին"
   topic.references.title: "Այլ մասնագետներ"      # TODO: review
   topic.online_platforms.title: "Որտեղ են անցկացվում առցանց հանդիպումները"   # TODO: review
+  topic.about_me.title: "Իմ մասին"   # TODO: review
+  topic.cancellation.title: "Չեղարկման կանոն"   # TODO: review
+  topic.privacy.title: "Գաղտնիություն"   # TODO: review
   empty: "Տեղեկատվությունը դեռ ավելացված չէ։"
 
 booking:
@@ -243,3 +246,66 @@ email:
 calendar:
   summary: "Խորհրդատվություն"                    # TODO: review
   location.online: "Առցանց"                      # TODO: review
+
+# --- NP4b: ջերմ հաճախորդային կայք (գլխավոր, ժամի ընտրություն, հաջորդը, գաղտնիություն, կարգավիճակ) ---
+home:
+  facts.sessions: "Հանդիպումներ"                  # TODO: review
+  facts.format: "Ինչպես ենք հանդիպում"            # TODO: review
+  facts.languages: "Լեզուներ"                     # TODO: review
+  next.title: "Ինչ կլինի գրանցվելուց հետո"        # TODO: review
+  next.1: "Դուք ընտրում եք ժամը և գրում մի քանի բառ՝ միայն այն, ինչով ցանկանում եք կիսվել։"   # TODO: review
+  next.2: "Ես անձամբ եմ կարդում ձեր հայտը և հաստատում ժամը կամ առաջարկում մեկ այլ ժամ։"   # TODO: review
+  next.3: "Դուք ստանում եք իմ պատասխանը, և մենք հանդիպում ենք պայմանավորված ժամին։"   # TODO: review
+  more_about_me: "Ավելին իմ մասին"                # TODO: review
+
+picker:
+  morning: "Առավոտ"                               # TODO: review
+  afternoon: "Օրվա կեսին"                         # TODO: review
+  evening: "Երեկո"                                # TODO: review
+  days: "Ընտրեք օրը"                              # TODO: review
+  day_free: "{day}՝ ազատ է {count}"               # TODO: review
+  show_times: "Ցույց տալ ժամերը"                  # TODO: review
+
+next:
+  title: "Ինչ կլինի հաջորդը"                      # TODO: review
+  who.title: "Ով է կարդում ձեր գրածը"             # TODO: review
+  who.text: "Միայն ես։ Ուրիշ ոչ ոք չի տեսնում ձեր հաղորդագրությունը, և ես այն ոչ ոքի չեմ փոխանցում։"   # TODO: review
+  when.title: "Երբ կպատասխանեմ"                   # TODO: review
+  when.text: "Հայտը բաց է մնում {hours} ժամ, և ես կպատասխանեմ այդ ընթացքում։ Պատասխանը կգա էլ. փոստով կամ Telegram-ով և կերևա ձեր հայտի էջում։"   # TODO: review
+  cancel.title: "Եթե պետք է չեղարկել"             # TODO: review
+  cancel.text: "Գրեք ինձ ձեր հայտի էջում (հղումը նամակի մեջ է), և մենք կլուծենք։"   # TODO: review
+  privacy: "Ինչպես եմ պահպանում ձեր տվյալները"    # TODO: review
+
+privacy:
+  title: "Գաղտնիություն"                          # TODO: review
+  link: "Գաղտնիություն"                           # TODO: review
+  default.1: "Այս էջում պարզ գրված է, թե ինչ է լինում այն ամենի հետ, ինչ դուք հայտնում եք ինձ։"   # TODO: review
+  default.2: "Ինչ եմ պահում՝ ձեր անունը, եթե նշել եք, էլ. փոստի հասցեն, ընտրված ժամը և հայտում գրածը։ Եթե օգտվում եք Telegram-ից, պահվում է նաև ձեր Telegram-ի հաշիվը։"   # TODO: review
+  default.3: "Ով է կարդում՝ միայն ես։ Օգտագործում եմ՝ հայտին պատասխանելու և հանդիպումը պայմանավորելու համար։ Էլ. փոստի հասցեն օգտագործվում է հաստատման հղման և հիշեցումների համար, ուրիշ ոչնչի համար։"   # TODO: review
+  default.4: "Կայքում գովազդ ու հետևում չկա, և ձեր գրածը ես ուրիշին չեմ փոխանցում։"   # TODO: review
+  default.5: "Որքան ժամանակ՝ հայտերն ու հաղորդագրությունները ջնջվում են ավարտից մոտ {months} ամիս հետո։"   # TODO: review
+  default.6: "Կայքը պահում է մի քանի փոքր cookie՝ միայն ձեր լեզուն, ժամային գոտին և մուտք գործած լինելը հիշելու համար։ Եթե ուզում եք իմանալ կամ ջնջել, թե ինչ եմ պահում ձեր մասին, գրեք ինձ, և ես դա կանեմ։"   # TODO: review
+
+status:
+  head.pending: "Ձեր հայտն ուղարկվել է"           # TODO: review
+  head.negotiating: "Միասին ընտրում ենք ժամը"     # TODO: review
+  head.confirmed: "Հանդիպումը նշանակված է"        # TODO: review
+  head.rejected: "Այս ժամը չստացվեց"              # TODO: review
+  head.expired: "Հայտը մնաց առանց պատասխանի"       # TODO: review
+  head.cancelled: "Հանդիպումը չեղարկվել է"        # TODO: review
+  head.completed: "Հանդիպումը կայացել է"          # TODO: review
+  lead.pending: "Ես անձամբ եմ կարդում յուրաքանչյուր հայտ։ Պատասխանը կգա էլ. փոստով կամ Telegram-ով և կերևա այս էջում։"   # TODO: review
+  lead.negotiating: "Մենք դեռ ընտրում ենք ժամը։ Այն, ինչին պետք է պատասխանեք, ներքևում է։"   # TODO: review
+  lead.confirmed: "Ուրախ կլինեմ ձեզ տեսնել։ Ամեն անհրաժեշտը այս էջում է։"   # TODO: review
+  lead.rejected: "Չկարողացա առաջարկել այս ժամը։ Կարող եք ընտրել մեկ այլ ժամ։"   # TODO: review
+  lead.expired: "Չհասցրի ժամանակին պատասխանել։ Կարող եք ընտրել նոր ժամ։"   # TODO: review
+  lead.cancelled: "Կարող եք ընտրել մեկ այլ ժամ, երբ պատրաստ լինեք։"   # TODO: review
+  lead.completed: "Շնորհակալություն, որ եկաք։ Կարող եք նորից գրանցվել։"   # TODO: review
+  timeline.sent: "Ուղարկված"                      # TODO: review
+  timeline.confirmed: "Հաստատված"                 # TODO: review
+  timeline.session: "Հանդիպում"                   # TODO: review
+  ics: "Ավելացնել օրացույցում"                    # TODO: review
+  join: "Միանալ հանդիպմանը"                       # TODO: review
+  address: "Բացել հասցեն"                         # TODO: review
+  confirm_lead: "Ոչինչ չի ուղարկվի, քանի դեռ կոճակը չեք սեղմել։"   # TODO: review
+  hold_lead: "Ժամը պահված է, մինչ դուք լրացնում եք ձևը։"   # TODO: review

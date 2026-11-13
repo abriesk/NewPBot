@@ -1,0 +1,36 @@
+{# NP4b: one soft illustration style, inline and decorative (aria-hidden), painted only with the
+   site's own tokens so light and dark both work and nothing is fetched. Four small pictures:
+   `portrait` stands in for her photo until she uploads one (an abstract silhouette, not a face),
+   `leaf` for done states, `calm` for empty ones, `cloud` for errors. #}
+{% macro portrait() %}
+<svg class="art art-portrait" viewBox="0 0 120 120" role="img" aria-hidden="true" focusable="false">
+  <circle cx="60" cy="60" r="60" class="art-bg"/>
+  <circle cx="60" cy="46" r="19" class="art-fg"/>
+  <path d="M22 106c3-24 20-34 38-34s35 10 38 34c-10 8-24 13-38 13s-28-5-38-13z" class="art-fg"/>
+</svg>
+{% endmacro %}
+
+{% macro leaf() %}
+<svg class="art art-spot" viewBox="0 0 96 96" aria-hidden="true" focusable="false">
+  <circle cx="48" cy="48" r="46" class="art-bg"/>
+  <path d="M30 62c0-22 14-34 38-36 2 24-8 40-30 42z" class="art-fg"/>
+  <path d="M30 66c8-14 17-23 30-31" class="art-line"/>
+</svg>
+{% endmacro %}
+
+{% macro calm() %}
+<svg class="art art-spot" viewBox="0 0 96 96" aria-hidden="true" focusable="false">
+  <circle cx="48" cy="48" r="46" class="art-bg"/>
+  <circle cx="48" cy="40" r="13" class="art-fg"/>
+  <path d="M18 66c10-6 20-6 30 0s20 6 30 0" class="art-line"/>
+  <path d="M26 76c8-5 16-5 22 0s14 5 22 0" class="art-line"/>
+</svg>
+{% endmacro %}
+
+{% macro cloud() %}
+<svg class="art art-spot" viewBox="0 0 96 96" aria-hidden="true" focusable="false">
+  <circle cx="48" cy="48" r="46" class="art-bg"/>
+  <path d="M30 62a11 11 0 0 1 2-21 16 16 0 0 1 31 3 9 9 0 0 1-1 18z" class="art-fg"/>
+  <path d="M38 72v6M50 72v6M62 72v6" class="art-line"/>
+</svg>
+{% endmacro %}

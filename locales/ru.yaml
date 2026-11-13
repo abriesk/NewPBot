@@ -79,6 +79,9 @@ content:
   topic.about_psychotherapy.title: "О психотерапии"
   topic.references.title: "Другие специалисты"   # TODO: confirm wording
   topic.online_platforms.title: "Где проходят онлайн-сессии"   # TODO: review
+  topic.about_me.title: "Обо мне"   # TODO: review
+  topic.cancellation.title: "Правило отмены"   # TODO: review
+  topic.privacy.title: "Конфиденциальность"   # TODO: review
   empty: "Информация пока не добавлена."
 
 booking:
@@ -237,3 +240,66 @@ email:
 calendar:
   summary: "Консультация"                        # TODO
   location.online: "Онлайн"                      # TODO
+
+# --- NP4b: тёплый клиентский сайт (главная, выбор времени, что дальше, конфиденциальность, статус) ---
+home:
+  facts.sessions: "Встречи"                       # TODO: review
+  facts.format: "Как мы встречаемся"              # TODO: review
+  facts.languages: "Языки"                        # TODO: review
+  next.title: "Что будет после записи"            # TODO: review
+  next.1: "Вы выбираете время и пишете пару слов — только то, чем хотите поделиться."   # TODO: review
+  next.2: "Я сама читаю вашу заявку и подтверждаю время или предлагаю другое."          # TODO: review
+  next.3: "Вы получаете мой ответ, и мы встречаемся в назначенное время."               # TODO: review
+  more_about_me: "Подробнее обо мне"              # TODO: review
+
+picker:
+  morning: "Утро"                                 # TODO: review
+  afternoon: "День"                               # TODO: review
+  evening: "Вечер"                                # TODO: review
+  days: "Выберите день"                           # TODO: review
+  day_free: "{day}: свободно {count}"             # TODO: review
+  show_times: "Показать время"                    # TODO: review
+
+next:
+  title: "Что будет дальше"                       # TODO: review
+  who.title: "Кто читает то, что вы пишете"       # TODO: review
+  who.text: "Только я. Никто другой не видит ваше сообщение, и я не передаю его дальше."   # TODO: review
+  when.title: "Когда я отвечу"                    # TODO: review
+  when.text: "Заявка остаётся открытой {hours} ч, и я отвечу в это время. Ответ придёт по почте или в Telegram и появится на странице вашей заявки."   # TODO: review
+  cancel.title: "Если нужно отменить"             # TODO: review
+  cancel.text: "Напишите мне на странице вашей заявки (ссылка в письме), и мы всё решим."   # TODO: review
+  privacy: "Как я берегу ваши данные"             # TODO: review
+
+privacy:
+  title: "Конфиденциальность"                     # TODO: review
+  link: "Конфиденциальность"                      # TODO: review
+  default.1: "Здесь прямо написано, что происходит с тем, что вы мне сообщаете."   # TODO: review
+  default.2: "Что я храню: имя, если вы его указали, адрес почты, выбранное время и слова из вашей заявки. Если вы пользуетесь Telegram, сохраняется и ваш аккаунт Telegram."   # TODO: review
+  default.3: "Кто это читает: только я. Я использую это, чтобы ответить на заявку и договориться о встрече. Адрес почты нужен для ссылки подтверждения и напоминаний, больше ни для чего."   # TODO: review
+  default.4: "На сайте нет рекламы и слежки, и я не передаю написанное вами никому."   # TODO: review
+  default.5: "Как долго: заявки и сообщения стираются примерно через {months} мес. после того, как всё завершено."   # TODO: review
+  default.6: "Сайт хранит несколько небольших cookie — только чтобы помнить ваш язык, часовой пояс и то, что вы вошли. Если хотите узнать или стереть, что я о вас храню, напишите мне, и я это сделаю."   # TODO: review
+
+status:
+  head.pending: "Ваша заявка отправлена"          # TODO: review
+  head.negotiating: "Вместе выбираем время"        # TODO: review
+  head.confirmed: "Встреча назначена"              # TODO: review
+  head.rejected: "Это время не подошло"            # TODO: review
+  head.expired: "Заявка осталась без ответа"       # TODO: review
+  head.cancelled: "Встреча отменена"               # TODO: review
+  head.completed: "Встреча состоялась"             # TODO: review
+  lead.pending: "Я сама читаю каждую заявку. Ответ придёт по почте или в Telegram и появится на этой странице."   # TODO: review
+  lead.negotiating: "Мы ещё выбираем время. Всё, что требует вашего ответа, ниже."   # TODO: review
+  lead.confirmed: "Буду рада вас видеть. Всё нужное — на этой странице."   # TODO: review
+  lead.rejected: "Я не смогла предложить это время. Вы можете выбрать другое."   # TODO: review
+  lead.expired: "Я не успела ответить вовремя. Вы можете выбрать новое время."   # TODO: review
+  lead.cancelled: "Вы можете выбрать другое время, когда будете готовы."   # TODO: review
+  lead.completed: "Спасибо, что пришли. Вы можете записаться снова."   # TODO: review
+  timeline.sent: "Отправлено"                      # TODO: review
+  timeline.confirmed: "Подтверждено"               # TODO: review
+  timeline.session: "Встреча"                      # TODO: review
+  ics: "Добавить в календарь"                      # TODO: review
+  join: "Войти во встречу"                         # TODO: review
+  address: "Открыть адрес"                         # TODO: review
+  confirm_lead: "Ничего не отправится, пока вы не нажмёте кнопку."   # TODO: review
+  hold_lead: "Время сохранено, пока вы заполняете форму."   # TODO: review

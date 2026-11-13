@@ -14,9 +14,10 @@ import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from PIL import Image
-from sqlalchemy import select
+from sqlalchemy import select, update
 
-from app.core.models import ContentTopic, PracticePhoto
+from app.core.models import ContentBlock, ContentTopic, Practice, PracticePhoto, SessionType
+from app.core.services import content, photo
 from app.main import create_app
 
 # Fixtures and helpers shared with the admin and booking tests.
@@ -51,7 +52,7 @@ def _upload(web: TestClient, raw: bytes, name: str = "me.jpg", ctype: str = "ima
 
 
 @pytest_asyncio.fixture
-async def no_photo(committed) -> AsyncIterator[None]:  # noqa: F811
+async def no_photo(committed) -> AsyncIterator[None]:
     async def clear() -> None:
         await committed.rollback()
         for row in (await committed.execute(select(PracticePhoto))).scalars():
@@ -72,7 +73,7 @@ async def test_the_admin_uploads_a_photo_and_the_site_serves_a_small_cached_copy
 ) -> None:
     _sign_in(web)
     response = _upload(web, _jpeg((2400, 1800)))
-    assert response.status_code == 303 and "Photo+saved" in response.headers["location"]
+    assert response.status_code == 303 and "Photo%20saved" in response.headers["location"]
 
     page = web.get("/admin/settings")
     assert "/media/photo?v=" in page.text
@@ -182,7 +183,7 @@ def test_the_languages_field_is_on_the_settings_form_and_saves(web: TestClient) 
 
 
 @pytest.mark.asyncio
-async def test_bio_cancellation_and_privacy_are_content_topics_she_can_write(committed) -> None:  # noqa: F811
+async def test_bio_cancellation_and_privacy_are_content_topics_she_can_write(committed) -> None:
     codes = set((await committed.execute(select(ContentTopic.code))).scalars())
     assert {"about_me", "cancellation", "privacy"} <= codes
     hidden = (
@@ -191,3 +192,121 @@ async def test_bio_cancellation_and_privacy_are_content_topics_she_can_write(com
         )
     ).scalar_one()
     assert hidden is False  # not a menu entry: nothing to link to while it is empty
+
+
+# --- item 2: the front page ----------------------------------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def empty_content(committed, no_photo) -> AsyncIterator[None]:
+    """No photo, no bio, no languages, no price, no home text: what a new practice looks like."""
+    topics = ("about_me", "cancellation", "privacy", "home")
+    saved = (
+        await committed.execute(
+            select(
+                SessionType.id, SessionType.price_amount_minor, SessionType.price_display_override
+            )
+        )
+    ).all()
+    await committed.execute(
+        update(SessionType).values(price_amount_minor=None, price_display_override=None)
+    )
+    ids = select(ContentTopic.id).where(ContentTopic.code.in_(topics))
+    held = (
+        (await committed.execute(select(ContentBlock).where(ContentBlock.topic_id.in_(ids))))
+        .scalars()
+        .all()
+    )
+    for block in held:
+        await committed.delete(block)
+    await committed.commit()
+    yield
+    await committed.rollback()
+    for row_id, amount, override in saved:
+        await committed.execute(
+            update(SessionType)
+            .where(SessionType.id == row_id)
+            .values(price_amount_minor=amount, price_display_override=override)
+        )
+    await committed.commit()
+
+
+@pytest_asyncio.fixture
+async def her_content(committed, empty_content) -> AsyncIterator[None]:
+    """Everything she can supply, written the way the admin writes it."""
+    topic = {
+        c: i for c, i in (await committed.execute(select(ContentTopic.code, ContentTopic.id))).all()
+    }
+    await content.upsert_block(
+        committed,
+        topic_id=topic["about_me"],
+        lang="en",
+        position=0,
+        body_md="I work with grief and change.",
+    )
+    await content.upsert_block(
+        committed, topic_id=topic["about_me"], lang="en", position=1, body_md="A second paragraph."
+    )
+    await content.upsert_block(
+        committed,
+        topic_id=topic["home"],
+        lang="en",
+        position=0,
+        body_md="Her free text on the front page.",
+    )
+    await committed.execute(
+        update(SessionType)
+        .where(SessionType.code == "individual")
+        .values(price_amount_minor=15000, price_currency="AMD")
+    )
+    await committed.execute(
+        update(Practice).values(languages="Русский, English", online_only=False)
+    )
+    await photo.set_photo(committed, _jpeg())
+    await committed.commit()
+    yield
+
+
+@pytest.mark.asyncio
+async def test_the_front_page_with_nothing_written_still_reads_well_and_invents_nothing(
+    web: TestClient, empty_content: None
+) -> None:
+    page = web.get("/?lang=en")
+    assert page.status_code == 200
+    assert "/media/photo" not in page.text  # a plain illustration, not a stock face
+    assert 'class="art art-portrait"' in page.text
+    assert "What happens after you book" in page.text
+    assert 'href="/book"' in page.text
+    assert "Languages" not in page.text  # a fact she has not given is left out
+    assert "AMD" not in page.text and "Sessions" in page.text
+    assert "More about me" not in page.text
+    # No placeholder text ships as content.
+    assert "Lorem" not in page.text and "TODO" not in page.text
+
+
+@pytest.mark.asyncio
+async def test_the_front_page_shows_what_she_wrote_and_nothing_else(
+    web: TestClient, her_content: None
+) -> None:
+    page = web.get("/?lang=en").text
+    assert "/media/photo?v=" in page and "art-portrait" not in page
+    assert "I work with grief and change." in page
+    assert (
+        "A second paragraph." not in page and 'href="/t/about_me"' in page
+    )  # the rest is one click away
+    assert "Her free text on the front page." in page
+    assert "Русский, English" in page
+    assert "15\u00a0000\u00a0AMD" in page
+    assert "Online" in page and "In person" in page
+    assert web.get("/t/about_me?lang=en").status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_online_only_says_online_only(
+    web: TestClient, empty_content: None, committed
+) -> None:
+    await committed.execute(update(Practice).values(online_only=True))
+    await committed.commit()
+    page = web.get("/?lang=en").text
+    facts = page.split('<dl class="facts">')[1].split("</dl>")[0]
+    assert "In person" not in facts

@@ -881,3 +881,148 @@ input[aria-invalid=true], textarea[aria-invalid=true] { border-color: #a3261c; }
     transition-duration: .01ms !important;
   }
 }
+
+/* --- NP4b: warm and personal -------------------------------------------
+   Typography and spacing carry the warmth; the palette is the one above and no
+   colour is added here. The illustrations are inline SVG painted with the same
+   tokens (decorative, `aria-hidden`), so light and dark both work and nothing
+   is fetched. */
+
+.art { display: block; max-width: 100%; height: auto; }
+.art-bg { fill: var(--accent-soft); }
+.art-fg { fill: var(--accent); opacity: .55; }
+.art-line { fill: none; stroke: var(--accent); stroke-width: 3; stroke-linecap: round; opacity: .7; }
+.art-spot { width: 5.5rem; margin: 0 auto 1.25rem; }
+
+/* The front page: a photo and who she is, side by side from the width where it fits. */
+.intro { display: grid; gap: 1.5rem; align-items: center; margin: 0 0 2rem; }
+.portrait { width: min(11rem, 55vw); aspect-ratio: 1; margin-inline: auto; }
+.portrait img, .portrait .art {
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  object-fit: cover;
+  box-shadow: var(--shadow-md);
+}
+.intro-text { text-align: center; }
+.intro-text h1 { margin-bottom: .6rem; }
+.intro-text .prose { margin-inline: auto; text-align: left; }
+.intro-text .eyebrow { margin-bottom: .35rem; }
+@media (min-width: 34rem) {
+  .intro { grid-template-columns: 12rem 1fr; gap: 2.25rem; }
+  .portrait { width: 12rem; }
+  .intro-text { text-align: left; }
+}
+
+.facts {
+  display: grid;
+  gap: .75rem;
+  margin: 0 0 1.5rem;
+  padding: 1.1rem 1.25rem;
+  border: 1px solid var(--line-strong);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+.facts dt { color: var(--muted); font-size: .8rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.facts dd { margin: .1rem 0 0; color: var(--ink); }
+@media (min-width: 42rem) { .facts { grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); gap: 1.5rem; } }
+
+.how { margin-top: 3rem; }
+.how h2 { margin-top: 0; }
+.how-steps { display: grid; gap: .9rem; margin: 0; padding: 0; list-style: none; counter-reset: how; }
+.how-steps li {
+  position: relative;
+  min-height: 2rem;
+  padding-left: 2.75rem;
+  color: var(--ink-soft);
+  counter-increment: how;
+}
+.how-steps li::before {
+  content: counter(how);
+  position: absolute;
+  left: 0;
+  top: -.05rem;
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 50%;
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-family: var(--serif);
+  font-weight: 600;
+}
+.her-words { margin-top: 3rem; padding-top: 2rem; border-top: 1px solid var(--line); }
+
+/* The slot picker: type and modality in one compact row, a strip of days, then the day's times. */
+.picker-row { display: flex; flex-wrap: wrap; gap: .75rem 1.5rem; margin: 0 0 1.25rem; }
+.picker-row fieldset { margin: 0; padding: 0; border: 0; }
+.picker-row legend { margin-bottom: .35rem; color: var(--muted); font-size: .8rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.picker-row .pills { display: flex; flex-wrap: wrap; gap: .5rem; }
+.picker-row label.choice { margin: 0; padding: .55rem .9rem; }
+
+.daystrip { margin: 0 -1.5rem 1.25rem; padding: 0 1.5rem .35rem; overflow-x: auto; scroll-snap-type: x proximity; }
+.daystrip ul { display: flex; gap: .5rem; margin: 0; padding: 0; list-style: none; }
+.daystrip a {
+  display: grid;
+  justify-items: center;
+  gap: .05rem;
+  min-width: 4.25rem;
+  padding: .55rem .5rem;
+  border: 1px solid var(--control);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--ink);
+  line-height: 1.2;
+  text-decoration: none;
+  scroll-snap-align: start;
+}
+.daystrip a:hover { border-color: var(--accent); }
+.daystrip a[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); box-shadow: inset 0 0 0 1px var(--accent); }
+.daystrip .dow { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+.daystrip .num { font-family: var(--serif); font-size: 1.3rem; font-weight: 600; }
+.daystrip .mon { color: var(--muted); font-size: .78rem; }
+.daystrip .cnt { margin-top: .15rem; color: var(--accent); font-size: .8rem; font-weight: 600; }
+.daystrip a:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+
+.zone-line { margin: 0 0 1rem; }
+/* The zone choice stays out of the way until "change" is followed (the fragment targets the fieldset). */
+#tz-field:not(:target) .zone-choice { display: none; }
+#tz-field { margin: 0 0 1rem; padding: 0; border: 0; }
+.part + .part { margin-top: 1.1rem; }
+.part h3 { margin: 0 0 .5rem; color: var(--muted); font-family: var(--sans); font-size: .82rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+
+/* "What happens next": three short answers, the same block on details, done and waitlist. */
+.what-next { margin: 1.75rem 0 0; padding: 1.25rem 1.35rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-tint); }
+.what-next h2 { margin: 0 0 .75rem; font-size: 1.1rem; }
+.what-next dl { display: grid; gap: .8rem; margin: 0; }
+.what-next dt { color: var(--ink); font-weight: 600; }
+.what-next dd { margin: .1rem 0 0; color: var(--ink-soft); }
+.what-next .prose { max-width: none; }
+.what-next .prose > :last-child { margin-bottom: 0; }
+.what-next p.privacy-link { margin: 1rem 0 0; font-size: .92rem; }
+
+/* The request page as a status page, and the confirm and hold notices that share its shell. */
+.status-card { max-width: 36rem; margin-inline: auto; padding: 2rem 1.5rem; text-align: center; }
+.status-card h1 { margin-bottom: .5rem; }
+.status-card .lead { color: var(--ink-soft); }
+.status-when { margin: 1.25rem 0 .25rem; color: var(--ink); font-family: var(--serif); font-size: clamp(1.4rem, 1.1rem + 1.6vw, 1.9rem); font-weight: 600; line-height: 1.25; }
+.status-where { margin: 0; color: var(--ink-soft); }
+.timeline { display: flex; margin: 1.5rem 0 0; padding: 0; list-style: none; }
+.timeline li { position: relative; flex: 1; padding-top: 1.6rem; color: var(--muted); font-size: .85rem; }
+.timeline li::before { content: ""; position: absolute; top: .35rem; left: 50%; width: .8rem; height: .8rem; margin-left: -.4rem; z-index: 1; border: 2px solid var(--control); border-radius: 50%; background: var(--surface); }
+.timeline li::after { content: ""; position: absolute; top: .75rem; left: -50%; width: 100%; height: 2px; background: var(--control); }
+.timeline li:first-child::after { display: none; }
+.timeline li.done { color: var(--ink); }
+.timeline li.done::before { border-color: var(--accent); background: var(--accent); }
+.timeline li.done::after { background: var(--accent); }
+.timeline li.now { color: var(--ink); font-weight: 600; }
+.timeline li.now::before { border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-soft); }
+.status-actions { display: flex; flex-wrap: wrap; justify-content: center; gap: .75rem; margin-top: 1.5rem; }
+.cta.secondary-cta { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+.cta.secondary-cta:hover { background: var(--accent-soft); color: var(--accent-hover); }
+.status-card .uuid { margin-top: 1.25rem; }
+.held-card { display: flex; gap: .9rem; align-items: center; text-align: left; margin: 0 0 1.5rem; padding: .9rem 1.1rem; border: 1px solid var(--line-strong); border-radius: var(--radius); background: var(--accent-soft); }
+.held-card .art-spot { width: 2.75rem; margin: 0; flex: none; }
+.held-card p { margin: 0; }
+.held-card strong { display: block; color: var(--ink); font-family: var(--serif); font-size: 1.1rem; }

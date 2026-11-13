@@ -94,6 +94,9 @@ content:
   topic.references.title: "Other specialists"
   # Read where a client chooses to meet online, not browsed as a page.
   topic.online_platforms.title: "Where online sessions are held"
+  topic.about_me.title: "About me"
+  topic.cancellation.title: "Cancellation rule"
+  topic.privacy.title: "Privacy"
   empty: "This section has not been filled in yet."
 
 booking:
@@ -333,3 +336,66 @@ admin:
   intent.request.note.admin.body.no_name: "New information on request {uuid}."
   intent.request.note.admin.note: "They wrote: {note}"
   intent.waitlist.joined.admin.body: "New waitlist entry {uuid} from {name}."
+
+# --- NP4b: the warm client site (front page, picker, what happens next, privacy, status) ---
+home:
+  facts.sessions: "Sessions"
+  facts.format: "How we meet"
+  facts.languages: "Languages"
+  next.title: "What happens after you book"
+  next.1: "You choose a time and write a few words, only what you want to share."
+  next.2: "I read your request myself and confirm the time, or suggest another."
+  next.3: "You hear from me, and we meet at the time we agreed."
+  more_about_me: "More about me"
+
+picker:
+  morning: "Morning"
+  afternoon: "Afternoon"
+  evening: "Evening"
+  days: "Choose a day"
+  day_free: "{day}: {count} free"
+  show_times: "Show times"
+
+next:
+  title: "What happens next"
+  who.title: "Who reads what you write"
+  who.text: "Only I do. Nobody else sees your message, and I do not pass it on."
+  when.title: "When I answer"
+  when.text: "Your request stays open for {hours} hours, and I reply within that time. My answer comes by email or Telegram, and it appears on your request page."
+  cancel.title: "If you need to cancel"
+  cancel.text: "Write to me on your request page (the link is in your email) and we will sort it out."
+  privacy: "How I look after your data"
+
+privacy:
+  title: "Privacy"
+  link: "Privacy"
+  default.1: "This page says plainly what happens to what you tell me here."
+  default.2: "What I keep: your name if you give one, your email address, the time you chose and the words you write in your request. If you use Telegram, your Telegram account is kept as well."
+  default.3: "Who reads it: only me. I use it to answer your request and to arrange our session. Your email address is used for the confirmation link and for reminders, and for nothing else."
+  default.4: "There is no advertising and no tracking on this site, and I do not pass what you write to anyone else."
+  default.5: "How long: requests and messages are erased about {months} months after they are finished."
+  default.6: "The site keeps a few small cookies, only to remember your language, your time zone and that you are signed in. If you want to see or erase what I hold about you, write to me and I will do it."
+
+status:
+  head.pending: "Your request has been sent"
+  head.negotiating: "We are choosing a time together"
+  head.confirmed: "Your session is booked"
+  head.rejected: "This time did not work out"
+  head.expired: "This request was not answered in time"
+  head.cancelled: "This session was cancelled"
+  head.completed: "This session has taken place"
+  lead.pending: "I read every request myself. My answer will come by email or Telegram, and it will appear on this page."
+  lead.negotiating: "We are still choosing a time. Anything that needs your reply is below."
+  lead.confirmed: "I am glad to see you. Everything you need is on this page."
+  lead.rejected: "I could not offer this time. You are welcome to choose another."
+  lead.expired: "I did not manage to answer in time. You are welcome to choose a new time."
+  lead.cancelled: "You are welcome to choose another time whenever you are ready."
+  lead.completed: "Thank you for coming. You are welcome to book again."
+  timeline.sent: "Sent"
+  timeline.confirmed: "Confirmed"
+  timeline.session: "Session"
+  ics: "Add to calendar"
+  join: "Join the meeting"
+  address: "Open the address"
+  confirm_lead: "Nothing is sent until you press the button."
+  hold_lead: "Your time is saved while you finish."
