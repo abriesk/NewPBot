@@ -21,6 +21,7 @@ from app.core.services import content, photo
 from app.main import create_app
 
 # Fixtures and helpers shared with the admin and booking tests.
+from tests.e2e.test_web_booking import web_slot  # noqa: F401
 from tests.e2e.test_admin_web import (  # noqa: F401
     _csrf,
     _sign_in,
@@ -310,3 +311,29 @@ async def test_online_only_says_online_only(
     page = web.get("/?lang=en").text
     facts = page.split('<dl class="facts">')[1].split("</dl>")[0]
     assert "In person" not in facts
+
+
+# --- item 3: the slot picker, without htmx -------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_book_renders_the_strip_and_the_chosen_days_times_on_the_server(
+    web: TestClient, web_slot: int
+) -> None:
+    page = web.get("/book?lang=en&tz=Asia/Yerevan").text
+    assert 'class="daystrip"' in page and 'href="/book?' in page  # days are plain links
+    assert f'name="slot_id" value="{web_slot}"' in page  # a plain list of forms, no htmx needed
+    assert "Times are shown in Yerevan (GMT+4)" in page
+    assert 'data-zone-change' in page and 'id="tz-field"' in page
+    assert "<noscript>" in page  # the "show times" fallback
+    # One session type's picker is not hidden by a missing second one.
+    assert 'name="modality"' in page
+
+
+@pytest.mark.asyncio
+async def test_the_partial_takes_a_day_and_a_day_without_times_falls_back(
+    web: TestClient, web_slot: int
+) -> None:
+    partial = web.get("/book/slots?modality=online&tz=Asia/Yerevan&day=1999-01-01")
+    assert partial.status_code == 200 and f'value="{web_slot}"' in partial.text
+    assert 'aria-current="true"' in partial.text

@@ -1,28 +1,41 @@
-{# HTMX partial (§12.1 step 2). Times are already rendered in the client's
-   timezone; storage stays UTC (DESIGN.md §8). #}
-{% if not days %}
-  {# §12.1: nothing this way, something the other. A labelled switch rather
-     than the other kind of time listed without explanation. The button carries
-     the radio to click; /book's script block does the clicking. #}
+{# The slot picker (§12.1 step 2): shown in /book itself and swapped in by htmx. Times are already
+   rendered in the client's timezone; storage stays UTC (DESIGN.md §8). The days are ordinary links,
+   so without htmx the page simply reloads on the chosen day. #}
+{% from "partials/art.html" import calm %}
+{% if not has_times %}
+  {# §12.1: nothing this way, something the other. A labelled switch rather than the other kind of
+     time listed without explanation. The button carries the radio to click; /book's script does
+     the clicking. #}
   {% if switch_to %}
     <p class="muted">{{ none_this_way }}</p>
     <button type="button" class="switch-modality" data-switch-modality="{{ switch_to }}">
       {{ switch_label }}
     </button>
   {% else %}
+    {{ calm() }}
     <p class="muted">{{ t.no_slots }}</p>
     {# Nothing free at all: the waitlist is the answer, so it is a real button and not a link under a sentence. #}
     <p class="muted">{{ t.waitlist_intro }}</p>
     <div class="stack-actions"><a class="cta" href="/waitlist">{{ t.waitlist_join }}</a></div>
   {% endif %}
 {% else %}
-  {# The zone the times are in; part of the list so it changes with the select. #}
-  <p class="muted zone-line">{{ zone_line }} <a href="#tz">{{ t.change }}</a></p>
-  {% for day, slots in days %}
-    <div class="day">
-      <h2>{{ day }}</h2>
+  <nav class="daystrip" aria-label="{{ t.picker_days }}">
+    <ul>
+      {% for d in strip %}
+        <li><a href="{{ d.href }}" hx-get="{{ d.hx }}" hx-target="#slots" hx-push-url="false"
+               aria-label="{{ d.aria }}" {% if d.current %}aria-current="true"{% endif %}>
+          <span class="dow">{{ d.dow }}</span><span class="num">{{ d.num }}</span><span class="mon">{{ d.mon }}</span><span class="cnt">{{ d.count }}</span>
+        </a></li>
+      {% endfor %}
+    </ul>
+  </nav>
+  {# The zone the times are in, as one line; its GMT offset is the chosen day's. #}
+  <p class="muted zone-line">{{ zone_line }}{% if modality != 'onsite' %} <a href="#tz-field" data-zone-change>{{ t.change }}</a>{% endif %}</p>
+  {% for g in groups %}
+    <div class="part">
+      <h3>{{ g.title }}</h3>
       <div class="times">
-        {% for slot in slots %}
+        {% for slot in g.times %}
           <form method="post" action="/book/hold">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="slot_id" value="{{ slot.id }}">

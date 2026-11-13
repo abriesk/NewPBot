@@ -9,50 +9,53 @@
 <div class="page-head">
   <h1>{{ t.consultation }}</h1>
 </div>
-<noscript><p class="noscript">{{ t.noscript }}</p></noscript>
 
 {# §12.1 step 1: session type and modality. Chosen before the slot list so the
    picker can be filtered by them. #}
-<form method="get" action="/book/details" class="card steps" id="booking">
-  <fieldset>
-    <legend>{{ t.choose_type }}</legend>
-    {% for st in session_types %}
-      <label class="choice">
-        <input type="radio" name="session_type_id" value="{{ st.id }}"
-               {% if loop.first %}checked{% endif %}
-               hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
-        {{ st.label }}
-      </label>
-    {% endfor %}
-  </fieldset>
+<form method="get" action="/book" class="card steps" id="booking">
+  {# Type and modality in one compact row; a question with one answer is not asked (the radio stays
+     as a hidden input, because the slot list is filtered by whatever this form posts). #}
+  <div class="picker-row">
+    <fieldset {% if session_types|length < 2 %}hidden{% endif %}>
+      <legend>{{ t.choose_type }}</legend>
+      <div class="pills">
+      {% for st in session_types %}
+        <label class="choice">
+          <input type="radio" name="session_type_id" value="{{ st.id }}"
+                 {% if st.id == chosen_type %}checked{% endif %}
+                 hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
+          {{ st.label }}
+        </label>
+      {% endfor %}
+      </div>
+    </fieldset>
 
-  {# §6.1: with the practice online only there is nothing to choose, so the
-     question goes rather than being asked and its wrong answer refused. The
-     radio stays as a hidden input, because the slot list is filtered by
-     whatever this fieldset posts. #}
-  <fieldset {% if practice.online_only %}hidden{% endif %}>
-    <legend>{{ t.choose_modality }}</legend>
-    <label class="choice">
-      {# §12.1: an on-site client is in the room, so the room's clock is theirs
-         and the timezone selector is noise. Hidden rather than removed, so the
-         form still posts a zone and the slot list still has one to render in.
-         The show/hide lives in the script block at the bottom (no inline handlers). #}
-      <input type="radio" name="modality" value="online" checked
-             hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
-      {{ t.modality_online }}
-    </label>
-    <label class="choice">
-      <input type="radio" name="modality" value="onsite"
-             hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
-      {{ t.modality_onsite }}
-    </label>
-    {# §12.1: on-site selection MUST show clinic_onsite_url. #}
-    <p id="onsite-info" hidden class="muted">
-      {% if practice.clinic_onsite_url %}
-        {% set parts = t.onsite_info.split(practice.clinic_onsite_url, 1) %}{{ parts[0] }}<a href="{{ practice.clinic_onsite_url }}">{{ practice.clinic_onsite_url }}</a>{{ parts[1] if parts|length > 1 else '' }}
-      {% else %}{{ t.onsite_no_address }}{% endif %}
-    </p>
-  </fieldset>
+    {# §6.1: with the practice online only there is nothing to choose, so the question goes rather
+       than being asked and its wrong answer refused. #}
+    <fieldset {% if practice.online_only %}hidden{% endif %}>
+      <legend>{{ t.choose_modality }}</legend>
+      <div class="pills">
+      <label class="choice">
+        {# §12.1: an on-site client is in the room, so the room's clock is theirs and the timezone
+           choice is noise: hidden by the script at the bottom (no inline handlers). #}
+        <input type="radio" name="modality" value="online" {% if chosen_modality != 'onsite' %}checked{% endif %}
+               hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
+        {{ t.modality_online }}
+      </label>
+      <label class="choice">
+        <input type="radio" name="modality" value="onsite" {% if chosen_modality == 'onsite' %}checked{% endif %}
+               hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
+        {{ t.modality_onsite }}
+      </label>
+      </div>
+    </fieldset>
+  </div>
+  {# §12.1: on-site selection MUST show clinic_onsite_url. #}
+  <p id="onsite-info" hidden class="muted">
+    {% if practice.clinic_onsite_url %}
+      {% set parts = t.onsite_info.split(practice.clinic_onsite_url, 1) %}{{ parts[0] }}<a href="{{ practice.clinic_onsite_url }}">{{ practice.clinic_onsite_url }}</a>{{ parts[1] if parts|length > 1 else '' }}
+    {% else %}{{ t.onsite_no_address }}{% endif %}
+  </p>
 
   {# §12.1: the twin of the rule above. Outside the modality fieldset on
      purpose -- with the practice online only that fieldset is hidden, and this
@@ -64,23 +67,23 @@
     </div>
   {% endif %}
 
+  {# The browser's zone is put here before the slots are read (script below); the line above the
+     times says which zone they are in and its "change" opens this choice (the fragment targets
+     the fieldset). #}
   <fieldset id="tz-field">
-    <legend>{{ t.choose_timezone }}</legend>
-    {# The browser's zone is put here before the first slot list loads (script below); this selector is the visible
-       override (§12.1). The line that says which zone the times are in is part of the slot list. #}
-    <select name="tz" id="tz" aria-label="{{ t.choose_timezone }}" hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
-      {% for option in timezones %}
-        <option value="{{ option.iana_name }}" {% if option.iana_name == tz %}selected{% endif %}>{{ option.label }}</option>
-      {% endfor %}
-    </select>
-  </fieldset>
-
-  <fieldset>
-    <legend>{{ t.choose_slot }}</legend>
-    <div id="slots" aria-live="polite" hx-get="/book/slots" hx-trigger="load" hx-include="#booking">
-      <p class="muted">…</p>
+    <div class="zone-choice">
+      <label for="tz">{{ t.choose_timezone }}</label>
+      <select name="tz" id="tz" hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
+        {% for option in timezones %}
+          <option value="{{ option.iana_name }}" {% if option.iana_name == tz %}selected{% endif %}>{{ option.label }}</option>
+        {% endfor %}
+      </select>
     </div>
   </fieldset>
+
+  <div id="slots" aria-live="polite">{% include "partials/slots.html" %}</div>
+  {# Without htmx the choices above are sent as a plain GET and the page comes back on them. #}
+  <noscript><button type="submit" class="secondary">{{ t.picker_show_times }}</button></noscript>
 </form>
 <script>
 (function () {
@@ -90,6 +93,8 @@
     var onsite = byName('modality', 'onsite').checked;
     show('onsite-info', onsite);
     show('tz-field', !onsite);
+    var link = document.querySelector('[data-zone-change]');
+    if (link) { link.hidden = onsite; }
     show('online-info', !onsite);
   };
   Array.prototype.forEach.call(document.querySelectorAll('input[name=modality]'), function (r) {
@@ -99,9 +104,13 @@
   document.getElementById('booking').addEventListener('click', function (e) {
     var b = e.target.closest ? e.target.closest('[data-switch-modality]') : null;
     if (b) { byName('modality', b.getAttribute('data-switch-modality')).click(); }
+    // "change" on the zone line shows the choice (the fragment does it) and puts the keyboard in it.
+    var z = e.target.closest ? e.target.closest('[data-zone-change]') : null;
+    if (z) { setTimeout(function () { document.getElementById('tz').focus(); }, 0); }
   });
   // First visit: the zone cookie is written only by the end of this page, so the server rendered the practice's zone.
-  // Put the browser's zone in the select (adding it when it is not on the list) before htmx loads the slots.
+  // Put the browser's zone in the select (adding it when it is not on the list) and, once htmx is up,
+  // ask for the times in it. Without htmx the list stays as the server rendered it.
   try {
     var detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
     var sel = document.getElementById('tz');
@@ -113,7 +122,12 @@
         o.textContent = detected.split('/').pop().replace(/_/g, ' ');
         sel.appendChild(o);
       }
-      sel.value = detected;
+      if (sel.value !== detected) {
+        sel.value = detected;
+        window.addEventListener('load', function () {
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+      }
     }
   } catch (e) { /* the practice zone stays selected */ }
   sync();

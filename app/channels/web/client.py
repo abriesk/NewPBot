@@ -14,6 +14,7 @@ import logging
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import urlencode
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -75,6 +76,7 @@ from app.db import unit_of_work
 from app.render.dates import day_label, when_label
 from app.render.labels import price_text, session_type_name
 from app.render.markdown import to_web_html
+from app.render.picker import build_picker
 from app.render.zones import zone_label
 
 logger = logging.getLogger(__name__)
@@ -433,8 +435,122 @@ async def _labels(session: AsyncSession, lang: str) -> dict[str, str]:
         "facts_format": "home.facts.format",
         "facts_languages": "home.facts.languages",
         "privacy_link": "privacy.link",
+        "picker_days": "picker.days",
+        "picker_show_times": "picker.show_times",
     }
     return {name: await get_text(session, lang, key) for name, key in keys.items()}
+
+
+async def _picker_view(
+    session: AsyncSession,
+    request: Request,
+    *,
+    lang: str,
+    practice: Practice,
+    session_type_id: int | None,
+    modality: str | None,
+    zone: str,
+    day: str | None,
+) -> dict[str, Any]:
+    """The slot picker (§12.1 step 2): a strip of the days that have times, the chosen day's times
+    in three parts, and one line naming the zone with the GMT offset of *that day*. Rendered into
+    `/book` itself (so it works without htmx) and returned alone for the htmx swap."""
+    slots = await list_available_slots(
+        session,
+        window_from=now_utc(),
+        window_to=now_utc() + SLOT_WINDOW,
+        session_type_id=session_type_id,
+        modality=Modality(modality) if modality else None,
+        tz=zone,
+    )
+
+    # §12.1: nothing this way, something the other. Offered as a labelled switch rather than by
+    # quietly listing the other kind -- a client looking at in-person times after asking for online
+    # has to work out what happened, where a button saying so tells them.
+    chosen = Modality(modality) if modality else None
+    switch_to: Modality | None = None
+    # Nothing to switch to when only one modality is on offer (§6.1).
+    if not slots and chosen is not None and not practice.online_only:
+        other = Modality.online if chosen is Modality.onsite else Modality.onsite
+        if await list_available_slots(
+            session,
+            window_from=now_utc(),
+            window_to=now_utc() + SLOT_WINDOW,
+            session_type_id=session_type_id,
+            modality=other,
+            tz=zone,
+        ):
+            switch_to = other
+
+    data = build_picker([(slot.id, slot.starts_at_utc) for slot in slots], zone, day)
+    query = urlencode(
+        {"session_type_id": session_type_id or "", "modality": modality or "online", "tz": zone}
+    )
+
+    strip = []
+    for entry in data.days:
+        local = entry.first_utc.astimezone(ZoneInfo(zone))
+        heading = await day_label(session, lang, entry.first_utc, zone)
+        strip.append(
+            {
+                "iso": entry.day.isoformat(),
+                "count": entry.count,
+                "dow": await get_text(session, lang, f"date.weekday.{local.weekday()}"),
+                "num": local.day,
+                "mon": await get_text(session, lang, f"date.month.{local.month}"),
+                "current": entry.day == data.chosen,
+                "href": f"/book?{query}&day={entry.day.isoformat()}#slots",
+                "hx": f"/book/slots?{query}&day={entry.day.isoformat()}",
+                "aria": await get_text(
+                    session, lang, "picker.day_free", day=heading, count=entry.count
+                ),
+            }
+        )
+
+    # A button named only "18:00" says nothing out of context (WCAG 2.4.6): the day goes in its name.
+    chosen_heading = ""
+    if data.chosen is not None and data.zone_instant is not None:
+        chosen_heading = await day_label(session, lang, data.zone_instant, zone)
+    groups = []
+    for part, times in data.groups:
+        groups.append(
+            {
+                "title": await get_text(session, lang, f"picker.{part}"),
+                "times": [
+                    {"id": t.slot_id, "label": t.label, "aria": f"{chosen_heading}, {t.label}"}
+                    for t in times
+                ],
+            }
+        )
+
+    instant = data.zone_instant or now_utc()
+    return {
+        "request": request,
+        "lang": lang,
+        "strip": strip,
+        "groups": groups,
+        "chosen_heading": chosen_heading,
+        "has_times": bool(data.days),
+        "t": await _labels(session, lang),
+        "csrf_token": csrf_token_for(request),
+        "session_type_id": session_type_id or "",
+        "modality": modality or "online",
+        "tz": zone,
+        # One line above the times; its offset is the chosen day's, so a day after the clocks
+        # change says so (quick win 2). The select it offers to change lives on /book.
+        "zone_line": await get_text(
+            session, lang, "booking.timezone.shown", zone=zone_label(zone, lang, instant)
+        ),
+        "switch_to": switch_to.value if switch_to else None,
+        "switch_label": (
+            await get_text(session, lang, f"booking.switch.{switch_to.value}") if switch_to else ""
+        ),
+        "none_this_way": (
+            await get_text(session, lang, f"booking.slot.none_{chosen.value}")
+            if switch_to and chosen
+            else ""
+        ),
+    }
 
 
 async def _facts(session: AsyncSession, context: dict[str, Any]) -> list[dict[str, Any]]:
@@ -779,11 +895,19 @@ def build_router() -> APIRouter:
     # --- Booking (§12.1 steps 1-3) -----------------------------------------
 
     @router.get("/book", response_class=HTMLResponse, include_in_schema=False)
-    async def book(request: Request) -> Response:
+    async def book(
+        request: Request,
+        session_type_id: int | None = None,
+        modality: str | None = None,
+        tz: str | None = None,
+        day: str | None = None,
+    ) -> Response:
         async with unit_of_work() as session:
             context = await _context(session, request)
             practice = context["practice"]
-            tz = _timezone(request, practice.timezone)
+            # The query carries the picker's state so the page works without htmx too: a day in the
+            # strip is an ordinary link, and "show times" (noscript) submits the choices as a GET.
+            tz = tz if tz and _valid_zone(tz) else _timezone(request, practice.timezone)
 
             slots = await list_available_slots(
                 session,
@@ -859,11 +983,38 @@ def build_router() -> APIRouter:
                 session, ONLINE_PLATFORMS_TOPIC, context["lang"]
             )
 
+            # What is selected: the query's choice when it is a real one, else the first of each.
+            chosen_type = (
+                session_type_id
+                if session_type_id in {row["id"] for row in session_types}
+                else (session_types[0]["id"] if session_types else None)
+            )
+            chosen_modality = (
+                "online"
+                if practice.online_only or not _valid_modality(modality)
+                else str(modality)
+            )
+            picker = await _picker_view(
+                session,
+                request,
+                lang=context["lang"],
+                practice=practice,
+                session_type_id=chosen_type,
+                modality=chosen_modality,
+                zone=tz,
+                day=day,
+            )
+
             return _render(
                 "book.html",
                 {
+                    # The picker's own names (strip, groups, zone_line, ...) sit at the top level
+                    # because `/book` includes the very partial the htmx swap renders.
+                    **picker,
                     **context,
                     "t": labels,
+                    "chosen_type": chosen_type,
+                    "chosen_modality": chosen_modality,
                     "session_types": session_types,
                     "timezones": timezones,
                     "tz": tz,
@@ -878,6 +1029,7 @@ def build_router() -> APIRouter:
         session_type_id: int | None = None,
         modality: str | None = None,
         tz: str | None = None,
+        day: str | None = None,
     ) -> Response:
         """§12.1 step 2, an HTMX partial. Times in the client's timezone."""
         if modality and not _valid_modality(modality):
@@ -887,84 +1039,17 @@ def build_router() -> APIRouter:
             lang = _language(request, practice.default_language, None)
             zone = tz if tz and _valid_zone(tz) else _timezone(request, practice.timezone)
 
-            slots = await list_available_slots(
+            view = await _picker_view(
                 session,
-                window_from=now_utc(),
-                window_to=now_utc() + SLOT_WINDOW,
+                request,
+                lang=lang,
+                practice=practice,
                 session_type_id=session_type_id,
-                modality=Modality(modality) if modality else None,
-                tz=zone,
+                modality=modality,
+                zone=zone,
+                day=day,
             )
-
-            # §12.1: nothing this way, something the other. Offered as a
-            # labelled switch rather than by quietly listing the other kind --
-            # a client looking at in-person times after asking for online has
-            # to work out what happened, where a button saying so tells them.
-            chosen = Modality(modality) if modality else None
-            switch_to: Modality | None = None
-            # Nothing to switch to when only one modality is on offer (§6.1).
-            if not slots and chosen is not None and not practice.online_only:
-                other = Modality.online if chosen is Modality.onsite else Modality.onsite
-                if await list_available_slots(
-                    session,
-                    window_from=now_utc(),
-                    window_to=now_utc() + SLOT_WINDOW,
-                    session_type_id=session_type_id,
-                    modality=other,
-                    tz=zone,
-                ):
-                    switch_to = other
-
-            # Grouped by the calendar date, not by the heading it will be given:
-            # keying a structure on rendered text is how two days quietly become
-            # one when the wording changes.
-            grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
-            starts: dict[str, datetime] = {}
-            for slot in slots:
-                local = slot.starts_at_utc.astimezone(ZoneInfo(zone))
-                day = local.date().isoformat()
-                starts.setdefault(day, slot.starts_at_utc)
-                grouped[day].append({"id": slot.id, "label": local.strftime("%H:%M")})
-
-            days = []
-            for day, times in grouped.items():
-                heading = await day_label(session, lang, starts[day], zone)
-                # A button named only "18:00" says nothing out of context (WCAG 2.4.6): the day goes
-                # in its name.
-                for time in times:
-                    time["aria"] = f"{heading}, {time['label']}"
-                days.append((heading, times))
-
-            return _render(
-                "partials/slots.html",
-                {
-                    "request": request,
-                    "days": days,
-                    "t": await _labels(session, lang),
-                    "csrf_token": csrf_token_for(request),
-                    "session_type_id": session_type_id or "",
-                    "modality": modality or "online",
-                    "tz": zone,
-                    # Beside the times, so it changes with them when the select does (quick win 2).
-                    "zone_line": await get_text(
-                        session,
-                        lang,
-                        "booking.timezone.shown",
-                        zone=zone_label(zone, lang, now_utc()),
-                    ),
-                    "switch_to": switch_to.value if switch_to else None,
-                    "switch_label": (
-                        await get_text(session, lang, f"booking.switch.{switch_to.value}")
-                        if switch_to
-                        else ""
-                    ),
-                    "none_this_way": (
-                        await get_text(session, lang, f"booking.slot.none_{chosen.value}")
-                        if switch_to and chosen
-                        else ""
-                    ),
-                },
-            )
+            return _render("partials/slots.html", view)
 
     @router.post("/book/hold", include_in_schema=False)
     async def book_hold(
