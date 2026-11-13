@@ -33,6 +33,8 @@ USER root
 COPY requirements-dev.txt .
 RUN pip install -r requirements-dev.txt
 COPY tests ./tests
+# The demo seed (scripts/seed_demo.py) is exercised by a test; np-shot.sh mounts it for the runtime image.
+COPY scripts ./scripts
 # The start-up decision of the backup sidecar is tested as a shell function.
 COPY backup.sh ./backup.sh
 RUN chown -R appuser /app
