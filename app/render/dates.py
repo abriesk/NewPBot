@@ -46,10 +46,9 @@ async def when_label(session: AsyncSession, lang: str, value: datetime, tz: str)
     """Every client-visible moment: `вт 17 ноя, 18:00 (Ереван, GMT+4)`.
 
     The weekday and month come from the catalogue (like `day_label`), the time is 24-hour, and the
-    zone is named by its
-    city in the reader's language with the GMT offset in force at that instant -- so a Moscow client
-    is never shown a
-    bare Yerevan time. Numeric ISO stamps are for logs and for admins, not for this.
+    zone is named by its city in the reader's language with the GMT offset in force at that instant
+    -- so a Moscow client is never shown a bare Yerevan time. Numeric ISO stamps are for logs and for
+    admins, not for this.
     """
     local = value.astimezone(ZoneInfo(tz))
     day = await day_label(session, lang, value, tz)

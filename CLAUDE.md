@@ -108,7 +108,8 @@ commit like production), so `docker compose exec web pytest` against the deploym
 exits at once. Run it against a `_test` database instead, migrated and seeded first:
 the `docker run` recipe under "Tests" in `README.md` does exactly that, and CI does
 the same (`alembic upgrade head`, `python -m app.seed`, `pytest -q` on
-`psychobooking_test`).
+`psychobooking_test`). The stale-asset trap is under Commands below, and closing it is
+still not built.
 
 Milestones run M0 → M13 (`IMPLEMENTATION.md` §19). Work them **in order**. Each
 one's acceptance criteria must pass before starting the next. Do not implement
@@ -224,7 +225,8 @@ docker compose exec web alembic heads          # MUST print exactly one head
 # tests -- only against a database named *_test (README, "Tests"); the deployment's is refused
 docker compose run --rm -e DATABASE_URL=postgresql+asyncpg://USER:PASS@HOST:5432/psychobooking_test web \
     sh -c 'alembic upgrade head && python -m app.seed && pytest -q'
-# same container, narrower: append e.g. `tests/core -q` or `-k architecture` (the import-boundary test)
+# same container, narrower: edit the pytest args inside the quotes (e.g. `pytest -q tests/core` or
+# `pytest -q -k architecture`, the import-boundary test) -- words after the closing quote become $0/$1 for sh and never reach pytest
 
 # lint / types
 docker compose exec web ruff check app

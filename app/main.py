@@ -111,9 +111,8 @@ def create_app() -> FastAPI:
     @app.exception_handler(StarletteHTTPException)
     async def http_error(request: Request, exc: StarletteHTTPException) -> Response:
         """A visitor who follows a stale link meets the site's own 404 page (a heading, a sentence
-        and a way on), not
-        the JSON `{"detail":"Not Found"}`. Only for browsers on the client site; every other answer
-        is unchanged."""
+        and a way on), not the JSON `{"detail":"Not Found"}`. Only for browsers on the client site;
+        every other answer is unchanged."""
         path = request.url.path
         if (
             exc.status_code == 404

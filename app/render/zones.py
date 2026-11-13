@@ -1,17 +1,13 @@
 """Time-zone names a client can read: a city in their language and the offset from GMT.
 
 The select on /book used to show raw IANA ids or the practice's English labels; "Asia/Yerevan" is
-not something a
-client in Gyumri recognises. The `value` of an option stays the IANA id (that is what is stored and
-what the server
-converts with), only the label is localised: "Ереван (GMT+4)".
+not something a client in Gyumri recognises. The `value` of an option stays the IANA id (that is
+what is stored and what the server converts with), only the label is localised: "Ереван (GMT+4)".
 
 The table lists the zones a client of this practice is likely to be in: the practice's own seeded
-options and the places
-its clients travel from. A zone not in the table falls back to the city part of its IANA id, in
-Latin letters, which is
-better than a raw id and never wrong. The ru and hy names are drafts for a native check (`# TODO:
-review`).
+options and the places its clients travel from. A zone not in the table falls back to the city part
+of its IANA id, in Latin letters, which is better than a raw id and never wrong. The ru and hy names
+are drafts for a native check (`# TODO: review`).
 """
 
 from __future__ import annotations
