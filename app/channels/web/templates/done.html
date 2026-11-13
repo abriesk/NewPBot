@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/art.html" import leaf %}
 {% block title %}{{ heading }} — {{ practice.name }}{% endblock %}
 {% block content %}
 {# The end of §12.1's three pages -- but this template also answers a
@@ -7,7 +8,8 @@
 {% if request_uuid %}
 <ol class="flow"><li class="done"><span class="sr-only">{{ t.step.replace('{n}', '1').replace('{total}', '3') }}</span></li><li class="done"><span class="sr-only">{{ t.step.replace('{n}', '2').replace('{total}', '3') }}</span></li><li aria-current="step"><span class="sr-only">{{ t.step.replace('{n}', '3').replace('{total}', '3') }}</span></li></ol>
 {% endif %}
-<div class="card notice" role="status">
+<div class="card notice status-card" role="status">
+  {{ leaf() }}
   <h1>{{ heading }}</h1>
   <p>{{ message }}</p>
   {% if verify_notice %}<p class="muted">{{ verify_notice }}</p>{% endif %}

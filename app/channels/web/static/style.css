@@ -1026,3 +1026,6 @@ input[aria-invalid=true], textarea[aria-invalid=true] { border-color: #a3261c; }
 .held-card .art-spot { width: 2.75rem; margin: 0; flex: none; }
 .held-card p { margin: 0; }
 .held-card strong { display: block; color: var(--ink); font-family: var(--serif); font-size: 1.1rem; }
+.held-card .held { display: block; margin: 0; padding: 0; border: 0; background: transparent; color: var(--ink-soft); font-weight: 400; }
+.held-card .held::before { content: none; }
+.held-card .held strong { margin-left: 0; }

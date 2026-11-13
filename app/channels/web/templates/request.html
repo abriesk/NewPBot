@@ -1,23 +1,32 @@
 {% extends "base.html" %}
 {% block title %}{{ t.your_request }} — {{ practice.name }}{% endblock %}
+{% from "partials/art.html" import leaf, calm %}
 {% block content %}
 {# §12.1: shown on the page an emailed link opened, and on no other visit. #}
 {% if greeting %}<p class="greeting">{{ greeting }}</p>{% endif %}
-<div class="page-head">
-  <h1>{{ t.your_request }}</h1>
-</div>
-{# §12.2: the refusal has to be visible. Without it a rejected action looked
-   exactly like a button that did nothing at all. #}
+{# §12.2: the refusal has to be visible. Without it a rejected action looked exactly like a button that
+   did nothing at all. #}
 {% if refused %}<p class="flash" role="alert">{{ t.error }}</p>{% endif %}
-<div class="card">
-  <p role="status"><span class="status">{{ status_label }}</span></p>
-  <div class="meta">
-    {# The time is the point of the page: shown for a pending request too, in
-       the zone the client booked in (§7.1, DESIGN.md §8). #}
-    {% if when %}<p class="when"><strong>{{ t.when }}</strong> {{ when }}</p>{% endif %}
-    {% if join_url %}<p><a href="{{ join_url }}">{{ join_url }}</a></p>{% endif %}
-    <p class="uuid">{{ t.reference.replace('{ref}', ref) }}</p>
+{# NP4b: the request as a status page -- a headline for the status, the time large, three points of
+   timeline, the calendar file and the join link as buttons. Shares its shell with the confirm-button
+   page and the hold notice. #}
+<div class="card status-card" role="status">
+  {% if status_art == 'leaf' %}{{ leaf() }}{% else %}{{ calm() }}{% endif %}
+  <h1>{{ head }}</h1>
+  <p class="lead">{{ lead }}</p>
+  {% if when %}<p class="status-when"><span class="sr-only">{{ t.when }}: </span>{{ when }}</p>{% endif %}
+  {% if timeline %}
+  <ol class="timeline">
+    {% for point in timeline %}<li class="{{ point.state }}"{% if point.state == 'now' %} aria-current="step"{% endif %}>{{ point.label }}</li>{% endfor %}
+  </ol>
+  {% endif %}
+  {% if ics_href or join_url %}
+  <div class="status-actions">
+    {% if join_url %}<a class="cta" href="{{ join_url }}">{{ join_label }}</a>{% endif %}
+    {% if ics_href %}<a class="cta secondary-cta" href="{{ ics_href }}" download>{{ t.ics }}</a>{% endif %}
   </div>
+  {% endif %}
+  <p class="uuid">{{ t.reference.replace('{ref}', ref) }}</p>
 </div>
 
 {% if thread %}

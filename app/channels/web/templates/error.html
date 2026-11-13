@@ -1,8 +1,10 @@
 {% extends "base.html" %}
+{% from "partials/art.html" import cloud %}
 {% block title %}{{ heading }} — {{ practice.name }}{% endblock %}
 {% block content %}
 {# A short heading, a sentence that explains, and the next step that fits (not only "Home"). #}
-<div class="card notice" role="alert">
+<div class="card notice status-card" role="alert">
+  {{ cloud() }}
   <h1>{{ heading }}</h1>
   <p>{{ message }}</p>
   {% if kept %}<label>{{ t.counter_note_label }}<textarea rows="4" readonly>{{ kept }}</textarea></label>{% endif %}

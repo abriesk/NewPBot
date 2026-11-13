@@ -35,7 +35,10 @@ def test_the_strip_has_only_days_with_times_and_counts_them() -> None:
         (2, _utc(2026, 11, 16, 7)),
     ]
     data = build_picker(slots, "Asia/Yerevan")
-    assert [(d.day.isoformat(), d.count) for d in data.days] == [("2026-11-16", 2), ("2026-11-18", 1)]
+    assert [(d.day.isoformat(), d.count) for d in data.days] == [
+        ("2026-11-16", 2),
+        ("2026-11-18", 1),
+    ]
     assert data.chosen is not None and data.chosen.isoformat() == "2026-11-16"
 
 
@@ -76,3 +79,24 @@ def test_the_zone_offset_is_the_chosen_days_across_a_clock_change() -> None:
     assert saturday.zone_instant is not None and monday.zone_instant is not None
     assert gmt_offset("Europe/Berlin", saturday.zone_instant) == "GMT+1"
     assert gmt_offset("Europe/Berlin", monday.zone_instant) == "GMT+2"
+
+
+def test_the_timeline_marks_where_a_request_is_and_has_none_once_it_ended_without_a_session() -> (
+    None
+):
+    from app.render.status import timeline_states
+
+    assert timeline_states("pending") == [
+        ("sent", "done"),
+        ("confirmed", "now"),
+        ("session", "todo"),
+    ]
+    assert timeline_states("negotiating") == timeline_states("pending")
+    assert timeline_states("confirmed") == [
+        ("sent", "done"),
+        ("confirmed", "done"),
+        ("session", "now"),
+    ]
+    assert {state for _p, state in timeline_states("completed") or []} == {"done"}
+    for ended in ("rejected", "expired", "cancelled"):
+        assert timeline_states(ended) is None

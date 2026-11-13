@@ -1,4 +1,5 @@
 {% extends "base.html" %}
+{% from "partials/art.html" import calm %}
 {% block title %}{{ t.consultation }} — {{ practice.name }}{% endblock %}
 {% block content %}
 {# The second of §12.1's three pages. #}
@@ -9,7 +10,7 @@
 
 {# What is about to be sent, with a way back to change it. #}
 <div class="summary"><p>{{ summary }} <a href="/book">{{ t.change }}</a></p></div>
-<p class="held">{{ t.slot_held }}{% if held_when %} <strong>{{ held_when }}</strong>{% endif %}</p>
+<div class="held-card">{{ calm() }}<p class="held">{{ t.slot_held }}{% if held_when %} <strong>{{ held_when }}</strong>{% endif %}</p></div>
 {% if captcha %}<noscript><p class="noscript">{{ t.noscript }}</p></noscript>{% endif %}
 
 {# §12.1 step 3. Everything here is optional except the email, which is how a

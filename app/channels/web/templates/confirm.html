@@ -1,10 +1,13 @@
 {% extends "base.html" %}
+{% from "partials/art.html" import calm %}
 {% block title %}{{ heading }} — {{ practice.name }}{% endblock %}
 {% block content %}
 {# A link in a message lands here and does nothing until this button is pressed:
    scanners and previews fetch it, and only a person posts the form. #}
-<div class="card notice">
+<div class="card status-card">
+  {{ calm() }}
   <h1>{{ heading }}</h1>
+  <p class="lead">{{ t.confirm_lead }}</p>
   <form method="post" action="{{ action }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="token" value="{{ token }}">

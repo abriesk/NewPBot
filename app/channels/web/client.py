@@ -14,7 +14,7 @@ import logging
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
 from typing import Any
-from urllib.parse import urlencode
+from urllib.parse import urlencode, urlsplit
 from uuid import UUID
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -73,10 +73,12 @@ from app.core.services.settings import get_practice
 from app.core.services.slots import list_available_slots, open_slot_start
 from app.core.services.translations import get_text
 from app.db import unit_of_work
+from app.render.calendar import ICS_FILENAME, session_ics
 from app.render.dates import day_label, when_label
 from app.render.labels import price_text, session_type_name
 from app.render.markdown import to_web_html
 from app.render.picker import build_picker
+from app.render.status import timeline_states
 from app.render.zones import zone_label
 
 logger = logging.getLogger(__name__)
@@ -435,6 +437,8 @@ async def _labels(session: AsyncSession, lang: str) -> dict[str, str]:
         "facts_format": "home.facts.format",
         "facts_languages": "home.facts.languages",
         "privacy_link": "privacy.link",
+        "ics": "status.ics",
+        "confirm_lead": "status.confirm_lead",
         "picker_days": "picker.days",
         "picker_show_times": "picker.show_times",
     }
@@ -507,7 +511,7 @@ async def _picker_view(
             }
         )
 
-    # A button named only "18:00" says nothing out of context (WCAG 2.4.6): the day goes in its name.
+    # A button named only "18:00" says nothing out of context (WCAG 2.4.6): the day is in its name.
     chosen_heading = ""
     if data.chosen is not None and data.zone_instant is not None:
         chosen_heading = await day_label(session, lang, data.zone_instant, zone)
@@ -553,9 +557,7 @@ async def _picker_view(
     }
 
 
-async def _what_next(
-    session: AsyncSession, lang: str, practice: Practice
-) -> dict[str, str]:
+async def _what_next(session: AsyncSession, lang: str, practice: Practice) -> dict[str, str]:
     """The reusable "what happens next" block: who reads the client's text (only her), when she
     answers (the hours her own setting gives a request), how to cancel (her content block, or a
     plain default that only says where to write)."""
@@ -572,6 +574,37 @@ async def _what_next(
         "cancel_text": await get_text(session, lang, "next.cancel.text"),
         "cancel_html": "".join(to_web_html(block.body_md) for block in rule),
         "privacy": await get_text(session, lang, "next.privacy"),
+    }
+
+
+async def _status_view(
+    session: AsyncSession,
+    context: dict[str, Any],
+    booking_request: BookingRequest,
+) -> dict[str, Any]:
+    """The request page as a status page: headline and lead per status, the timeline, the join
+    button and the calendar file (only for a confirmed session that has an instant)."""
+    lang = context["lang"]
+    status = booking_request.status.value
+    states = timeline_states(status)
+    confirmed = status == "confirmed" and booking_request.scheduled_start is not None
+    join = (
+        await notifications.join_info(session, booking_request) if status == "confirmed" else None
+    )
+    onsite = booking_request.modality == Modality.onsite
+    return {
+        "head": await get_text(session, lang, f"status.head.{status}"),
+        "lead": await get_text(session, lang, f"status.lead.{status}"),
+        "status_art": "leaf" if status in ("confirmed", "completed") else "calm",
+        "timeline": [
+            {"label": await get_text(session, lang, f"status.timeline.{key}"), "state": state}
+            for key, state in states
+        ]
+        if states
+        else [],
+        "ics_href": f"/r/{booking_request.uuid}/session.ics" if confirmed else None,
+        "join_url": join,
+        "join_label": await get_text(session, lang, "status.address" if onsite else "status.join"),
     }
 
 
@@ -979,7 +1012,7 @@ def build_router() -> APIRouter:
                     {**context, "by_choice": False, "captcha": _challenge(practice)},
                 )
 
-            session_types = []
+            session_types: list[dict[str, Any]] = []
             for st in await _active_session_types(session):
                 name = await session_type_name(session, context["lang"], st.code)
                 price = price_text(st)
@@ -1044,9 +1077,7 @@ def build_router() -> APIRouter:
                 else (session_types[0]["id"] if session_types else None)
             )
             chosen_modality = (
-                "online"
-                if practice.online_only or not _valid_modality(modality)
-                else str(modality)
+                "online" if practice.online_only or not _valid_modality(modality) else str(modality)
             )
             picker = await _picker_view(
                 session,
@@ -1646,6 +1677,7 @@ def build_router() -> APIRouter:
                         arrived_by_token=arrived_by_token,
                     ),
                     "refused": request.query_params.get("refused") == "1",
+                    **await _status_view(session, context, booking_request),
                     "can_respond": turn is SenderType.client,
                     "can_note": booking_request.status in booking.NOTE_STATUSES,
                     **(
@@ -1661,6 +1693,50 @@ def build_router() -> APIRouter:
                 # what lets the form on this page post back at all.
                 issue_client_session(response, client.id, new_session)
             return response
+
+    @router.get("/r/{uuid}/session.ics", include_in_schema=False)
+    async def request_ics(request: Request, uuid: str) -> Response:
+        """NP4b: the confirmed session as a calendar file, for the client it belongs to. 404 (not
+        403) for anyone else's, and for a request with no confirmed instant."""
+        async with unit_of_work() as session:
+            context = await _context(session, request)
+            client = await _session_client(session, request)
+            booking_request = None
+            if client is not None:
+                try:
+                    booking_request = await booking.get_by_uuid(session, UUID(uuid))
+                except (NotFound, ValueError):
+                    booking_request = None
+            if (
+                booking_request is None
+                or booking_request.client_id != client.id  # type: ignore[union-attr]
+                or booking_request.status.value != "confirmed"
+                or booking_request.scheduled_start is None
+            ):
+                return Response(status_code=404)
+            lang = context["lang"]
+            onsite = booking_request.modality == Modality.onsite
+            location = (
+                (context["practice"].clinic_onsite_url or "")
+                if onsite
+                else await get_text(session, lang, "calendar.location.online")
+            )
+            host = urlsplit(get_settings().base_url).hostname or "localhost"
+            body = session_ics(
+                uid=f"{booking_request.uuid}@{host}",
+                start=booking_request.scheduled_start,
+                duration_min=booking_request.scheduled_duration_min or 60,
+                summary=await get_text(session, lang, "calendar.summary"),
+                location=location,
+            )
+            return Response(
+                body,
+                media_type="text/calendar; charset=utf-8",
+                headers={
+                    "Content-Disposition": f'attachment; filename="{ICS_FILENAME}"',
+                    "Cache-Control": "private, no-store",
+                },
+            )
 
     @router.post("/r/{uuid}/enter", include_in_schema=False)
     async def request_enter(

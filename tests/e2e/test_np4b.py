@@ -5,29 +5,41 @@ Her content is hers: the photo, languages, bio, price and cancellation rule come
 are never invented -- with none of it the pages still read well and say nothing false.
 """
 
+# ruff: noqa: F811
 from __future__ import annotations
 
 import io
 from collections.abc import AsyncIterator, Iterator
+from datetime import UTC, datetime, timedelta
 
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
 from PIL import Image
-from sqlalchemy import select, update
+from sqlalchemy import delete, select, update
 
-from app.core.models import ContentBlock, ContentTopic, Practice, PracticePhoto, SessionType
+from app.channels.web.security import client_session_value
+from app.core.enums import Channel, Modality, RequestStatus
+from app.core.models import (
+    BookingRequest,
+    Client,
+    ContentBlock,
+    ContentTopic,
+    Practice,
+    PracticePhoto,
+    SessionType,
+)
 from app.core.services import content, photo
 from app.main import create_app
-
-# Fixtures and helpers shared with the admin and booking tests.
-from tests.e2e.test_web_booking import web_slot  # noqa: F401
 from tests.e2e.test_admin_web import (  # noqa: F401
     _csrf,
     _sign_in,
     committed,
     restore_practice,
 )
+
+# Fixtures and helpers shared with the admin and booking tests.
+from tests.e2e.test_web_booking import web_slot  # noqa: F401
 
 
 @pytest.fixture
@@ -235,9 +247,7 @@ async def empty_content(committed, no_photo) -> AsyncIterator[None]:
 @pytest_asyncio.fixture
 async def her_content(committed, empty_content) -> AsyncIterator[None]:
     """Everything she can supply, written the way the admin writes it."""
-    topic = {
-        c: i for c, i in (await committed.execute(select(ContentTopic.code, ContentTopic.id))).all()
-    }
+    topic = dict((await committed.execute(select(ContentTopic.code, ContentTopic.id))).all())
     await content.upsert_block(
         committed,
         topic_id=topic["about_me"],
@@ -324,7 +334,7 @@ async def test_book_renders_the_strip_and_the_chosen_days_times_on_the_server(
     assert 'class="daystrip"' in page and 'href="/book?' in page  # days are plain links
     assert f'name="slot_id" value="{web_slot}"' in page  # a plain list of forms, no htmx needed
     assert "Times are shown in Yerevan (GMT+4)" in page
-    assert 'data-zone-change' in page and 'id="tz-field"' in page
+    assert "data-zone-change" in page and 'id="tz-field"' in page
     assert "<noscript>" in page  # the "show times" fallback
     # One session type's picker is not hidden by a missing second one.
     assert 'name="modality"' in page
@@ -397,3 +407,81 @@ async def test_her_privacy_block_replaces_the_default(
     await committed.commit()
     page = web.get("/privacy?lang=en").text
     assert "My own privacy words." in page and "Who reads it: only me." not in page
+
+
+# --- item 5: the status page and the calendar file -----------------------------------------------
+
+
+@pytest_asyncio.fixture
+async def confirmed_request(committed) -> AsyncIterator[tuple[Client, BookingRequest]]:
+    practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
+    type_id = (await committed.execute(select(SessionType.id).limit(1))).scalar_one()
+    client = Client(
+        practice_id=practice.id, language="en", timezone="Asia/Yerevan", display_name="T"
+    )
+    committed.add(client)
+    await committed.flush()
+    row = BookingRequest(
+        practice_id=practice.id,
+        client_id=client.id,
+        session_type_id=type_id,
+        modality=Modality.online,
+        status=RequestStatus.confirmed,
+        source_channel=Channel.web,
+        scheduled_start=datetime.now(UTC) + timedelta(days=5),
+        scheduled_duration_min=50,
+        confirmed_at=datetime.now(UTC),
+        client_timezone="Asia/Yerevan",
+    )
+    committed.add(row)
+    await committed.commit()
+    yield client, row
+    await committed.rollback()
+    await committed.execute(delete(BookingRequest).where(BookingRequest.id == row.id))
+    await committed.execute(delete(Client).where(Client.id == client.id))
+    await committed.commit()
+
+
+def test_the_ics_is_for_the_client_it_belongs_to_only(web: TestClient, confirmed_request) -> None:
+    _client, row = confirmed_request
+    assert web.get(f"/r/{row.uuid}/session.ics").status_code == 404  # not signed in
+
+
+def test_a_confirmed_request_is_a_status_page_with_a_calendar_file(
+    web: TestClient, confirmed_request
+) -> None:
+    client, row = confirmed_request
+    web.cookies.set("pb_client", client_session_value(client.id), domain="testserver")
+    page = web.get(f"/r/{row.uuid}?lang=en").text
+    assert "Your session is booked" in page
+    assert 'class="timeline"' in page and 'aria-current="step"' in page
+    assert f'href="/r/{row.uuid}/session.ics"' in page and "Add to calendar" in page
+
+    ics = web.get(f"/r/{row.uuid}/session.ics")
+    assert ics.status_code == 200
+    assert ics.headers["content-type"].startswith("text/calendar")
+    assert "attachment" in ics.headers["content-disposition"]
+    assert "BEGIN:VEVENT" in ics.text and f"UID:{row.uuid}@" in ics.text
+    assert "DTEND" in ics.text and "\r\n" in ics.text
+    start = row.scheduled_start.astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+    assert f"DTSTART:{start}" in ics.text
+    end = (row.scheduled_start + timedelta(minutes=50)).astimezone(UTC).strftime("%Y%m%dT%H%M%SZ")
+    assert f"DTEND:{end}" in ics.text
+
+
+@pytest.mark.asyncio
+async def test_no_calendar_file_until_it_is_confirmed(
+    web: TestClient, confirmed_request, committed
+) -> None:
+    client, row = confirmed_request
+    await committed.execute(
+        update(BookingRequest)
+        .where(BookingRequest.id == row.id)
+        .values(status=RequestStatus.expired)
+    )
+    await committed.commit()
+    web.cookies.set("pb_client", client_session_value(client.id), domain="testserver")
+    assert web.get(f"/r/{row.uuid}/session.ics").status_code == 404
+    page = web.get(f"/r/{row.uuid}?lang=en").text
+    assert "This request was not answered in time" in page
+    assert 'class="timeline"' not in page and "session.ics" not in page
