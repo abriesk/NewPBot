@@ -223,8 +223,22 @@ def _guard(request: BookingRequest, event: str) -> None:
 
 
 async def _get(session: AsyncSession, request_id: int) -> BookingRequest:
+    """The request, read under a row lock.
+
+    Every transition starts here, and a transition is "check the status, then
+    change it": without the lock a reject and an accept at the same moment both
+    pass the check and the later write wins. `populate_existing` because the
+    caller often loaded this row a moment earlier (`get_by_uuid`) -- the lock
+    would otherwise be taken and the stale status in the session used anyway.
+    Autoflush has already written anything pending, so nothing is overwritten.
+    """
     request = (
-        await session.execute(select(BookingRequest).where(BookingRequest.id == request_id))
+        await session.execute(
+            select(BookingRequest)
+            .where(BookingRequest.id == request_id)
+            .with_for_update()
+            .execution_options(populate_existing=True)
+        )
     ).scalar_one_or_none()
     if request is None:
         raise NotFound(f"booking request {request_id}")

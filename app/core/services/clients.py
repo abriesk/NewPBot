@@ -16,7 +16,7 @@ from datetime import datetime, timedelta
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import ActorType, Channel, TokenPurpose
@@ -210,25 +210,31 @@ async def consume_token(
     set in the same transaction as the action the token authorises, so a
     rollback cannot leave a token spent for an action that did not happen.
     """
-    token = (
-        await session.execute(select(AuthToken).where(AuthToken.token_hash == _hash(raw_token)))
-    ).scalar_one_or_none()
-
+    # One statement, so the check and the spend cannot be separated: two
+    # requests carrying the same token both used to read it as unused. The
+    # second one waits on the first's row lock, then re-evaluates `used_at IS
+    # NULL` against the committed row and gets nothing back.
+    #
     # One error for unknown, used, expired, and wrong-purpose: distinguishing
     # them tells a caller whether a token existed.
-    if (
-        token is None
-        or token.used_at is not None
-        or token.expires_at <= now_utc()
-        or token.purpose != purpose
-    ):
+    row = (
+        await session.execute(
+            update(AuthToken)
+            .where(
+                AuthToken.token_hash == _hash(raw_token),
+                AuthToken.used_at.is_(None),
+                AuthToken.expires_at > now_utc(),
+                AuthToken.purpose == purpose,
+            )
+            .values(used_at=now_utc())
+            .returning(AuthToken.client_id, AuthToken.purpose, AuthToken.payload)
+            .execution_options(synchronize_session=False)
+        )
+    ).one_or_none()
+    if row is None:
         raise TokenInvalid("token is not valid")
 
-    token.used_at = now_utc()
-    await session.flush()
-    return TokenResult(
-        client_id=token.client_id, purpose=token.purpose, payload=token.payload or {}
-    )
+    return TokenResult(client_id=row.client_id, purpose=row.purpose, payload=row.payload or {})
 
 
 async def token_target(
