@@ -125,6 +125,7 @@ All configuration is environment variables, loaded through Pydantic settings. `.
 | `ACME_EMAIL` | conditional | — | Let's Encrypt contact address; required by the `tls` profile |
 | `TUNNEL_TOKEN` | conditional | — | Required by the `cloudflared` profile only |
 | `TRUST_PROXY_HEADERS` | no | `true` | Honour `X-Forwarded-Proto` / `X-Forwarded-For` |
+| `PGDATA_DIR` | no | `pgdata` | Compose only — a bare name is the named volume; a path (`./pgdata`) bind-mounts that host directory as the database's data directory |
 | `BACKUP_DIR` | no | `./backups` | Compose only — host path bind-mounted into `backup` (read-write) and `web` (read-only) |
 | `BACKUP_PATH` | no | `/backups` | Container path `web` lists dumps from; the other end of the same mount |
 | `BACKUP_HOUR_UTC` | no | `3` | Compose only — hour of day the sidecar dumps; `0`–`23` |
@@ -1183,7 +1184,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-psycho}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      - ${PGDATA_DIR:-pgdata}:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-psycho}"]
       interval: 5s
