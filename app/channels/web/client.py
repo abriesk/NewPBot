@@ -125,6 +125,7 @@ async def _queue_login_link(
     client_id: UUID,
     email: str,
     request_uuid: UUID | None = None,
+    book: dict[str, str] | None = None,
 ) -> None:
     """Queue `auth.login_link.client` to an address that has not proved itself.
 
@@ -145,6 +146,10 @@ async def _queue_login_link(
     payload: dict[str, str] = {"email": email}
     if request_uuid is not None:
         payload["request"] = str(request_uuid)
+    if book is not None:
+        # A proved owner on a new browser: the choice rides in the token and is
+        # filed when the link is followed (the problem text is not carried).
+        payload["book"] = book  # type: ignore[assignment]
     raw = await issue_token(
         session, TokenPurpose.login, client_id=client_id, payload=payload
     )
@@ -771,6 +776,7 @@ def build_router() -> APIRouter:
         if not csrf_ok(request, csrf_token):
             return Response(status_code=403)
         settings_now = get_settings()
+        can_link = settings_now.email_enabled
 
         async with unit_of_work() as session:
             context = await _context(session, request)
@@ -825,15 +831,50 @@ def build_router() -> APIRouter:
                 email = address
                 owner = await verified_email_client(session, address)
                 if owner is not None:
+                    if not can_link:
+                        return _render(
+                            "error.html",
+                            {
+                                **context,
+                                "heading": context["t"]["error"],
+                                "message": context["t"]["unavailable"],
+                            },
+                            status_code=409,
+                        )
                     # A proved address is somebody's real record. A stranger
-                    # typing it files nothing there: the owner is sent a link,
-                    # and the page says exactly what it says for a new address.
-                    if settings_now.email_enabled and (
-                        await magic_link_allowance_left(session, address) > 0
-                    ):
-                        await _queue_login_link(session, client_id=owner, email=address)
+                    # typing it files nothing there: the owner is sent a link
+                    # carrying the choice, which is filed when it is followed,
+                    # and the page says what it says for a new address.
+                    if await magic_link_allowance_left(session, address) > 0:
+                        await _queue_login_link(
+                            session,
+                            client_id=owner,
+                            email=address,
+                            book={
+                                "slot_id": str(reservation["slot_id"]),
+                                "session_type_id": str(reservation["session_type_id"]),
+                                "modality": str(reservation.get("modality", "online")),
+                                "tz": str(reservation.get("tz") or ""),
+                                "name": (name or "")[:200],
+                                "contact": (contact or "")[:500],
+                            },
+                        )
                     await notifications.publish(session)
                     return await _check_email_page(session, context)
+                if can_link and await magic_link_allowance_left(session, address) <= 0:
+                    # No link can be sent, so no short hold could be released:
+                    # refuse readably rather than lose the booking later.
+                    return _render(
+                        "error.html",
+                        {
+                            **context,
+                            "heading": context["t"]["error"],
+                            "message": await get_text(
+                                session, context["lang"], "error.rate_limited"
+                            ),
+                        },
+                        status_code=429,
+                    )
                 # §12.1 (IMPLEMENTATION.md): verification is never a
                 # precondition for booking -- the request is submitted either
                 # way. What it *is* a precondition for is anything that signs
@@ -863,7 +904,8 @@ def build_router() -> APIRouter:
                     client_timezone=reservation.get("tz"),
                     # A typed address proves nothing: short hold, and the
                     # therapist hears when the link is followed.
-                    awaiting_verification=not proven,
+                    # (Without SMTP nothing could release it: filed normally.)
+                    awaiting_verification=not proven and can_link,
                 )
             except SlotUnavailable:
                 await flow.clear(session, client.id, Channel.web)
@@ -908,18 +950,21 @@ def build_router() -> APIRouter:
                 # through it rather than around it. Nothing else here reaches an
                 # unverified address (§13.3), which is why the booking otherwise
                 # leaves the client with no route back at all.
-                if settings.email_enabled and await magic_link_allowance_left(session, email) > 0:
+                if can_link:
                     await _queue_login_link(
                         session,
                         client_id=client.id,
                         email=email,
                         request_uuid=booking_request.uuid,
                     )
-                verify_notice = await get_text(session, context["lang"], "booking.check_email")
+                if can_link:
+                    verify_notice = await get_text(
+                        session, context["lang"], "booking.check_email"
+                    )
 
             await notifications.publish(session)
 
-            if not proven:
+            if not proven and can_link:
                 # The same page as for an address that already belongs to
                 # somebody (above): nothing here says which it was.
                 response = await _check_email_page(session, context)
@@ -1391,13 +1436,49 @@ def build_router() -> APIRouter:
                         status_code=400,
                     )
 
+            # A proved owner's booking made on another browser: filed now, with
+            # the same checks as at the form (the slot may have gone since).
+            carried = result.payload.get("book")
+            carried_uuid = None
+            if isinstance(carried, dict):
+                try:
+                    if not _valid_modality(str(carried["modality"])) or (
+                        carried.get("tz") and not _valid_zone(str(carried["tz"]))
+                    ):
+                        raise ValueError("bad reservation")
+                    filed = await booking.submit_slot_request(
+                        session,
+                        client_id=result.client_id,
+                        slot_id=int(carried["slot_id"]),
+                        session_type_id=int(carried["session_type_id"]),
+                        modality=Modality(str(carried["modality"])),
+                        source_channel=Channel.web,
+                        contact_note=str(carried.get("contact") or "") or None,
+                        display_name=str(carried.get("name") or "") or None,
+                        client_timezone=str(carried.get("tz") or "") or None,
+                    )
+                    carried_uuid = filed.uuid
+                    await notifications.publish(session)
+                except (DomainError, ValueError, KeyError):
+                    gone = _render(
+                        "error.html",
+                        {
+                            **context,
+                            "heading": context["t"]["slot_taken"],
+                            "message": context["t"]["slot_taken"],
+                        },
+                        status_code=409,
+                    )
+                    issue_client_session(gone, result.client_id)
+                    return gone
+
             # Where the link was sent from. A login link minted by the booking
             # flow is about one request and says so, so it lands there rather
             # than on the front page; one from `/auth/email` names no request
             # and lands on the front page as before. Parsed rather than
             # interpolated: this is our own payload, and a redirect built from
             # a string in the database should still have to be a UUID.
-            target = "/"
+            target = f"/r/{carried_uuid}" if carried_uuid else "/"
             requested = str(result.payload.get("request", ""))
             if requested:
                 try:

@@ -1241,7 +1241,11 @@ def build_router() -> APIRouter:
                     .with_for_update()
                 )
             ).scalar_one_or_none()
-            if row is None or row.status is not OutboxStatus.dead:
+            if (
+                row is None
+                or row.status is not OutboxStatus.dead
+                or row.last_error == "client erased"
+            ):
                 return _back("/admin/delivery")
             row.status = OutboxStatus.pending
             row.attempts = 0

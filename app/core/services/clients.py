@@ -682,6 +682,32 @@ async def erase_client(session: AsyncSession, client_id: UUID) -> Client:
     from app.core.models import OutboxMessage
     from app.core.services.notifications import purge_payload
 
+    # A delivery-failed alert names the address it could not reach and carries no
+    # client or request id, so it is found by the address itself.
+    addresses = set(
+        (
+            await session.execute(
+                select(Identity.external_id).where(Identity.client_id == client_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if addresses:
+        for alert in (
+            (
+                await session.execute(
+                    select(OutboxMessage).where(
+                        OutboxMessage.intent_key == "system.delivery_failed.admin",
+                        OutboxMessage.payload["address"].astext.in_(addresses),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        ):
+            alert.payload = {**alert.payload, "address": "erased", "error": ""}
+
     for outbox in (
         (
             await session.execute(

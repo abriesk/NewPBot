@@ -23,7 +23,7 @@ from __future__ import annotations
 import logging
 from datetime import timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels.base import DeliveryResult, Transport
@@ -259,6 +259,15 @@ async def dispatch_outbox(transports: dict[Channel, Transport] | None = None) ->
 
 
 async def _attempt(message_id: int, active: dict[Channel, Transport]) -> None:
+    # The batch was claimed at one instant and its sends run one after another
+    # (15 s each for SMTP): restamp, committed, so a row waiting its turn is not
+    # taken for a stuck one by another worker's `reclaim_stuck`.
+    async with unit_of_work() as session:
+        await session.execute(
+            update(OutboxMessage)
+            .where(OutboxMessage.id == message_id, OutboxMessage.status == OutboxStatus.sending)
+            .values(next_attempt_at=now_utc())
+        )
     async with unit_of_work() as session:
         message = (
             await session.execute(select(OutboxMessage).where(OutboxMessage.id == message_id))

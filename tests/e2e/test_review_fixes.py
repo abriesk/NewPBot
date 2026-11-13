@@ -246,3 +246,75 @@ def test_the_telegram_transport_is_reused_across_passes() -> None:
     from app.core.enums import Channel as C
 
     assert build_transports()[C.telegram] is build_transports()[C.telegram]
+
+
+# --- Review round 1: erasure reaches names, reasons and delivery alerts ------------------
+
+
+async def test_erasure_clears_name_reason_and_alerts_that_name_the_address(
+    db: AsyncSession, client: Any, request_id: int
+) -> None:
+    from app.core.models import Practice
+
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    from app.core.services.clients import link_identity
+
+    await link_identity(db, client.id, Channel.email, "gone@example.test", verified=True)
+
+    def row(**kw: Any) -> OutboxMessage:
+        r = OutboxMessage(
+            practice_id=practice.id,
+            channel=Channel.telegram,
+            address="1",
+            locale="en",
+            status=OutboxStatus.sent,
+            **kw,
+        )
+        db.add(r)
+        return r
+
+    named = row(
+        request_id=request_id,
+        intent_key="request.submitted.admin",
+        payload={"uuid": "u", "name": "Real Name", "reason": "private reason"},
+    )
+    alert = row(
+        intent_key="system.delivery_failed.admin",
+        payload={"intent": "x", "address": "gone@example.test", "error": "550 gone@example.test"},
+    )
+    other = row(
+        intent_key="system.delivery_failed.admin",
+        payload={"intent": "x", "address": "someone@else.test", "error": "e"},
+    )
+    await db.flush()
+
+    await erase_client(db, client.id)
+
+    assert "name" not in named.payload and "reason" not in named.payload
+    assert alert.payload["address"] == "erased"
+    assert "gone@example.test" not in str(alert.payload)
+    assert other.payload["address"] == "someone@else.test"
+
+
+async def test_retention_purges_a_waitlist_entrys_words(db: AsyncSession, client: Any) -> None:
+    from datetime import UTC, datetime, timedelta
+
+    from app.core.enums import WaitlistStatus
+    from app.core.models import Practice, WaitlistEntry
+    from app.worker.jobs.sweeps import purge_waitlist_in_session
+
+    practice = (await db.execute(select(Practice).limit(1))).scalar_one()
+    old = WaitlistEntry(
+        practice_id=practice.id,
+        client_id=client.id,
+        problem_text="old words",
+        contact_note="old contact",
+        status=WaitlistStatus.contacted,
+    )
+    db.add(old)
+    await db.flush()
+    old.created_at = datetime.now(UTC) - timedelta(days=30 * (practice.retention_months + 1))
+    await db.flush()
+
+    assert await purge_waitlist_in_session(db) >= 1
+    assert old.problem_text is None and old.contact_note is None

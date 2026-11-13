@@ -276,3 +276,78 @@ async def test_the_email_transport_refuses_a_line_break_without_retrying(
 ) -> None:
     result = await EmailTransport().send("a@b.example\nBcc: x@y.example", RenderedMessage(parts=["hi"]))
     assert result.permanent_failure
+
+
+# --- Review round 1 ----------------------------------------------------------------
+
+
+async def test_the_claim_time_is_restamped_when_each_send_starts(
+    committed: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sends in a batch are sequential; a row waiting its turn must not look
+    stuck to another worker's reclaim."""
+    from app.db import unit_of_work
+
+    ids = await _make_rows(committed, ["777"])
+    try:
+
+        async def stale_claim(session: AsyncSession, limit: int = 0) -> list[OutboxMessage]:
+            row = (
+                await session.execute(
+                    select(OutboxMessage).where(OutboxMessage.id == ids[0]).with_for_update()
+                )
+            ).scalar_one()
+            row.status = OutboxStatus.sending
+            row.next_attempt_at = datetime.now(UTC) - timedelta(minutes=20)
+            await session.flush()
+            return [row]
+
+        seen: list[datetime] = []
+
+        async def watching(session: AsyncSession, message: OutboxMessage, transports: Any) -> Any:
+            async with unit_of_work() as other:
+                seen.append(
+                    (
+                        await other.execute(
+                            select(OutboxMessage.next_attempt_at).where(
+                                OutboxMessage.id == message.id
+                            )
+                        )
+                    ).scalar_one()
+                )
+            return DeliveryResult.success()
+
+        monkeypatch.setattr(job, "claim_batch", stale_claim)
+        monkeypatch.setattr(job, "deliver_one", watching)
+        await job.dispatch_outbox(transports={})
+        assert seen and seen[0] > datetime.now(UTC) - timedelta(minutes=1), seen
+    finally:
+        await _drop(committed, ids)
+
+
+async def test_retry_refuses_an_erased_clients_row(
+    committed: AsyncSession, web: TestClient
+) -> None:
+    ids = await _make_rows(committed, ["888"])
+    try:
+        row = (
+            await committed.execute(select(OutboxMessage).where(OutboxMessage.id == ids[0]))
+        ).scalar_one()
+        row.status = OutboxStatus.dead
+        row.last_error = "client erased"
+        await committed.commit()
+
+        _sign_in(web)
+        assert f"/admin/delivery/{ids[0]}/retry" not in web.get("/admin/delivery").text
+        web.post(
+            f"/admin/delivery/{ids[0]}/retry",
+            data={"csrf_token": _csrf(web)},
+            follow_redirects=False,
+        )
+        committed.expire_all()
+        row = (
+            await committed.execute(select(OutboxMessage).where(OutboxMessage.id == ids[0]))
+        ).scalar_one()
+        assert row.status is OutboxStatus.dead
+    finally:
+        await _drop(committed, ids)

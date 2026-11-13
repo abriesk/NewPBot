@@ -8,7 +8,10 @@ on that person's record.
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
+
+import pytest
 
 from fastapi.testclient import TestClient
 from sqlalchemy import select, text, update
@@ -255,3 +258,69 @@ async def test_a_line_break_in_the_booking_email_is_refused_and_nothing_is_held(
     response = await _book(web, committed, web_slot, email="a@b.example\nBcc: x@y.example")
     assert response.status_code == 400
     assert (await _slot(committed, web_slot)).status is SlotStatus.available
+
+
+# --- Review round 1 ----------------------------------------------------------------
+
+
+@pytest.fixture
+def web_nomail(email_disabled: None) -> Iterator[TestClient]:
+    from app.main import create_app
+
+    with TestClient(create_app(), base_url="https://testserver") as client:
+        yield client
+
+
+async def test_without_smtp_a_booking_is_filed_normally_and_the_therapist_is_told(
+    web_nomail: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """No link can be sent, so a 15-minute hold nothing can release would just
+    lose the booking."""
+    response = await _book(web_nomail, committed, web_slot)
+    assert response.status_code == 200
+    request = await _request_for(committed, web_slot)
+    assert request is not None and not request.awaiting_verification
+    assert await _admin_rows(committed, request.id), "the therapist was not told"
+    slot = await _slot(committed, web_slot)
+    assert slot.hold_expires_at - datetime.now(UTC) > timedelta(hours=1)
+
+
+async def test_an_address_out_of_login_links_is_refused_not_silently_lost(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    from app.core.enums import TokenPurpose
+    from app.core.services.clients import issue_token, resolve_client
+
+    client = await resolve_client(committed, Channel.email, EMAIL)
+    for _ in range(3):
+        await issue_token(
+            committed, TokenPurpose.login, client_id=client.id, payload={"email": EMAIL}
+        )
+    await committed.commit()
+
+    response = await _book(web, committed, web_slot)
+    assert response.status_code == 429
+    assert await _request_for(committed, web_slot) is None
+    assert (await _slot(committed, web_slot)).status is SlotStatus.available
+
+
+async def test_a_proved_owner_on_a_new_browser_has_the_booking_filed_when_the_link_is_followed(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    from app.core.services.clients import resolve_client
+
+    owner_id = (await resolve_client(committed, Channel.email, EMAIL, verified=True)).id
+    await committed.commit()
+
+    await _book(web, committed, web_slot)
+    assert await _request_for(committed, web_slot) is None
+    url = await _login_url(committed, EMAIL)
+
+    _follow(web, url)
+
+    request = await _request_for(committed, web_slot)
+    assert request is not None, "the booking the owner chose was lost"
+    assert request.client_id == owner_id
+    assert not request.awaiting_verification
+    assert await _admin_rows(committed, request.id)
+    assert (await _slot(committed, web_slot)).status is SlotStatus.held

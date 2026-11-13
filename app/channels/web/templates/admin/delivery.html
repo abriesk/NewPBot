@@ -27,7 +27,7 @@
       <td><span class="badge {{ row.status.value }}">{{ row.status.value }}</span></td>
       <td>{{ row.attempts }}</td>
       <td class="muted">{{ row.last_error or "" }}</td>
-      <td>{% if row.status.value == "dead" %}
+      <td>{% if row.status.value == "dead" and row.last_error != "client erased" %}
         <form method="post" action="/admin/delivery/{{ row.id }}/retry">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <button type="submit">{{ t.delivery_retry }}</button>

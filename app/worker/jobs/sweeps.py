@@ -16,7 +16,9 @@ from datetime import timedelta
 
 from sqlalchemy import delete, func, select, update
 
-from app.core.enums import ReminderState, RequestStatus, SlotStatus
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.enums import ReminderState, RequestStatus, SlotStatus, WaitlistStatus
 from app.core.models import (
     AuthToken,
     BookingRequest,
@@ -26,6 +28,7 @@ from app.core.models import (
     OutboxMessage,
     Reminder,
     Slot,
+    WaitlistEntry,
 )
 from app.core.policies import now_utc
 from app.core.services import booking, notifications, translations
@@ -208,6 +211,32 @@ async def fire_reminders() -> int:
         return len(due)
 
 
+async def purge_waitlist_in_session(session: AsyncSession) -> int:
+    """Retention for the waitlist's free text, on the same clock as requests."""
+    practice = await get_practice(session)
+    cutoff = now_utc() - timedelta(days=30 * practice.retention_months)
+    entries = (
+        (
+            await session.execute(
+                select(WaitlistEntry)
+                .where(
+                    WaitlistEntry.status != WaitlistStatus.new,
+                    WaitlistEntry.created_at < cutoff,
+                    WaitlistEntry.problem_text.isnot(None) | WaitlistEntry.contact_note.isnot(None),
+                )
+                .limit(BATCH_SIZE)
+                .with_for_update(skip_locked=True)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for entry in entries:
+        entry.problem_text = None
+        entry.contact_note = None
+    return len(entries)
+
+
 async def purge_content() -> int:
     """§16 of DESIGN, §14 here: null out the sensitive free text on terminal
     requests older than `retention_months`, keeping the row for statistics.
@@ -226,6 +255,7 @@ async def purge_content() -> int:
     async with unit_of_work() as session:
         practice = await get_practice(session)
         cutoff = now_utc() - timedelta(days=30 * practice.retention_months)
+        purged_waitlist = await purge_waitlist_in_session(session)
 
         rows = (
             (
@@ -270,7 +300,7 @@ async def purge_content() -> int:
         if rows:
             # Identifiers, never content (hard rule 8).
             logger.info("purged retained content from %d request(s)", len(rows))
-        return len(rows)
+        return len(rows) + purged_waitlist
 
 
 async def prune_tokens() -> int:

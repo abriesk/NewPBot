@@ -80,7 +80,13 @@ EMAIL_FORBIDDEN_FIELDS = frozenset({"problem", "problem_text", "note", "thread",
 
 #: What retention and erasure remove from a stored outbox payload (C11): the
 #: email-forbidden fields plus the free text a notification can carry.
-PURGE_PAYLOAD_FIELDS = EMAIL_FORBIDDEN_FIELDS | {"message", "body", "desired_time_text"}
+PURGE_PAYLOAD_FIELDS = EMAIL_FORBIDDEN_FIELDS | {
+    "message",
+    "body",
+    "desired_time_text",
+    "name",
+    "reason",
+}
 
 
 def purge_payload(payload: dict[str, Any]) -> dict[str, Any]:
