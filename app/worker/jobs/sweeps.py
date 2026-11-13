@@ -23,6 +23,7 @@ from app.core.models import (
     ContentBlockRevision,
     ErrorEvent,
     NegotiationMessage,
+    OutboxMessage,
     Reminder,
     Slot,
 )
@@ -30,7 +31,7 @@ from app.core.policies import now_utc
 from app.core.services import booking, notifications, translations
 from app.core.services import slots as slot_service
 from app.core.services.content import MAX_REVISIONS
-from app.core.services.notifications import Recipient
+from app.core.services.notifications import Recipient, purge_payload
 from app.core.services.settings import get_practice
 from app.db import unit_of_work
 
@@ -249,6 +250,17 @@ async def purge_content() -> int:
         for request in rows:
             request.problem_text = None
             request.contact_note = None
+            # The notifications about it kept the words too (C11).
+            for outbox in (
+                (
+                    await session.execute(
+                        select(OutboxMessage).where(OutboxMessage.request_id == request.id)
+                    )
+                )
+                .scalars()
+                .all()
+            ):
+                outbox.payload = purge_payload(outbox.payload)
             await session.execute(
                 update(NegotiationMessage)
                 .where(NegotiationMessage.request_id == request.id)

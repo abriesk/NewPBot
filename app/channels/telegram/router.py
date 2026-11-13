@@ -516,7 +516,8 @@ async def _my_appointments(session: AsyncSession, client: Client) -> Reply:
                     session, client.language, f"request.status.{request.status.value}"
                 ),
                 # Hard rule 8: status and time, never the problem text.
-                time=_local(when, client, practice) or (request.desired_time_text or ""),
+                time=_local(when, client, practice)
+                or escape_telegram(request.desired_time_text or ""),
                 session_type=session_type,
                 modality=await get_text(
                     session, client.language, f"booking.modality.{request.modality.value}"
@@ -986,7 +987,7 @@ async def _contact_email(session: AsyncSession, client: Client, address: str) ->
     await flow.remember(session, client.id, Channel.telegram, contact=address)
     reply = await _submit_booking(session, client)
     reply.extra.insert(
-        0, await get_text(session, client.language, "booking.contact.email_sent", email=address)
+        0, await get_text(session, client.language, "booking.contact.email_sent", email=escape_telegram(address))
     )
     return reply
 
@@ -2239,9 +2240,37 @@ async def _admin_request(
 
     buttons = [actions] if actions else []
     buttons.append(_admin_nav())
+    # §17 lets problem text, contact note and the thread each run to 4096, and
+    # escaping expands them: one message cannot hold it (C9).
+    first, *rest = _split_message(lines)
     return Reply(
-        "\n".join(lines), keyboard=kb.panel_keyboard(buttons), edit=True, toast=toast
+        first, keyboard=kb.panel_keyboard(buttons), extra=rest, edit=True, toast=toast
     )
+
+
+def _split_message(lines: list[str], limit: int = 4000) -> list[str]:
+    """Pack lines into messages of at most `limit` characters, never cutting an
+    HTML entity such as `&amp;` in half."""
+    parts: list[str] = []
+    current = ""
+    for line in lines:
+        while len(line) > limit:
+            cut = limit
+            amp = line.rfind("&", 0, cut)
+            if amp != -1 and ";" not in line[amp:cut]:
+                cut = amp
+            if current:
+                parts.append(current)
+                current = ""
+            parts.append(line[:cut])
+            line = line[cut:]
+        if current and len(current) + 1 + len(line) > limit:
+            parts.append(current)
+            current = line
+        else:
+            current = f"{current}\n{line}" if current else line
+    parts.append(current)
+    return parts
 
 
 async def _admin_thread(session: AsyncSession, request_id: int) -> list[str]:

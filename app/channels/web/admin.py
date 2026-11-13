@@ -789,6 +789,8 @@ def build_router() -> APIRouter:
             if admin is None:
                 return _back("/admin/login")
 
+            if lang not in LANGUAGES:
+                return Response(status_code=400)
             topic = await content.get_topic(session, topic_code)
             try:
                 await content.upsert_block(
@@ -964,7 +966,12 @@ def build_router() -> APIRouter:
             if admin is None:
                 return _back("/admin/login")
 
-            await set_text(session, lang, key, value)
+            if lang not in LANGUAGES:
+                return Response(status_code=400)
+            try:
+                await set_text(session, lang, key, value)
+            except ValueError:
+                return _back(f"/admin/translations?lang={lang}", "empty-value-not-saved")
             invalidate_cache()
             return _back(f"/admin/translations?lang={lang}", "saved")
 

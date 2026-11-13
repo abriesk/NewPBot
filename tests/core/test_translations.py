@@ -199,3 +199,32 @@ async def test_missing_keys_reports_a_language_with_nothing_seeded(db: AsyncSess
 
     assert missing
     assert all(not key.startswith("admin.") for key in missing)
+
+
+# --- NP2: A2 and C13 ----------------------------------------------------------
+
+
+async def test_an_empty_translation_is_refused_and_a_blank_row_falls_back(db) -> None:  # type: ignore[no-untyped-def]
+    import pytest as _pytest
+
+    from app.core.models import Translation
+    from app.core.services.settings import get_practice
+    from app.core.services.translations import get_text, invalidate_cache, set_text
+
+    with _pytest.raises(ValueError):
+        await set_text(db, "hy", "booking.ask_desired_time", "   ")
+    with _pytest.raises(ValueError):
+        await set_text(db, "am", "booking.ask_desired_time", "text")
+
+    # A blank row already in the database (the live one) is skipped, not served.
+    practice = await get_practice(db)
+    from sqlalchemy import delete
+
+    await db.execute(
+        delete(Translation).where(Translation.lang == "en", Translation.key == "common.skip")
+    )
+    db.add(Translation(practice_id=practice.id, lang="en", key="common.skip", value=""))
+    await db.flush()
+    invalidate_cache()
+    assert await get_text(db, "en", "common.skip") == "Skip"
+    invalidate_cache()

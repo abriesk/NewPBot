@@ -297,8 +297,13 @@ async def _actions(
                 # "connect Telegram" label on a link that does nothing of the
                 # sort.
                 continue
-            actions.append(
-                Action(key=key, label=label, url=url or _request_url(base_url, payload))
+            # An admin email's buttons open the admin page, not the client's
+            # sign-in form (C6).
+            fallback = (
+                f"{base_url}/admin/requests/{payload.get('uuid', '')}"
+                if intent_key.endswith(".admin")
+                else _request_url(base_url, payload)
             )
+            actions.append(Action(key=key, label=label, url=url or fallback))
 
     return actions

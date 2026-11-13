@@ -78,6 +78,15 @@ BOTH_CHANNELS = frozenset(
 #: bodies.
 EMAIL_FORBIDDEN_FIELDS = frozenset({"problem", "problem_text", "note", "thread", "contact_note"})
 
+#: What retention and erasure remove from a stored outbox payload (C11): the
+#: email-forbidden fields plus the free text a notification can carry.
+PURGE_PAYLOAD_FIELDS = EMAIL_FORBIDDEN_FIELDS | {"message", "body", "desired_time_text"}
+
+
+def purge_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """The payload with the client's own words removed."""
+    return {k: v for k, v in payload.items() if k not in PURGE_PAYLOAD_FIELDS}
+
 
 @dataclass(frozen=True, slots=True)
 class Envelope:
@@ -686,6 +695,16 @@ async def enqueue_raw(
     rows: list[OutboxMessage] = []
     for channel, address in await _client_targets(session, client_id, intent_key):
         scoped = f"{dedupe_key}:{channel.value}:{address}"
+        body = scrub_for_email(intent_key, payload) if channel == Channel.email else payload
+        if channel == Channel.email and request_id is not None:
+            # As `enqueue` does (§12.1): a reminder's link must not land on the
+            # sign-in form (C7).
+            body = {
+                **body,
+                "view_token": await issue_token(
+                    session, TokenPurpose.view_request, client_id=client_id
+                ),
+            }
         stmt = (
             pg_insert(OutboxMessage)
             .values(
@@ -695,9 +714,7 @@ async def enqueue_raw(
                 client_id=client_id,
                 request_id=request_id,
                 intent_key=intent_key,
-                payload=(
-                    scrub_for_email(intent_key, payload) if channel == Channel.email else payload
-                ),
+                payload=body,
                 locale=client.language,
                 dedupe_key=scoped,
                 status=OutboxStatus.pending,

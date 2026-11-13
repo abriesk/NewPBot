@@ -676,6 +676,31 @@ async def erase_client(session: AsyncSession, client_id: UUID) -> Client:
         .values(problem_text=None, contact_note=None, admin_note=None)
     )
 
+    # The outbox keeps what was sent: addresses and the words in the payloads.
+    # Nothing still waiting may go out to somebody who asked to be forgotten (C11).
+    from app.core.enums import OutboxStatus
+    from app.core.models import OutboxMessage
+    from app.core.services.notifications import purge_payload
+
+    for outbox in (
+        (
+            await session.execute(
+                select(OutboxMessage).where(
+                    (OutboxMessage.client_id == client_id)
+                    | (OutboxMessage.request_id.in_(request_ids or [-1]))
+                )
+            )
+        )
+        .scalars()
+        .all()
+    ):
+        if outbox.client_id == client_id:
+            if outbox.status in (OutboxStatus.pending, OutboxStatus.sending):
+                outbox.status = OutboxStatus.dead
+                outbox.last_error = "client erased"
+            outbox.address = "erased"
+        outbox.payload = purge_payload(outbox.payload)
+
     await session.execute(delete(Identity).where(Identity.client_id == client_id))
     await session.execute(delete(AuthToken).where(AuthToken.client_id == client_id))
     await session.execute(delete(FlowState).where(FlowState.client_id == client_id))

@@ -352,6 +352,20 @@ def _language(request: Request, default: str, override: str | None) -> str:
     return default
 
 
+def _valid_zone(candidate: str | None) -> bool:
+    if not candidate:
+        return False
+    try:
+        ZoneInfo(candidate)
+    except (ZoneInfoNotFoundError, ValueError, OSError):
+        return False
+    return True
+
+
+def _valid_modality(candidate: str | None) -> bool:
+    return candidate in {m.value for m in Modality}
+
+
 def _timezone(request: Request, practice_tz: str) -> str:
     """The client's zone, in DESIGN.md §8's order: explicit choice, then the
     browser's detection, then the practice default."""
@@ -546,10 +560,12 @@ def build_router() -> APIRouter:
         tz: str | None = None,
     ) -> Response:
         """§12.1 step 2, an HTMX partial. Times in the client's timezone."""
+        if modality and not _valid_modality(modality):
+            return Response(status_code=400)
         async with unit_of_work() as session:
             practice = await get_practice(session)
             lang = _language(request, practice.default_language, None)
-            zone = tz or _timezone(request, practice.timezone)
+            zone = tz if _valid_zone(tz) else _timezone(request, practice.timezone)
 
             slots = await list_available_slots(
                 session,
@@ -642,6 +658,10 @@ def build_router() -> APIRouter:
         """
         if not csrf_ok(request, csrf_token):
             return Response(status_code=403)
+        if not _valid_modality(modality):
+            return Response(status_code=400)
+        if tz and not _valid_zone(tz):
+            return Response(status_code=400)
 
         async with unit_of_work() as session:
             practice = await get_practice(session)
@@ -825,6 +845,10 @@ def build_router() -> APIRouter:
                     session, Channel.email, email, language=context["lang"]
                 )
 
+            if not _valid_modality(reservation.get("modality", "online")) or (
+                reservation.get("tz") and not _valid_zone(reservation.get("tz"))
+            ):
+                return Response(status_code=400)
             try:
                 booking_request = await booking.submit_slot_request(
                     session,

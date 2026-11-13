@@ -100,7 +100,10 @@ async def _load(session: AsyncSession, lang: str) -> None:
         )
     ).all()
     for key, value in rows:
-        _cache[(lang, key)] = value
+        # A blank row must not end the fallback chain: it would be served as "".
+        # (A2: the live database held one, saved empty from the admin form.)
+        if value and value.strip():
+            _cache[(lang, key)] = value
 
 
 async def get_text(session: AsyncSession, lang: str, key: str, **fmt: Any) -> str:
@@ -158,7 +161,17 @@ async def _resolve(session: AsyncSession, lang: str, key: str, *, warn: bool = T
 
 
 async def set_text(session: AsyncSession, lang: str, key: str, value: str) -> Translation:
-    """Admin edit. Invalidates the cache so the next lookup sees it."""
+    """Admin edit. Invalidates the cache so the next lookup sees it.
+
+    Refuses an empty value and a language the service does not speak: a blank
+    saved here used to be served as "" and a stray `lang` wrote a row for it.
+    """
+    from app.seed import LANGUAGES
+
+    if lang not in LANGUAGES:
+        raise ValueError(f"{lang!r} is not a configured language")
+    if not value or not value.strip():
+        raise ValueError("an empty translation is not saved; use the default instead")
     practice = await get_practice(session)
     row = (
         await session.execute(

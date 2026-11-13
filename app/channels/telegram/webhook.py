@@ -61,6 +61,10 @@ def build_router() -> APIRouter:
             # and acknowledge, so one broken message does not become a loop.
             # The transaction rolled back, so nothing partial was written.
             logger.exception("telegram update from chat %s failed", update.chat_id)
+            if update.callback_id:
+                # The button would spin until Telegram gave up on it (C12).
+                with suppress(Exception):
+                    await _send(update, None)
             return Response(status_code=200)
 
         if reply is not None or update.callback_id:
