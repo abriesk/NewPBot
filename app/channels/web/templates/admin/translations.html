@@ -48,9 +48,16 @@
             <td><code>{{ entry.key }}</code></td>
             {% if lang != 'en' %}<td class="reference">{{ entry.english }}</td>{% endif %}
             <td>
+              {# A text input would strip a wording's line breaks and the save would rewrite it. #}
+              {% if "\n" in entry.value or "\n" in entry.english %}
+              <textarea name="value__{{ entry.key }}" rows="3"
+                     aria-label="Wording of {{ entry.key }} in {{ lang | human('language') }}"
+                     placeholder="{{ entry.english }}">{{ entry.value }}</textarea>
+              {% else %}
               <input type="text" name="value__{{ entry.key }}" value="{{ entry.value }}"
                      aria-label="Wording of {{ entry.key }} in {{ lang | human('language') }}"
                      placeholder="{{ entry.english }}">
+              {% endif %}
             </td>
           </tr>
         {% endfor %}

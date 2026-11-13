@@ -22,22 +22,30 @@
       {% for c in identities[e.client_id | string] %}{{ contact_link(c) }}<br>{% else %}—{% endfor %}
     </p>
     {% if e.admin_note %}<p class="muted">Note: {{ e.admin_note }}</p>{% endif %}
-    {# One field, labelled, and hidden once the entry is finished. Only "Contacted" sends it. #}
-    {% if e.status.value in ("new", "contacted") %}
-    <form method="post" class="msg-form">
+    {# The message field exists only where a button sends it: on a new entry, beside "Contacted".
+       Anything later has no field, so nothing typed is ever dropped or stored unsent. #}
+    {% if e.status.value == "new" %}
+    <form method="post" class="msg-form" action="/admin/waitlist/{{ e.id }}/contacted">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <label class="msg-field" for="note-{{ e.id }}">Message to the client
         <small>(sent with “Contacted”; leave empty to send nothing)</small></label>
       <input type="text" id="note-{{ e.id }}" name="note">
-      <div class="admin-actions">
-        {% if e.status.value == "new" %}
-          <button type="submit" formaction="/admin/waitlist/{{ e.id }}/contacted">Contacted</button>
-        {% else %}
-          <button type="submit" formaction="/admin/waitlist/{{ e.id }}/converted">Booked a session</button>
-        {% endif %}
-        <button type="submit" class="secondary" formaction="/admin/waitlist/{{ e.id }}/closed">Close entry</button>
-      </div>
+      <div class="admin-actions"><button type="submit">Contacted</button></div>
     </form>
+    {% endif %}
+    {% if e.status.value in ("new", "contacted") %}
+    <div class="admin-actions">
+      {% if e.status.value == "contacted" %}
+      <form method="post" action="/admin/waitlist/{{ e.id }}/converted">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit">Booked a session</button>
+      </form>
+      {% endif %}
+      <form method="post" action="/admin/waitlist/{{ e.id }}/closed">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <button type="submit" class="secondary">Close entry</button>
+      </form>
+    </div>
     {% endif %}
   </div>
 {% else %}

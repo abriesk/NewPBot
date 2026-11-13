@@ -26,11 +26,12 @@
 </p>
 <form method="get" action="/admin/requests" class="search" role="search">
   <label class="sr-only" for="q">Find a request by reference or name</label>
-  <input type="search" id="q" name="q" value="{{ q }}" placeholder="Reference or name, e.g. 5A969404">
+  <input type="search" id="q" name="q" value="{{ q }}" placeholder="Ref or name">
   {% if active %}<input type="hidden" name="status" value="{{ active }}">{% endif %}
   <button type="submit" class="secondary small">Find</button>
   {% if q %}<a href="/admin/requests">clear</a>{% endif %}
 </form>
+<p class="hint scroll-hint">Swipe the table sideways to see every column.</p>
 <div class="scroll">
 <table>
   <thead><tr>
@@ -44,7 +45,7 @@
         <span class="ref">{{ r.ref }}</span></td>
       <td><span class="badge {{ r.status }}">{{ r.status | human("request") }}</span></td>
       <td>{{ r.session_type }} · {{ r.modality | human("modality") }}</td>
-      <td>{% if r.scheduled %}{{ r.scheduled }}{% elif r.desired %}<span class="muted">asked for</span> {{ r.desired }}{% else %}—{% endif %}</td>
+      <td class="when">{% if r.scheduled %}{{ r.scheduled }}{% elif r.desired %}<span class="muted">asked for</span> {{ r.desired }}{% else %}—{% endif %}</td>
       {# §12.2: this is where she decides what to open, so a row she cannot
          answer from should say so here rather than after a click. #}
       <td>

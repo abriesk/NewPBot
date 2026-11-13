@@ -146,6 +146,9 @@ ALREADY_BOOKED = (
     "Moved. Note that you already had a confirmed session at that time — check the week schedule."
 )
 
+#: Slot action -> flash code. Explicit: building the code from the verb gave "slot-deleteed".
+SLOT_FLASH = {"block": "slot-blocked", "unblock": "slot-unblocked", "delete": "slot-deleted"}
+
 NO_NEW_TIME = "Moving a session needs a new time. Nothing was changed."
 
 #: Why a slot the page still lists cannot be deleted, for the same reason and in
@@ -229,6 +232,9 @@ def _flash(code: str | None) -> tuple[str, str] | None:
         return "Not saved: " + code[9:].strip(), "error"
     if code in (NO_NEW_TIME, SLOT_REFERENCED, BAD_PRICE):
         return code, "error"
+    if code == ALREADY_BOOKED:
+        # Done, but she must read it: announced like an error, worded as a note.
+        return code, "warn"
     return code, "ok"
 
 
@@ -941,7 +947,7 @@ def build_router() -> APIRouter:
             # Land on the row she touched; a deleted one is gone, so the top of the list.
             return _back(
                 "/admin/slots",
-                f"slot-{action}ed" if action != "block" else "slot-blocked",
+                SLOT_FLASH[action],
                 "" if action == "delete" else f"#slot-{slot_id}",
             )
 
@@ -1023,7 +1029,9 @@ def build_router() -> APIRouter:
                 # §11.1: caught at save time, in front of her, with a localised
                 # explanation -- not at send time in front of a client.
                 message = await get_text(session, LOCALE, exc.translation_key, detail=exc.detail)
-                return _back(f"/admin/content?topic={topic_code}&lang={lang}", message)
+                return _back(
+                    f"/admin/content?topic={topic_code}&lang={lang}", f"rejected: {message}"
+                )
 
             return _back(f"/admin/content?topic={topic_code}&lang={lang}", "saved")
 
@@ -1208,8 +1216,10 @@ def build_router() -> APIRouter:
                     .all()
                 )
                 saved = skipped = 0
-                for name, text in fields.items():
-                    if text == stored.get(name, ""):
+                for name, raw in fields.items():
+                    # A browser submits a textarea's line breaks as \r\n; the catalogue holds \n.
+                    text = raw.replace("\r\n", "\n")
+                    if text == stored.get(name, "").replace("\r\n", "\n"):
                         continue
                     try:
                         await set_text(session, lang, name, text)

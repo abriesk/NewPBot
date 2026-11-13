@@ -64,7 +64,19 @@ form.search { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; m
 form.search input[type=search] { max-width: 18rem; margin: 0; }
 
 /* Wide tables scroll inside their own box; the page never scrolls sideways. */
-.scroll { overflow-x: auto; }
+.scroll {
+  overflow-x: auto;
+  /* Edge cues that appear only while there is more to scroll to (shadows + covers). */
+  background:
+    linear-gradient(to right, var(--bg) 30%, transparent) left / 2rem 100% no-repeat local,
+    linear-gradient(to left, var(--bg) 30%, transparent) right / 2rem 100% no-repeat local,
+    linear-gradient(to right, rgb(0 0 0 / .22), transparent) left / .7rem 100% no-repeat scroll,
+    linear-gradient(to left, rgb(0 0 0 / .22), transparent) right / .7rem 100% no-repeat scroll;
+}
+.scroll-hint { display: none; margin: .25rem 0; }
+@media (max-width: 40rem) { .scroll-hint { display: block; } }
+td.when { white-space: nowrap; }
+.flash.warn::before { content: "Note: "; }
 table { border-collapse: collapse; width: 100%; font-size: .92rem; }
 th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 600; }

@@ -23,6 +23,7 @@ from tests.e2e.test_admin_web import (  # noqa: F401 - fixtures and helpers of t
     committed,
     restore_practice,
     scratch,
+    waitlist_scratch,
     web,
 )
 
@@ -430,3 +431,105 @@ def test_every_badge_colour_is_defined_for_both_palettes() -> None:
         assert css.count(f"{token}:") >= 3, token  # light, system-dark, chosen-dark
     assert "opacity" not in re.sub(r"/\*.*?\*/", "", css, flags=re.S), "no opacity on text"
     assert "min-height: 2.25rem" in css  # pills are at least 32 px tall
+
+
+# --- review round 1 ---------------------------------------------------------------------------
+
+
+async def test_a_multiline_wording_survives_a_save_of_its_group(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    """A text input strips newlines and a textarea submits \\r\\n: neither may rewrite the row."""
+    _sign_in(web)
+    key, value = (
+        await committed.execute(
+            select(Translation.key, Translation.value)
+            .where(Translation.lang == "en", Translation.value.like("%\n%"))
+            .limit(1)
+        )
+    ).one()
+    page = web.get("/admin/translations?lang=en").text
+    assert re.search(rf'<textarea name="value__{re.escape(key)}"', page), "multi-line = textarea"
+    response = web.post(
+        "/admin/translations",
+        data={
+            "csrf_token": _csrf(web),
+            "lang": "en",
+            "group": "x",
+            f"value__{key}": value.replace("\n", "\r\n"),
+        },
+        follow_redirects=False,
+    )
+    assert "flash=translations-0-0" in response.headers["location"], "not counted as changed"
+    await _fresh(committed)
+    after = (
+        await committed.execute(
+            select(Translation.value).where(Translation.lang == "en", Translation.key == key)
+        )
+    ).scalar_one()
+    assert after == value
+    await _sign_out(committed)
+
+
+async def test_the_message_field_exists_only_where_a_button_sends_it(
+    web: TestClient, committed: AsyncSession, waitlist_scratch: dict[str, object]
+) -> None:
+    from app.core.enums import WaitlistStatus
+    from app.core.models import WaitlistEntry
+
+    _sign_in(web)
+    entry_id = waitlist_scratch["entry_id"]
+    page = web.get("/admin/waitlist?status=all").text
+    assert f'id="note-{entry_id}"' in page
+    await committed.execute(
+        update(WaitlistEntry)
+        .where(WaitlistEntry.id == entry_id)
+        .values(status=WaitlistStatus.contacted)
+    )
+    await committed.commit()
+    page = web.get("/admin/waitlist?status=all").text
+    assert f'id="note-{entry_id}"' not in page, "a contacted entry has no message field"
+    assert f"/admin/waitlist/{entry_id}/converted" in page
+    assert f"/admin/waitlist/{entry_id}/closed" in page
+    await _sign_out(committed)
+
+
+def test_every_slot_action_has_its_own_sentence() -> None:
+    from app.channels.web.admin import SLOT_FLASH
+
+    assert set(SLOT_FLASH) == {"block", "unblock", "delete"}
+    texts = {action: _flash(code) for action, code in SLOT_FLASH.items()}
+    assert texts["block"] == ("Slot blocked. It is no longer offered.", "ok")
+    assert texts["unblock"] == ("Slot unblocked. It is offered again.", "ok")
+    assert texts["delete"] == ("Slot deleted.", "ok")
+
+
+def test_a_move_onto_a_booked_hour_and_a_refused_save_are_announced_as_problems() -> None:
+    from app.channels.web.admin import ALREADY_BOOKED
+
+    assert _flash(ALREADY_BOOKED) == (ALREADY_BOOKED, "warn")
+    assert _flash("rejected: That markdown is not allowed.")[1] == "error"  # type: ignore[index]
+
+
+async def test_a_warning_and_a_refusal_are_drawn_and_announced_as_alerts(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    from urllib.parse import quote
+
+    from app.channels.web.admin import ALREADY_BOOKED
+
+    _sign_in(web)
+    page = web.get(f"/admin/requests?flash={quote(ALREADY_BOOKED)}").text
+    assert 'class="flash error warn" role="alert"' in page
+    page = web.get("/admin/requests?flash=" + quote("rejected: no tables")).text
+    assert 'class="flash error" role="alert"' in page
+    assert "Not saved: no tables" in page
+    await _sign_out(committed)
+
+
+def test_the_search_box_fits_a_phone_and_the_table_shows_it_scrolls() -> None:
+    html = open("app/channels/web/templates/admin/requests.html", encoding="utf-8").read()
+    assert 'placeholder="Ref or name"' in html
+    assert "scroll-hint" in html
+    css = open("app/channels/web/static/admin.css", encoding="utf-8").read()
+    assert "no-repeat local" in css and "td.when { white-space: nowrap; }" in css

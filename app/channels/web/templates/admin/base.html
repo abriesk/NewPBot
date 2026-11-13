@@ -60,7 +60,7 @@ try {
 <main class="wrap wide">
   {% if flash %}
     {# Announced when it appears: a success politely, an error at once. #}
-    <p class="flash {{ flash_kind }}" role="{{ 'alert' if flash_kind == 'error' else 'status' }}">{{ flash }}</p>
+    <p class="flash {{ 'error' if flash_kind in ('error', 'warn') else 'ok' }}{{ ' warn' if flash_kind == 'warn' }}" role="{{ 'alert' if flash_kind in ('error', 'warn') else 'status' }}">{{ flash }}</p>
   {% endif %}
   {% block content %}{% endblock %}
 </main>
