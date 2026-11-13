@@ -1,4 +1,7 @@
-"""scripts/seed_demo.py (np-shot.sh's data): every status, enough free slots, a waitlist entry, a block, a priced type."""
+"""scripts/seed_demo.py (np-shot.sh's data): every status, enough free slots, a waitlist entry, a block, a priced type.
+
+Covers IMPLEMENTATION.md §6.4 (the tables it fills) and refuses databases not named *_test (CLAUDE.md, Commands).
+"""
 
 from __future__ import annotations
 

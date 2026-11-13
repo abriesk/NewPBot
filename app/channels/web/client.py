@@ -210,7 +210,6 @@ async def _details_page(
         for part in (
             await session_type_name(session, lang, code) if code else "",
             t["modality_onsite"] if modality == "onsite" else t["modality_online"],
-            held_when or "",
         )
         if part
     )

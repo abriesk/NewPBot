@@ -1,4 +1,7 @@
-"""NP4a: the client site's quick wins, errors in place, copy and accessibility, through the real ASGI app."""
+"""NP4a: the client site's quick wins, errors in place, copy and accessibility, through the real ASGI app.
+
+Enforces IMPLEMENTATION.md §12.1 (the client web pages) and §15 (the catalogue, localised dates).
+"""
 
 from __future__ import annotations
 
@@ -9,7 +12,7 @@ from pathlib import Path
 import pytest
 import pytest_asyncio
 from fastapi.testclient import TestClient
-from sqlalchemy import update
+from sqlalchemy import select, update
 
 from app.channels.web.client import LANG_COOKIE
 from app.channels.web.security import CSRF_COOKIE
@@ -35,13 +38,14 @@ def anon() -> TestClient:
 
 @pytest_asyncio.fixture
 async def captcha_off(committed) -> AsyncIterator[None]:  # noqa: F811
+    before = (await committed.execute(select(Practice.captcha_on).limit(1))).scalar_one()
     await committed.execute(update(Practice).values(captcha_on=False))
     await committed.commit()
     try:
         yield
     finally:
         await committed.rollback()
-        await committed.execute(update(Practice).values(captcha_on=True))
+        await committed.execute(update(Practice).values(captcha_on=before))
         await committed.commit()
 
 

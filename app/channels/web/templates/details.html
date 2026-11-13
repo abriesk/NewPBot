@@ -9,7 +9,7 @@
 
 {# What is about to be sent, with a way back to change it. #}
 <div class="summary"><p>{{ summary }} <a href="/book">{{ t.change }}</a></p></div>
-<p class="held">{{ t.slot_held }}</p>
+<p class="held">{{ t.slot_held }}{% if held_when %} <strong>{{ held_when }}</strong>{% endif %}</p>
 {% if captcha %}<noscript><p class="noscript">{{ t.noscript }}</p></noscript>{% endif %}
 
 {# §12.1 step 3. Everything here is optional except the email, which is how a

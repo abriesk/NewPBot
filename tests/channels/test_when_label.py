@@ -1,4 +1,7 @@
-"""NP4a: one helper for every client-visible time: localised weekday + date + 24 h time + city and GMT offset."""
+"""NP4a: one helper for every client-visible time: localised weekday + date + 24 h time + city and GMT offset.
+
+Enforces IMPLEMENTATION.md §15 (dates in the reader's language) and DESIGN.md §8 (zones).
+"""
 
 from __future__ import annotations
 

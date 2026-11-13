@@ -8,6 +8,8 @@ on that person's record.
 
 from __future__ import annotations
 
+import re
+
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
@@ -393,7 +395,8 @@ async def test_the_confirm_page_for_a_carried_booking_names_it_and_offers_both_c
     assert page.status_code == 200
     assert 'name="mode" value="book"' in page.text
     assert 'name="mode" value="signin"' in page.text
-    assert (datetime.now(UTC) + timedelta(days=21)).strftime("%Y-%m-%d") in page.text
+    # Named in words and the client's zone, not as an ISO stamp: "пт 4 дек, 23:54 (Москва, GMT+3)".
+    assert re.search(r"\d+ [а-я]{3}, \d\d:\d\d \([^)]+, GMT[+-]\d", page.text)
 
     row = (
         await committed.execute(

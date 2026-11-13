@@ -636,9 +636,9 @@ async def test_a_client_can_open_a_request_from_a_link_and_add_information(
     # `scheduled_start` is not set yet, so it comes from the held slot (§7.1).
     slot = (await committed.execute(select(Slot).where(Slot.id == web_slot))).scalar_one()
     local = slot.starts_at.astimezone(ZoneInfo("Europe/Moscow"))
-    assert local.strftime("%Y-%m-%d %H:%M") in page.text
-    # In the zone the client booked in, and saying which zone that is.
-    assert "Europe/Moscow" in page.text
+    assert f"{local.day} " in page.text and f"{local:%H:%M} (" in page.text
+    # In the zone the client booked in, and saying which zone that is (the city in her language and its GMT offset).
+    assert "Москва, GMT+3" in page.text
     # Consuming the token started a session, so the form on the page can post.
     assert web.cookies.get(CLIENT_COOKIE)
 
@@ -1284,9 +1284,9 @@ async def test_the_request_page_names_the_status_in_words(
 def test_the_booking_page_fills_its_placeholders(web: TestClient) -> None:
     """§15: a placeholder must never reach a client's screen unfilled."""
     body = web.get("/book", params={"tz": "Europe/Berlin"}).text
-    legends = re.findall(r"<legend>(.*?)</legend>", body, re.S)
-    assert any("Europe/Berlin" in legend for legend in legends)
-    assert "{timezone}" not in body
+    # The select shows the zone by its city and offset; the option keeps the IANA id as its value.
+    assert re.search(r'<option value="Europe/Berlin" selected>Берлин \(GMT\+[12]\)</option>', body)
+    assert "{timezone}" not in body and "{zone}" not in body
 
 
 async def test_the_hold_notice_names_the_hold_window(
@@ -1351,8 +1351,8 @@ async def test_the_hold_notice_names_the_instant_it_is_holding(
     # showing a Moscow client a Yerevan time with no label is how somebody
     # misses a session by an hour (DESIGN.md §8).
     local = starts_at.astimezone(ZoneInfo("Europe/Moscow"))
-    assert local.strftime("%Y-%m-%d %H:%M") in notice.group(1)
-    assert "Europe/Moscow" in notice.group(1)
+    assert f"{local:%H:%M} (" in notice.group(1)
+    assert "Москва, GMT+3" in notice.group(1)
 
 
 async def test_the_three_booking_pages_say_which_of_them_this_is(
