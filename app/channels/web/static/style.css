@@ -1029,3 +1029,4 @@ input[aria-invalid=true], textarea[aria-invalid=true] { border-color: #a3261c; }
 .held-card .held { display: block; margin: 0; padding: 0; border: 0; background: transparent; color: var(--ink-soft); font-weight: 400; }
 .held-card .held::before { content: none; }
 .held-card .held strong { margin-left: 0; }
+.how + .topics { margin-top: 2.5rem; }
