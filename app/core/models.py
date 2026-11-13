@@ -17,7 +17,7 @@ truth for the same fact.
 
 from __future__ import annotations
 
-from datetime import datetime
+from datetime import UTC, datetime
 from typing import Any
 from uuid import UUID
 
@@ -73,6 +73,20 @@ class Base(DeclarativeBase):
 def _tstz(**kwargs: Any) -> Mapped[Any]:
     """A timestamptz column. Every instant in this schema is one."""
     return mapped_column(TIMESTAMP(timezone=True), **kwargs)
+
+
+def _updated_at() -> Mapped[Any]:
+    """`updated_at`: the insert default, and moved by every ORM UPDATE after it.
+
+    The Python-side `onupdate` (not `now()`): `now()` is the *transaction's*
+    start, so a column stamped by it cannot tell two steps of one transaction
+    apart, and the retention sweep measures terminal requests from this value
+    (REVIEW C14). An explicit assignment still wins, as the hand-set sites rely
+    on.
+    """
+    return _tstz(
+        nullable=False, server_default=func.now(), onupdate=lambda: datetime.now(UTC)
+    )
 
 
 # --- Practice ---------------------------------------------------------------
@@ -136,7 +150,7 @@ class Practice(Base):
     )
     retention_months: Mapped[int] = mapped_column(Integer, nullable=False, server_default="12")
     created_at: Mapped[datetime] = _tstz(nullable=False, server_default=func.now())
-    updated_at: Mapped[datetime] = _tstz(nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = _updated_at()
 
 
 # --- Clients and identity ---------------------------------------------------
@@ -159,7 +173,7 @@ class Client(Base):
     language: Mapped[str] = mapped_column(Text, nullable=False)
     timezone: Mapped[str | None] = mapped_column(Text)  # IANA, nullable
     created_at: Mapped[datetime] = _tstz(nullable=False, server_default=func.now())
-    updated_at: Mapped[datetime] = _tstz(nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = _updated_at()
     erased_at: Mapped[datetime | None] = _tstz()  # set by the erasure operation
 
 
@@ -318,7 +332,7 @@ class Slot(Base):
         BigInteger, ForeignKey("booking_request.id", ondelete="SET NULL", use_alter=True)
     )
     created_at: Mapped[datetime] = _tstz(nullable=False, server_default=func.now())
-    updated_at: Mapped[datetime] = _tstz(nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = _updated_at()
 
 
 class SlotSessionType(Base):
@@ -393,7 +407,7 @@ class BookingRequest(Base):
     cancellation_reason: Mapped[str | None] = mapped_column(Text)
     rejected_reason: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _tstz(nullable=False, server_default=func.now())
-    updated_at: Mapped[datetime] = _tstz(nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = _updated_at()
 
 
 class NegotiationMessage(Base):
@@ -490,7 +504,7 @@ class ContentBlock(Base):
     link_url: Mapped[str | None] = mapped_column(Text)  # kind='link_button'
     is_published: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
     version: Mapped[int] = mapped_column(Integer, nullable=False, server_default="1")
-    updated_at: Mapped[datetime] = _tstz(nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = _updated_at()
 
 
 class ContentBlockRevision(Base):
@@ -657,7 +671,7 @@ class FlowState(Base):
     channel: Mapped[Channel] = mapped_column(pg_enum(Channel), nullable=False)
     step: Mapped[str] = mapped_column(Text, nullable=False)
     data: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False, server_default="{}")
-    updated_at: Mapped[datetime] = _tstz(nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = _updated_at()
 
 
 class AuditLog(Base):

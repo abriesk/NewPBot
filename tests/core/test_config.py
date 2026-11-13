@@ -90,3 +90,31 @@ def test_explicit_webhook_path_is_normalised_to_a_leading_slash() -> None:
 def test_admin_telegram_ids_parse_to_ints() -> None:
     assert _settings(telegram_admin_ids="10, 20 ,30").admin_telegram_ids == {10, 20, 30}
     assert _settings(telegram_admin_ids="").admin_telegram_ids == frozenset()
+
+
+# --- The suite's own guard (NP1/B1) -----------------------------------------
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "postgresql+asyncpg://psycho:pw@db:5432/psychobooking",
+        "postgresql+asyncpg://psycho:pw@db:5432/psychobooking_test_backup",
+        "postgresql+asyncpg://psycho:pw@db:5432/",
+        "postgresql+asyncpg://psycho:pw@db:5432",
+    ],
+)
+def test_the_suite_refuses_a_database_that_is_not_a_test_one(url: str) -> None:
+    from tests.conftest import refuse_a_database_that_is_not_a_test_one
+
+    with pytest.raises(pytest.exit.Exception) as stopped:
+        refuse_a_database_that_is_not_a_test_one(url)
+    assert "_test" in str(stopped.value)
+
+
+def test_the_suite_accepts_a_database_named_for_testing() -> None:
+    from tests.conftest import refuse_a_database_that_is_not_a_test_one
+
+    refuse_a_database_that_is_not_a_test_one(
+        "postgresql+asyncpg://psycho:pw@db:5432/psychobooking_test"
+    )

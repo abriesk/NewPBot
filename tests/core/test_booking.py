@@ -351,6 +351,25 @@ async def test_expiring_a_request_that_does_not_own_its_slot_leaves_the_owners_b
     assert future_slot.booked_request == owner.id
 
 
+async def test_a_terminal_transition_moves_updated_at(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """NP1/C14: retention is measured from `updated_at`, so a column that never
+    moved after insert measured it from submission."""
+    request = await _submit(db, client, session_type_id, future_slot)
+    await db.refresh(request)
+    submitted_at = request.updated_at
+
+    with time_machine.travel(datetime.now(UTC) + timedelta(hours=2), tick=False):
+        await booking.expire_request(db, request.id)
+        moved_to = datetime.now(UTC)
+    await db.refresh(request)
+
+    assert request.status is RequestStatus.expired
+    assert request.updated_at > submitted_at
+    assert abs(request.updated_at - moved_to) < timedelta(seconds=5)
+
+
 # --- negotiating transitions ------------------------------------------------
 
 

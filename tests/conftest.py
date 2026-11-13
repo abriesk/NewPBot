@@ -36,10 +36,37 @@ FORCED_ENV = {
     "TELEGRAM_ADMIN_IDS": "1,2",
 }
 
+
+
+def refuse_a_database_that_is_not_a_test_one(url: str) -> None:
+    """B1: end the session unless `url` names a database ending in `_test`.
+
+    The suite commits, deletes and rewrites rows, and the end-to-end tests run
+    against a database whose worker may be live. Pointed at the deployment's
+    own database (as `docker compose exec web pytest` is, by default) it used to
+    start without a word and fail on -- or damage -- real rows. The name is the
+    only thing checked on purpose: it is what a person typed, and the one thing
+    that cannot be mistaken for the deployment's.
+    """
+    from sqlalchemy.engine import make_url
+
+    name = make_url(url).database or ""
+    if not name.endswith("_test"):
+        pytest.exit(
+            f"refusing to run: DATABASE_URL names the database {name!r}, which does not end in "
+            "'_test'. The suite writes to its database; point it at a separate one, e.g. "
+            "DATABASE_URL=postgresql+asyncpg://user:pass@db:5432/psychobooking_test "
+            "(CLAUDE.md, Commands).",
+            returncode=2,
+        )
+
+
 for _key, _value in TEST_ENV.items():
     os.environ.setdefault(_key, _value)
 for _key, _value in FORCED_ENV.items():
     os.environ[_key] = _value
+
+refuse_a_database_that_is_not_a_test_one(os.environ["DATABASE_URL"])
 
 
 from sqlalchemy import NullPool  # noqa: E402
