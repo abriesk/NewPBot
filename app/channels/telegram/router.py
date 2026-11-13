@@ -32,6 +32,7 @@ from app.core.models import (
     TimezoneOption,
 )
 from app.core.policies import BookingPath, now_utc, parse_client_time, resolve_booking_mode
+from app.core.ref import short_ref
 from app.core.services import booking, content, flow, notifications, waitlist
 from app.core.services.clients import (
     consume_token,
@@ -1033,7 +1034,7 @@ async def _submit_booking(session: AsyncSession, client: Client) -> Reply:
     await flow.clear(session, client.id, Channel.telegram)
 
     return Reply(
-        await get_text(session, client.language, "booking.submitted", uuid=str(request.uuid))
+        await get_text(session, client.language, "booking.submitted", uuid=short_ref(request.uuid))
     )
 
 
@@ -1137,9 +1138,9 @@ async def _callback(session: AsyncSession, client: Client, update: Update) -> Re
                     session,
                     client.language,
                     "booking.onsite_info",
-                    url=practice.clinic_onsite_url,
+                    url=escape_telegram(practice.clinic_onsite_url),
                 )
-                if practice.clinic_onsite_url not in info:
+                if escape_telegram(practice.clinic_onsite_url) not in info:
                     # Her edited text has no {url}: the address still has to be shown.
                     info = f"{info}\n{escape_telegram(practice.clinic_onsite_url)}"
                 reply.extra.insert(0, info)
@@ -1557,7 +1558,7 @@ async def _negotiation_action(
                     session,
                     client.language,
                     "intent.request.confirmed.client.body",
-                    uuid=str(confirmed.uuid),
+                    uuid=short_ref(confirmed.uuid),
                     time=await _local(
                         session, confirmed.scheduled_start, client, await get_practice(session)
                     ),
@@ -1570,7 +1571,7 @@ async def _negotiation_action(
                 session,
                 client.language,
                 "intent.request.rejected.client.body",
-                uuid=str(request.uuid),
+                uuid=short_ref(request.uuid),
             )
         )
     except DomainError:
@@ -1662,7 +1663,7 @@ async def _propose_screen(
     if action == kb.PROPOSE_TYPE:
         await _park_admin_input(session, chat_id, Step.admin_entering_proposal, request.id)
         return Reply(
-            f"Propose a time for {request.uuid}.\n\n"
+            f"Propose a time for {short_ref(request.uuid)}.\n\n"
             f"Send it as YYYY-MM-DD HH:MM in {practice.timezone}, or send words.",
             keyboard=kb.panel_keyboard([[("✕ Cancel", f"{kb.PANEL_OPEN}:{request.id}")]]),
             edit=True,
@@ -1761,7 +1762,7 @@ async def _propose_slots(
         if day not in labels:
             labels[day] = await day_label(session, LOCALE, slot.starts_at_utc, practice.timezone)
 
-    lines = [f"Propose a time for {request.uuid}.", f"Times are in {practice.timezone}."]
+    lines = [f"Propose a time for {short_ref(request.uuid)}.", f"Times are in {practice.timezone}."]
     if slots:
         lines.insert(1, "Tap one of your free times, or pick another.")
     else:
@@ -1863,7 +1864,7 @@ async def _admin_action(
             extra={"keep_slot": keep_slot},
         )
         return Reply(
-            f"Cancelling {request.uuid}."
+            f"Cancelling {short_ref(request.uuid)}."
             + (" The hour stays off the picker." if keep_slot else " The hour goes back on offer.")
             + "\n\nWhy? The client is told the reason. Send a line, or skip it.",
             keyboard=kb.panel_keyboard(
@@ -1886,7 +1887,7 @@ async def _admin_action(
         # try her", and the prompt asks for that rather than for a reason.
         await _park_admin_input(session, chat_id, Step.admin_entering_reject_note, request.id)
         return Reply(
-            f"Declining {request.uuid}.\n\n"
+            f"Declining {short_ref(request.uuid)}.\n\n"
             "Anything to tell them? Another practice, another time to ask, "
             "or why not. It reaches them in your words. Send a line, or skip it.",
             keyboard=kb.panel_keyboard(
@@ -2164,7 +2165,7 @@ async def _admin_request(
     zone = ZoneInfo(practice.timezone)
     lines = [
         f"{ADMIN_GLYPHS.get(request.status, '·')} {request.status.value}",
-        str(request.uuid),
+        short_ref(request.uuid),
         # §12.2: the request carries whatever name it was submitted under, which
         # for a web booking is usually nothing. The client may still have one.
         f"Client: {escape_telegram(request.display_name or _client_name(client) or 'no name')}",

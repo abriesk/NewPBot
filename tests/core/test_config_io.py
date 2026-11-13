@@ -71,7 +71,7 @@ async def test_the_export_is_exactly_the_admin_editable_configuration(db: AsyncS
         "timezone_options",
         "content",
         "translations",
-    }
+    } | ({"practice_photo"} & set(payload))  # NP5a: present only while she has a photo
     # §16.7: exactly MUTABLE_FIELDS, so adding a settings field does not
     # silently widen what an import can rewrite.
     assert set(payload["practice"]) == set(MUTABLE_FIELDS)

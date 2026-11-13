@@ -46,6 +46,7 @@ from app.core.models import (
     Slot,
     TimezoneOption,
 )
+from app.core.ref import short_ref
 from app.core.policies import (
     CLIENT_TEXT_MAX_CHARS,
     BookingPath,
@@ -840,11 +841,6 @@ async def _error_page(
     )
 
 
-def _short_ref(uuid: UUID) -> str:
-    """The reference a client can read out on the phone: the first block of the uuid, upper case."""
-    return str(uuid).split("-")[0].upper()
-
-
 def _render(name: str, context: dict[str, Any], status_code: int = 200) -> HTMLResponse:
     # Starlette takes the request first; the older (name, context) form is gone.
     response = TEMPLATES.TemplateResponse(
@@ -1455,7 +1451,7 @@ def build_router() -> APIRouter:
                         session,
                         context["lang"],
                         "booking.submitted",
-                        uuid=_short_ref(booking_request.uuid),
+                        uuid=short_ref(booking_request.uuid),
                     ),
                     "request_uuid": str(booking_request.uuid),
                     "telegram_link": telegram_link,
@@ -1664,7 +1660,7 @@ def build_router() -> APIRouter:
                     **context,
                     "csrf_token": csrf_token_for(request, new_client_cookie=new_session),
                     "req": booking_request,
-                    "ref": _short_ref(booking_request.uuid),
+                    "ref": short_ref(booking_request.uuid),
                     # The enum value is a database word, not a client-facing one
                     # (§15): the page used to read "pending" in every language.
                     "status_label": await get_text(

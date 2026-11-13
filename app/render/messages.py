@@ -19,6 +19,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels.base import Action, Attachment, RenderedMessage
 from app.core.enums import Channel
+from app.core.ref import short_ref
 from app.core.services.translations import get_text
 from app.render.calendar import ICS_FILENAME, ICS_SUBTYPE, session_ics
 from app.render.dates import when_label
@@ -165,6 +166,10 @@ def _format_args(payload: dict[str, Any], tz: str) -> dict[str, Any]:
     args = {key: ("" if value is None else value) for key, value in payload.items()}
     args["time"] = format_instant(payload.get("time"), tz)
     args.setdefault("uuid", "")
+    if args["uuid"]:
+        # NP5a: the text names a request by the short reference the web shows; the link
+        # built from the payload (`/r/<uuid>`, the admin URL) keeps the full uuid.
+        args["uuid"] = short_ref(args["uuid"])
     args.setdefault("name", "")
     args.setdefault("reason", "")
     args.setdefault("note", "")

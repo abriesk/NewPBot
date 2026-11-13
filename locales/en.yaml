@@ -370,7 +370,7 @@ privacy:
   title: "Privacy"
   link: "Privacy"
   default.1: "This page says plainly what happens to what you tell me here."
-  default.2: "What I keep: your name if you give one, your email address, the time you chose and the words you write in your request. If you use Telegram, your Telegram account is kept as well."
+  default.2: "What I keep: your name if you give one, your email address, the time you chose, the words you write in your request, and how you would like me to reach you if you fill that in. If you use Telegram, your Telegram account is kept as well."
   default.3: "Who reads it: only me. I use it to answer your request and to arrange our session. Your email address is used for the confirmation link and for reminders, and for nothing else."
   default.4: "There is no advertising and no tracking on this site, and I do not pass what you write to anyone else."
   default.5: "How long: requests and messages are erased about {months} months after they are finished."

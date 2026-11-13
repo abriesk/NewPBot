@@ -19,6 +19,9 @@ the recoverable direction.
 
 from __future__ import annotations
 
+import asyncio
+import base64
+import binascii
 import json
 from dataclasses import dataclass, field
 from typing import Any
@@ -36,6 +39,7 @@ from app.core.models import (
     Translation,
 )
 from app.core.policies import now_utc
+from app.core.services import photo as photo_service
 from app.core.services.content import upsert_block
 from app.core.services.settings import MUTABLE_FIELDS, get_practice, update_settings
 from app.core.services.translations import invalidate_cache, set_text
@@ -52,7 +56,14 @@ KNOWN_VERSIONS = frozenset({1})
 #: Top-level keys allowed in the file. Anything else is a refusal, not a
 #: silent skip: that is what stops a `clients` or `admin_user` section from
 #: looking like it was honoured (§16.7).
-SECTIONS = ("practice", "session_types", "timezone_options", "content", "translations")
+SECTIONS = (
+    "practice",
+    "practice_photo",
+    "session_types",
+    "timezone_options",
+    "content",
+    "translations",
+)
 
 _ENVELOPE = ("format", "version", "exported_at")
 
@@ -71,6 +82,31 @@ _SESSION_TYPE_FIELDS = (
 _TIMEZONE_FIELDS = ("iana_name", "display_name", "sort_order", "is_active")
 _TOPIC_FIELDS = ("code", "sort_order", "show_in_menu", "is_active")
 _BLOCK_FIELDS = ("lang", "position", "kind", "body_md", "link_url", "is_published")
+
+async def _import_photo(session: AsyncSession, raw: Any, report: ImportReport) -> None:
+    """NP5a: her photo. Re-validated and re-encoded exactly like an upload (`photo.process`), so a
+    file cannot smuggle in anything the settings page would refuse."""
+    entry = report.section("practice_photo")
+    if raw is None:
+        return
+    if not isinstance(raw, dict) or not isinstance(raw.get("data_b64"), str):
+        raise ConfigInvalid("practice_photo: expected an object with a data_b64 string")
+    try:
+        data = base64.b64decode(raw["data_b64"], validate=True)
+        processed = await asyncio.to_thread(photo_service.process, data)
+    except (binascii.Error, ValueError) as exc:  # PhotoRejected is a ValueError
+        raise ConfigInvalid(f"practice_photo: {exc}") from exc
+
+    existing = await photo_service.get_photo(session)
+    if existing is not None and existing.data in (data, processed):
+        entry.unchanged = 1
+        return
+    await photo_service.set_photo(session, data)
+    if existing is None:
+        entry.created = 1
+    else:
+        entry.updated = 1
+
 
 #: The admin namespace is English by design (DESIGN.md §11), so an `admin.` key
 #: offered for ru or hy is skipped rather than written -- nothing would ever
@@ -193,6 +229,20 @@ async def export_config(session: AsyncSession) -> dict[str, Any]:
     for lang, key, value in translations:
         catalogue.setdefault(lang, {})[key] = value
 
+    photo = await photo_service.get_photo(session)
+    # NP5a: her photo travels with the rest of what she set up, so a restored install does not
+    # show a front page without a face. Absent when she has none: an import never deletes.
+    photo_section = (
+        {
+            "practice_photo": {
+                "content_type": photo.content_type,
+                "data_b64": base64.b64encode(photo.data).decode("ascii"),
+            }
+        }
+        if photo is not None
+        else {}
+    )
+
     return {
         "format": FORMAT,
         "version": VERSION,
@@ -200,6 +250,7 @@ async def export_config(session: AsyncSession) -> dict[str, Any]:
         "practice": {
             field_: _scalar(getattr(practice, field_)) for field_ in sorted(MUTABLE_FIELDS)
         },
+        **photo_section,
         "session_types": [_row(row, _SESSION_TYPE_FIELDS) for row in session_types],
         "timezone_options": [_row(row, _TIMEZONE_FIELDS) for row in timezones],
         "content": [
@@ -309,6 +360,7 @@ async def _apply(session: AsyncSession, payload: dict[str, Any], *, applied: boo
     report = ImportReport(applied=applied)
 
     await _import_practice(session, payload.get("practice"), report)
+    await _import_photo(session, payload.get("practice_photo"), report)
     await _import_session_types(session, payload.get("session_types"), report)
     await _import_timezones(session, payload.get("timezone_options"), report)
     await _import_content(session, payload.get("content"), report)
