@@ -301,6 +301,56 @@ async def test_expire_releases_the_slot(
     assert future_slot.status is SlotStatus.available
 
 
+async def test_a_refused_submission_commits_no_request(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """NP1/F1: the loser of a race for one slot leaves no request row behind
+    (the caller commits after catching SlotUnavailable), and no event that
+    would notify anybody about a request that does not exist."""
+    from app.core.errors import SlotUnavailable
+    from app.core.services.clients import resolve_client
+
+    winner = await _submit(db, client, session_type_id, future_slot)
+    loser = await resolve_client(db, Channel.telegram, "777000111", verified=True)
+
+    with pytest.raises(SlotUnavailable):
+        await _submit(db, loser, session_type_id, future_slot)
+
+    rows = (
+        (await db.execute(select(BookingRequest).where(BookingRequest.slot_id == future_slot.id)))
+        .scalars()
+        .all()
+    )
+    assert [r.id for r in rows] == [winner.id]
+    submitted = [e for e in pending(db) if isinstance(e, RequestSubmitted)]
+    assert [e.request_id for e in submitted] == [winner.id]
+
+
+async def test_expiring_a_request_that_does_not_own_its_slot_leaves_the_owners_booking(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot, practice: Practice
+) -> None:
+    """NP1/F1: a pending request that still points at a slot somebody else
+    booked must not free it when it expires (live request 41025 on slot 37293)."""
+    owner = await _confirmed(db, client, session_type_id, future_slot)
+    stray = BookingRequest(
+        practice_id=practice.id,
+        client_id=client.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        status=RequestStatus.pending,
+        source_channel=Channel.web,
+        slot_id=future_slot.id,
+    )
+    db.add(stray)
+    await db.flush()
+
+    await booking.expire_request(db, stray.id)
+
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.booked
+    assert future_slot.booked_request == owner.id
+
+
 # --- negotiating transitions ------------------------------------------------
 
 
@@ -313,6 +363,29 @@ async def test_client_accept_confirms_at_the_last_admin_proposal(
     assert confirmed.status is RequestStatus.confirmed
     assert confirmed.scheduled_start == LATER
     assert confirmed.confirmed_at is not None
+
+
+async def test_accepting_a_proposal_for_the_held_time_books_the_held_slot(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
+) -> None:
+    """NP1/F2: the proposal names the instant the request's own slot holds.
+    Accepting must book that slot, not leave it held to lapse back onto the
+    picker."""
+    request = await _negotiating(
+        db, client, session_type_id, future_slot, proposed=future_slot.starts_at
+    )
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.held
+
+    confirmed = await booking.client_accept(db, request.id)
+
+    assert confirmed.status is RequestStatus.confirmed
+    assert confirmed.slot_id == future_slot.id
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.booked
+    assert future_slot.booked_request == request.id
+    assert future_slot.held_by_request is None
+    assert future_slot.hold_expires_at is None
 
 
 async def test_client_accept_uses_the_most_recent_proposal(

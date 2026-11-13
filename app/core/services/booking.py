@@ -57,6 +57,7 @@ from app.core.errors import (
     NotFound,
     RateLimited,
 )
+from app.core import events
 from app.core.events import (
     RequestAccepted,
     RequestCancelled,
@@ -531,7 +532,7 @@ async def _release_slot(session: AsyncSession, request: BookingRequest) -> None:
     """Every terminal transition releases whatever the request was holding, in
     the same transaction (§7.1)."""
     if request.slot_id is not None:
-        await slot_service.release_slot(session, request.slot_id)
+        await slot_service.release_slot(session, request.slot_id, request.id)
 
 
 async def _create_reminders(session: AsyncSession, request: BookingRequest) -> list[Reminder]:
@@ -736,29 +737,45 @@ async def submit_slot_request(
     picking it meanwhile.
     """
     practice = await get_practice(session)
-    request = await _submit(
-        session,
-        client_id=client_id,
-        session_type_id=session_type_id,
-        modality=modality,
-        source_channel=source_channel,
-        slot_id=slot_id,
-        desired_time_text=None,
-        problem_text=problem_text,
-        contact_note=contact_note,
-        display_name=display_name,
-        client_timezone=client_timezone,
-    )
 
-    # The hold lasts as long as the request can stay undecided, not
-    # `slot_hold_minutes`: this request is submitted, so the window it needs is
-    # the therapist's, not the client's form-filling one (§7.2).
-    slot = await slot_service.hold_slot(session, slot_id, request.id, until=request.expires_at)
+    # One savepoint around the whole submission. The request row is written
+    # before the slot is taken (the hold needs its id), so a hold that loses
+    # the race would otherwise leave a `pending` request pointing at the
+    # winner's slot behind it -- committed by every caller that catches the
+    # error and carries on to answer the client. Rolled back, the refusal is
+    # complete: no row, no audit entry, and no queued event to notify anyone
+    # of a request that does not exist.
+    queued = events.pending(session)
+    try:
+        async with session.begin_nested():
+            request = await _submit(
+                session,
+                client_id=client_id,
+                session_type_id=session_type_id,
+                modality=modality,
+                source_channel=source_channel,
+                slot_id=slot_id,
+                desired_time_text=None,
+                problem_text=problem_text,
+                contact_note=contact_note,
+                display_name=display_name,
+                client_timezone=client_timezone,
+            )
 
-    if practice.auto_confirm_slots:
-        # One line of policy, off by default: keeping the therapist in the loop
-        # is the point of the product (DESIGN.md §6).
-        return await admin_approve(session, request.id, scheduled_start=slot.starts_at)
+            # The hold lasts as long as the request can stay undecided, not
+            # `slot_hold_minutes`: this request is submitted, so the window it
+            # needs is the therapist's, not the client's form-filling one (§7.2).
+            slot = await slot_service.hold_slot(
+                session, slot_id, request.id, until=request.expires_at
+            )
+
+            if practice.auto_confirm_slots:
+                # One line of policy, off by default: keeping the therapist in
+                # the loop is the point of the product (DESIGN.md §6).
+                return await admin_approve(session, request.id, scheduled_start=slot.starts_at)
+    except Exception:
+        events.restore(session, queued)
+        raise
     return request
 
 
@@ -839,7 +856,7 @@ async def admin_approve(
         if held is not None and held.starts_at == start:
             await slot_service.book_slot(session, request.slot_id, request.id)
         else:
-            await slot_service.release_slot(session, request.slot_id)
+            await slot_service.release_slot(session, request.slot_id, request.id)
             request.slot_id = None
 
     if request.slot_id is None:
@@ -899,7 +916,7 @@ async def admin_propose(
             await session.execute(select(Slot).where(Slot.id == request.slot_id))
         ).scalar_one_or_none()
         if held is None or held.starts_at != proposed_start:
-            await slot_service.release_slot(session, request.slot_id)
+            await slot_service.release_slot(session, request.slot_id, request.id)
             request.slot_id = None
 
     # Whatever slot is still held after that, the conversation keeps alive.
@@ -1040,10 +1057,23 @@ async def client_accept(session: AsyncSession, request_id: int) -> BookingReques
         )
         return request
 
-    matching = await _matching_slot(session, proposal.proposed_start)
-    if matching is not None:
-        await slot_service.book_slot(session, matching, request.id)
-        request.slot_id = matching
+    # The proposal may name the very instant this request's own slot holds
+    # (`admin_propose` keeps it for exactly that case). `_matching_slot` only
+    # sees *available* slots, so without this the held one was never booked: it
+    # lapsed back onto the picker under a confirmed session, as `admin_approve`
+    # already guards against.
+    own = await _slot(session, request.slot_id)
+    if (
+        own is not None
+        and own.starts_at == proposal.proposed_start
+        and (own.status is SlotStatus.available or own.held_by_request == request.id)
+    ):
+        await slot_service.book_slot(session, own.id, request.id)
+    else:
+        matching = await _matching_slot(session, proposal.proposed_start)
+        if matching is not None:
+            await slot_service.book_slot(session, matching, request.id)
+            request.slot_id = matching
 
     session_type = (
         await session.execute(select(SessionType).where(SessionType.id == request.session_type_id))

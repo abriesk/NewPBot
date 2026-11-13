@@ -100,7 +100,7 @@ async def test_release_returns_a_held_slot_to_available(
     db: AsyncSession, future_slot: Slot, request_id: int
 ) -> None:
     await slot_service.hold_slot(db, future_slot.id, request_id=request_id)
-    slot = await slot_service.release_slot(db, future_slot.id)
+    slot = await slot_service.release_slot(db, future_slot.id, request_id)
     assert slot.status is SlotStatus.available
     assert slot.held_by_request is None
     assert slot.hold_expires_at is None
@@ -135,14 +135,31 @@ async def test_release_returns_a_booked_slot_to_available(
     db: AsyncSession, future_slot: Slot, request_id: int
 ) -> None:
     await slot_service.book_slot(db, future_slot.id, request_id=request_id)
-    slot = await slot_service.release_slot(db, future_slot.id)
+    slot = await slot_service.release_slot(db, future_slot.id, request_id)
     assert slot.status is SlotStatus.available
     assert slot.booked_request is None
 
 
-async def test_releasing_an_available_slot_is_a_no_op(db: AsyncSession, future_slot: Slot) -> None:
-    slot = await slot_service.release_slot(db, future_slot.id)
+async def test_releasing_an_available_slot_is_a_no_op(
+    db: AsyncSession, future_slot: Slot, request_id: int
+) -> None:
+    slot = await slot_service.release_slot(db, future_slot.id, request_id)
     assert slot.status is SlotStatus.available
+
+
+async def test_release_by_a_request_that_does_not_hold_the_slot_changes_nothing(
+    db: AsyncSession, future_slot: Slot, request_id: int, other_request_id: int
+) -> None:
+    """NP1/F1: only the request that holds or booked a slot may free it."""
+    await slot_service.hold_slot(db, future_slot.id, request_id=request_id)
+    slot = await slot_service.release_slot(db, future_slot.id, other_request_id)
+    assert slot.status is SlotStatus.held
+    assert slot.held_by_request == request_id
+
+    await slot_service.book_slot(db, future_slot.id, request_id=request_id)
+    slot = await slot_service.release_slot(db, future_slot.id, other_request_id)
+    assert slot.status is SlotStatus.booked
+    assert slot.booked_request == request_id
 
 
 async def test_block_and_unblock(db: AsyncSession, future_slot: Slot) -> None:

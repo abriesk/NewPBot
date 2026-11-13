@@ -199,6 +199,12 @@ def pending(session: AsyncSession) -> list[DomainEvent]:
     return list(events)
 
 
+def restore(session: AsyncSession, events: list[DomainEvent]) -> None:
+    """Put the queue back as `pending` returned it, dropping what was collected
+    since -- for work that was rolled back and so never happened."""
+    session.info[_SESSION_KEY] = list(events)
+
+
 def drain(session: AsyncSession) -> list[DomainEvent]:
     """Take the queued events and clear it."""
     events: list[DomainEvent] = session.info.get(_SESSION_KEY, [])

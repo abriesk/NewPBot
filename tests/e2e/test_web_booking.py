@@ -318,6 +318,59 @@ async def test_a_client_with_no_telegram_can_book_end_to_end(
     assert str(request.uuid) in done.text
 
 
+async def test_two_submissions_for_one_slot_leave_one_request_row(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """NP1/F1: the second browser is told the slot is taken, and its refused
+    request is not committed pointing at the winner's slot."""
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+
+    # Two browsers, one app: each is its own cookie jar, and both choose the
+    # slot before either submits.
+    await _hold_a_slot(web, web_slot, session_type_id)
+    first_jar = dict(web.cookies)
+    web.cookies.clear()
+    await _hold_a_slot(web, web_slot, session_type_id)
+    second_jar = dict(web.cookies)
+
+    web.cookies.clear()
+    web.cookies.update(first_jar)
+    first_done = web.post(
+        "/book", data={"csrf_token": _csrf(web), "problem": "first", "email": EMAIL}
+    )
+    web.cookies.clear()
+    web.cookies.update(second_jar)
+    second_done = web.post(
+        "/book", data={"csrf_token": _csrf(web), "problem": "second", "email": EMAIL}
+    )
+
+    assert first_done.status_code == 200
+    assert second_done.status_code == 409
+
+    await committed.rollback()
+    rows = (
+        (await committed.execute(select(BookingRequest).where(BookingRequest.slot_id == web_slot)))
+        .scalars()
+        .all()
+    )
+    assert len(rows) == 1
+    slot = (await committed.execute(select(Slot).where(Slot.id == web_slot))).scalar_one()
+    assert slot.status is SlotStatus.held
+    assert slot.held_by_request == rows[0].id
+    everything = (
+        (
+            await committed.execute(
+                select(BookingRequest).where(BookingRequest.client_id == rows[0].client_id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(everything) == 1
+
+
 async def test_the_confirmation_offers_the_telegram_merge_link(
     web: TestClient, web_slot: int, committed: AsyncSession
 ) -> None:

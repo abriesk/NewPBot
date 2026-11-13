@@ -188,16 +188,22 @@ async def book_slot(session: AsyncSession, slot_id: int, request_id: int) -> Slo
     return slot
 
 
-async def release_slot(session: AsyncSession, slot_id: int) -> Slot:
-    """held|booked -> available.
+async def release_slot(session: AsyncSession, slot_id: int, request_id: int) -> Slot:
+    """held|booked -> available, by the request that holds or booked it.
 
     Releasing an already-available slot is a no-op rather than an error: the
     terminal request transitions all release unconditionally, and several of
     them can reach a request that never held a slot at all.
+
+    So is releasing a slot that belongs to somebody else. A request keeps
+    pointing at the slot it asked for after it is refused or moved on (§7.1),
+    and when it later expires it must not hand back an hour another request
+    holds or has booked.
     """
     slot = await _lock(session, slot_id)
 
-    if slot.status in (SlotStatus.held, SlotStatus.booked):
+    owned = request_id in (slot.held_by_request, slot.booked_request)
+    if slot.status in (SlotStatus.held, SlotStatus.booked) and owned:
         slot.status = SlotStatus.available
         slot.hold_expires_at = None
         slot.held_by_request = None

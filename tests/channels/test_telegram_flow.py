@@ -623,6 +623,39 @@ async def test_a_slot_taken_meanwhile_is_reported_not_crashed(
     assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_slot
 
 
+async def test_a_slot_taken_meanwhile_commits_no_request_for_the_loser(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    """NP1/F1: the refusal is reported and nothing of the attempt is kept."""
+    client = await _walk_to_slot_pick(db, future_slot)
+    other = await resolve_client(db, Channel.telegram, "999888777", verified=True)
+    await booking.submit_slot_request(
+        db,
+        client_id=other.id,
+        slot_id=future_slot.id,
+        session_type_id=session_type_id,
+        modality=Modality.online,
+        source_channel=Channel.telegram,
+    )
+
+    await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))
+    await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))
+    await handle(db, Update(chat_id=CHAT, callback_data=kb.SKIP))
+
+    mine = (
+        (await db.execute(select(BookingRequest).where(BookingRequest.client_id == client.id)))
+        .scalars()
+        .all()
+    )
+    assert mine == []
+    on_slot = (
+        (await db.execute(select(BookingRequest).where(BookingRequest.slot_id == future_slot.id)))
+        .scalars()
+        .all()
+    )
+    assert [r.client_id for r in on_slot] == [other.id]
+
+
 # --- M5 acceptance: a restart mid-flow preserves progress -------------------
 
 
