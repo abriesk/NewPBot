@@ -12,7 +12,7 @@
 
 {# §12.1 step 1: session type and modality. Chosen before the slot list so the
    picker can be filtered by them. #}
-<div class="card steps">
+<div class="card steps" id="picker-card">
 <form method="get" action="/book" id="booking">
   {# Type and modality in one compact row; a question with one answer is not asked (the radio stays
      as a hidden input, because the slot list is filtered by whatever this form posts). #}
@@ -104,7 +104,8 @@
     r.addEventListener('change', sync);
   });
   // The "switch to the other kind" button in the slot list (an htmx partial) clicks the other radio.
-  document.getElementById('booking').addEventListener('click', function (e) {
+  // The listener sits on the card that holds both the form and #slots: the list is outside the form.
+  document.getElementById('picker-card').addEventListener('click', function (e) {
     var b = e.target.closest ? e.target.closest('[data-switch-modality]') : null;
     if (b) { byName('modality', b.getAttribute('data-switch-modality')).click(); }
     // "change" on the zone line shows the choice (the fragment does it) and puts the keyboard in it.

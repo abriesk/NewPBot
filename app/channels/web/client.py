@@ -782,7 +782,10 @@ def _valid_zone(candidate: str | None) -> bool:
 
 def _int_or_none(value: str | None) -> int | None:
     """A query value that is a whole number, else None (never a raw 422 for a mangled link)."""
-    return int(value) if value is not None and value.strip().isdigit() else None
+    text = (value or "").strip()
+    # isdecimal (not isdigit: "²" passes that and int() refuses it) and a length cap (int() refuses
+    # a very long digit string too).
+    return int(text) if text.isdecimal() and len(text) <= 9 else None
 
 
 def _valid_modality(candidate: str | None) -> bool:

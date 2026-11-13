@@ -581,3 +581,53 @@ async def test_another_signed_in_client_gets_a_404_for_the_ics_and_the_page(
         await committed.rollback()
         await committed.execute(delete(Client).where(Client.id == other.id))
         await committed.commit()
+
+
+# --- review round 2 ------------------------------------------------------------------------------
+
+
+class _Ancestry(HTMLParser):
+    """Which element ids enclose `#slots` (void tags never open an element)."""
+
+    VOID = frozenset({"input", "br", "img", "hr", "meta", "link", "source", "wbr"})
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stack: list[str | None] = []
+        self.around_slots: list[str | None] | None = None
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if attributes.get("id") == "slots":
+            self.around_slots = list(self.stack)
+        if tag not in self.VOID:
+            self.stack.append(attributes.get("id"))
+
+    def handle_endtag(self, tag):
+        if tag not in self.VOID and self.stack:
+            self.stack.pop()
+
+
+@pytest.mark.asyncio
+async def test_the_click_listener_sits_on_an_element_that_contains_the_slot_list(
+    web: TestClient, web_slot: int
+) -> None:
+    """The switch-to-the-other-kind button and the zone "change" link live in #slots, which is
+    outside the GET form: a listener on the form never hears them."""
+    import re
+
+    html = web.get("/book?lang=en&tz=Asia/Yerevan").text
+    listener = re.search(r"getElementById\('([\w-]+)'\)\.addEventListener\('click'", html)
+    assert listener, "no click listener on an element found by id"
+    walker = _Ancestry()
+    walker.feed(html)
+    assert walker.around_slots is not None
+    assert listener.group(1) in walker.around_slots, (
+        "the listener's element does not contain #slots"
+    )
+
+
+def test_a_digit_that_is_not_a_number_or_a_huge_one_is_not_a_500(web: TestClient) -> None:
+    for value in ("%C2%B2", "%D9%A3", "9" * 5000, "1" * 10, "-1", "1.5"):
+        assert web.get(f"/book?lang=en&session_type_id={value}").status_code == 200
+        assert web.get(f"/book/slots?session_type_id={value}").status_code == 200
