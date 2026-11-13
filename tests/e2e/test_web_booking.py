@@ -637,6 +637,43 @@ async def test_a_client_can_open_a_request_from_a_link_and_add_information(
     web.cookies.delete(CLIENT_COOKIE)
 
 
+async def test_a_link_for_another_request_does_not_spend_the_token(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """NP1/C4: a mangled link (the UUID is not this client's) used to burn the
+    single-use token before the ownership check, so the right link then failed."""
+    from uuid import uuid4
+
+    from app.core.services.clients import issue_token
+
+    session_type_id = (
+        await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
+    ).scalar_one()
+    await _hold_a_slot(web, web_slot, session_type_id)
+    web.post("/book", data={"csrf_token": _csrf(web), "problem": "x", "email": EMAIL})
+    await committed.rollback()
+    identity = (
+        await committed.execute(select(Identity).where(Identity.external_id == EMAIL))
+    ).scalar_one()
+    request_uuid = (
+        await committed.execute(
+            select(BookingRequest.uuid).where(BookingRequest.client_id == identity.client_id)
+        )
+    ).scalar_one()
+    raw = await issue_token(committed, TokenPurpose.view_request, client_id=identity.client_id)
+    await committed.commit()
+
+    web.cookies.delete(CLIENT_COOKIE)
+    wrong = web.get(f"/r/{uuid4()}", params={"token": raw}, follow_redirects=False)
+    assert not web.cookies.get(CLIENT_COOKIE)
+    assert wrong.status_code in (303, 404)
+
+    right = web.get(f"/r/{request_uuid}", params={"token": raw})
+    assert right.status_code == 200
+    assert web.cookies.get(CLIENT_COOKIE)
+    web.cookies.delete(CLIENT_COOKIE)
+
+
 async def test_the_login_link_is_queued_to_the_address_it_is_about(
     web: TestClient, committed: AsyncSession, email_enabled: None
 ) -> None:

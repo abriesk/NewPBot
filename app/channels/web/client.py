@@ -60,6 +60,7 @@ from app.core.services.clients import (
     magic_link_allowance_left,
     resolve_client,
     set_client_language,
+    token_target,
 )
 from app.core.services.flow import Step
 from app.core.services.notifications import Envelope, Recipient
@@ -965,13 +966,31 @@ def build_router() -> APIRouter:
             # other way in (§12.1: auth required).
             arrived_by_token = False
             if client is None and token:
-                try:
-                    result = await consume_token(session, token, TokenPurpose.view_request)
-                except TokenInvalid:
-                    result = None
-                if result and result.client_id:
-                    client = await _client_by_id(session, result.client_id)
-                    arrived_by_token = client is not None
+                # Ownership before spend: the token is single-use, so a link
+                # whose UUID is not the token holder's (a mangled or tampered
+                # one) must leave it unspent, or the correct link fails next.
+                target = await token_target(session, token, TokenPurpose.view_request)
+                owner = (
+                    await _client_by_id(session, target.client_id)
+                    if target is not None and target.client_id
+                    else None
+                )
+                owns = False
+                if owner is not None:
+                    try:
+                        owns = (await booking.get_by_uuid(session, UUID(uuid))).client_id == (
+                            owner.id
+                        )
+                    except (NotFound, ValueError):
+                        owns = False
+                if owner is not None and owns:
+                    try:
+                        await consume_token(session, token, TokenPurpose.view_request)
+                    except TokenInvalid:
+                        pass  # spent by a concurrent request between the two reads
+                    else:
+                        client = owner
+                        arrived_by_token = True
 
             if client is None:
                 return RedirectResponse("/auth/email", status_code=303)
