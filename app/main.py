@@ -31,6 +31,23 @@ from app.db import dispose_engine, get_session_factory, unit_of_work
 logger = logging.getLogger(__name__)
 
 
+class StripQueryFromAccessLog(logging.Filter):
+    """Drop `?...` from uvicorn's access line.
+
+    Login and request links carry their token in the query string, and a token in
+    a log file outlives its 30 minutes in whoever can read the logs.
+    """
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str):
+            record.args = (*args[:2], args[2].split("?", 1)[0], *args[3:])
+        return True
+
+
+logging.getLogger("uvicorn.access").addFilter(StripQueryFromAccessLog())
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     settings = get_settings()

@@ -9,6 +9,7 @@ end rather than rolled back.
 from __future__ import annotations
 
 import re
+from typing import Any
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -220,6 +221,32 @@ def _challenge_from(html: str) -> str:
     found = re.search(r'name="pow_challenge" value="([^"]+)"', html)
     assert found, "the form carried no challenge"
     return found.group(1)
+
+
+def _follow_login(web: TestClient, raw: str, *, follow_redirects: bool = False) -> Any:
+    """What a person does with a login link: open it, press the button.
+
+    The GET only shows the button (a scanner's GET must not spend the token);
+    the POST spends it. Returns the POST's response.
+    """
+    page = web.get("/auth/callback", params={"token": raw})
+    assert page.status_code == 200, page.status_code
+    return web.post(
+        "/auth/callback",
+        data={"csrf_token": _csrf(web), "token": raw},
+        follow_redirects=follow_redirects,
+    )
+
+
+def _open_request(web: TestClient, request_uuid: object, raw: str) -> Any:
+    """The same for a request link, ending on the request page."""
+    page = web.get(f"/r/{request_uuid}", params={"token": raw})
+    assert page.status_code == 200, page.status_code
+    return web.post(
+        f"/r/{request_uuid}/enter",
+        data={"csrf_token": _csrf(web), "token": raw},
+        follow_redirects=True,
+    )
 
 
 async def _hold_a_slot(web: TestClient, slot_id: int, session_type_id: int) -> None:
@@ -534,7 +561,7 @@ async def test_the_magic_link_flow_signs_a_client_in(
     )
     await committed.commit()
 
-    callback = web.get("/auth/callback", params={"token": raw}, follow_redirects=False)
+    callback = _follow_login(web, raw)
     assert callback.status_code == 303
     assert web.cookies.get(CLIENT_COOKIE)
 
@@ -599,7 +626,7 @@ async def test_a_client_can_open_a_request_from_a_link_and_add_information(
     await committed.commit()
 
     web.cookies.delete(CLIENT_COOKIE)
-    page = web.get(f"/r/{request_uuid}", params={"token": raw})
+    page = _open_request(web, request_uuid, raw)
     assert page.status_code == 200
     assert f"/r/{request_uuid}/note" in page.text
 
@@ -671,7 +698,7 @@ async def test_a_link_for_another_request_does_not_spend_the_token(
     assert not web.cookies.get(CLIENT_COOKIE)
     assert wrong.status_code in (303, 404)
 
-    right = web.get(f"/r/{request_uuid}", params={"token": raw})
+    right = _open_request(web, request_uuid, raw)
     assert right.status_code == 200
     assert web.cookies.get(CLIENT_COOKIE)
     web.cookies.delete(CLIENT_COOKIE)
@@ -726,7 +753,7 @@ async def test_a_link_for_an_address_owned_by_someone_else_is_refused(
     )
     await committed.commit()
 
-    response = web.get("/auth/callback", params={"token": raw}, follow_redirects=False)
+    response = _follow_login(web, raw)
     assert response.status_code == 400
 
     identity = (
@@ -1058,7 +1085,7 @@ async def test_an_emailed_link_greets_the_client_who_followed_it(
     expected = await get_text(committed, client.language, "auth.greeting", name="Nina")
 
     try:
-        callback = web.get("/auth/callback", params={"token": raw}, follow_redirects=False)
+        callback = _follow_login(web, raw)
         assert callback.status_code == 303
         assert "welcome=1" in callback.headers["location"]
         assert expected in web.get(callback.headers["location"]).text
@@ -1091,7 +1118,7 @@ async def test_a_client_who_never_gave_a_name_is_greeted_all_the_same(
     expected = await get_text(committed, client.language, "auth.greeting_unnamed")
 
     try:
-        callback = web.get("/auth/callback", params={"token": raw}, follow_redirects=False)
+        callback = _follow_login(web, raw)
         assert expected in web.get(callback.headers["location"]).text
     finally:
         web.cookies.delete(CLIENT_COOKIE)
@@ -1154,7 +1181,7 @@ async def test_a_signed_in_client_keeps_the_language_they_chose(
     )
     await committed.commit()
 
-    assert web.get("/auth/callback", params={"token": raw}).status_code == 200
+    assert _follow_login(web, raw, follow_redirects=True).status_code == 200
     try:
         # No cookie, no query: the client's own language is the default now.
         assert 'lang="hy"' in web.get("/").text
@@ -1244,7 +1271,7 @@ async def test_the_request_page_names_the_status_in_words(
     await committed.commit()
 
     web.cookies.delete(CLIENT_COOKIE)
-    page = web.get(f"/r/{request.uuid}", params={"token": raw})
+    page = _open_request(web, request.uuid, raw)
 
     expected = await get_text(committed, "ru", "request.status.pending")
     assert expected in page.text
@@ -1452,7 +1479,7 @@ async def _proposed(web: TestClient, committed: AsyncSession, web_slot: int) -> 
     )
     await committed.commit()
 
-    web.get(f"/r/{request.uuid}", params={"token": raw})
+    _open_request(web, request.uuid, raw)
     return request
 
 
@@ -1678,7 +1705,7 @@ async def test_the_login_link_from_a_booking_lands_on_that_booking(
     )
     await committed.commit()
 
-    callback = web.get("/auth/callback", params={"token": raw}, follow_redirects=False)
+    callback = _follow_login(web, raw)
     assert callback.status_code == 303
     # §12.1: the request it was sent about, and the marker that greets whoever
     # followed the link there.
@@ -1706,7 +1733,7 @@ async def test_a_login_link_with_no_booking_behind_it_still_lands_on_the_front_p
     )
     await committed.commit()
 
-    callback = web.get("/auth/callback", params={"token": raw}, follow_redirects=False)
+    callback = _follow_login(web, raw)
     assert callback.status_code == 303
     assert callback.headers["location"] == "/?welcome=1"
 

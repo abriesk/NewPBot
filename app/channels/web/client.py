@@ -210,6 +210,7 @@ async def _labels(session: AsyncSession, lang: str) -> dict[str, str]:
         "waitlist_submitted": "waitlist.submitted",
         "email_label": "auth.email_label",
         "sign_in": "auth.sign_in",
+        "continue_btn": "common.continue",
         "send_link": "auth.send_link",
         "link_sent": "auth.link_sent",
         "your_request": "request.title",
@@ -1047,13 +1048,17 @@ def build_router() -> APIRouter:
                     except (NotFound, ValueError):
                         owns = False
                 if owner is not None and owns:
-                    try:
-                        await consume_token(session, token, TokenPurpose.view_request)
-                    except TokenInvalid:
-                        pass  # spent by a concurrent request between the two reads
-                    else:
-                        client = owner
-                        arrived_by_token = True
+                    # A GET never spends the token: a mail scanner or a link
+                    # preview opens it first. The button posts it back.
+                    return _render(
+                        "confirm.html",
+                        {
+                            **context,
+                            "action": f"/r/{uuid}/enter",
+                            "token": token,
+                            "heading": context["t"]["your_request"],
+                        },
+                    )
 
             if client is None:
                 return RedirectResponse("/auth/email", status_code=303)
@@ -1138,6 +1143,42 @@ def build_router() -> APIRouter:
                 # link work when the client opens it again an hour later, and
                 # what lets the form on this page post back at all.
                 issue_client_session(response, client.id)
+            return response
+
+    @router.post("/r/{uuid}/enter", include_in_schema=False)
+    async def request_enter(
+        request: Request,
+        uuid: str,
+        token: str = Form(""),
+        csrf_token: str = Form("", alias=CSRF_FIELD),
+    ) -> Response:
+        """The button on the confirm page: here the view token is spent."""
+        if not csrf_ok(request, csrf_token):
+            return Response(status_code=403)
+        async with unit_of_work() as session:
+            # Ownership before spend, as the GET checked it: a mangled link
+            # must leave the token for the correct one.
+            target = await token_target(session, token, TokenPurpose.view_request)
+            owner = (
+                await _client_by_id(session, target.client_id)
+                if target is not None and target.client_id
+                else None
+            )
+            try:
+                owns = owner is not None and (
+                    (await booking.get_by_uuid(session, UUID(uuid))).client_id == owner.id
+                )
+            except (NotFound, ValueError):
+                owns = False
+            if owner is None or not owns:
+                return RedirectResponse("/auth/email", status_code=303)
+            try:
+                await consume_token(session, token, TokenPurpose.view_request)
+            except TokenInvalid:
+                return RedirectResponse("/auth/email", status_code=303)
+            response = RedirectResponse(f"/r/{UUID(uuid)}?{WELCOME_PARAM}=1", status_code=303)
+            issue_client_session(response, owner.id)
+            issue_csrf(response, csrf_token_for(request))
             return response
 
     @router.post("/r/{uuid}/{action}", include_in_schema=False)
@@ -1253,7 +1294,39 @@ def build_router() -> APIRouter:
             return _render("auth_email.html", {**context, "sent": True})
 
     @router.get("/auth/callback", include_in_schema=False)
-    async def auth_callback(request: Request, token: str = "") -> Response:
+    async def auth_callback_confirm(request: Request, token: str = "") -> Response:
+        """A button, not a spend: mail scanners and link previews GET every link
+        in a message, and a token they used up would be dead for the person."""
+        async with unit_of_work() as session:
+            context = await _context(session, request)
+            if await token_target(session, token, TokenPurpose.login) is None:
+                return _render(
+                    "error.html",
+                    {
+                        **context,
+                        "heading": context["t"]["expired_link"],
+                        "message": context["t"]["expired_link"],
+                    },
+                    status_code=400,
+                )
+            return _render(
+                "confirm.html",
+                {
+                    **context,
+                    "action": "/auth/callback",
+                    "token": token,
+                    "heading": context["t"]["sign_in"],
+                },
+            )
+
+    @router.post("/auth/callback", include_in_schema=False)
+    async def auth_callback(
+        request: Request,
+        token: str = Form(""),
+        csrf_token: str = Form("", alias=CSRF_FIELD),
+    ) -> Response:
+        if not csrf_ok(request, csrf_token):
+            return Response(status_code=403)
         async with unit_of_work() as session:
             context = await _context(session, request)
             try:

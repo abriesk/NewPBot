@@ -102,9 +102,12 @@ async def _login_url(committed: AsyncSession, email: str) -> str:
 
 
 def _follow(web: TestClient, url: str) -> None:
-    path = url.split("://", 1)[-1].split("/", 1)[1]
-    response = web.get("/" + path, follow_redirects=False)
-    assert response.status_code in (200, 303)
+    from urllib.parse import parse_qs, urlparse
+
+    from tests.e2e.test_web_booking import _follow_login
+
+    token = parse_qs(urlparse(url).query)["token"][0]
+    assert _follow_login(web, token).status_code == 303
 
 
 async def test_an_unverified_booking_holds_briefly_and_does_not_notify(
