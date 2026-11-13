@@ -13,7 +13,9 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-psycho}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?required}
     volumes:
-      - pgdata:/var/lib/postgresql/data
+      # A bare name is the named volume below; a path (`./pgdata`) bind-mounts a
+      # host directory instead, so a stopped stack moves as one folder copy.
+      - ${PGDATA_DIR:-pgdata}:/var/lib/postgresql/data
     healthcheck:
       # §16.3 specifies `pg_isready`. That only asks whether the server is
       # accepting connections: it returns 0 even for a database that does not
