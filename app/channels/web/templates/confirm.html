@@ -7,7 +7,13 @@
   <form method="post" action="{{ action }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="token" value="{{ token }}">
+    {% if book_text %}
+    <p>{{ book_text }}</p>
+    <button type="submit" name="mode" value="book">{{ t.confirm_book_yes }}</button>
+    <button type="submit" name="mode" value="signin" class="secondary">{{ t.confirm_book_no }}</button>
+    {% else %}
     <button type="submit">{{ t.continue_btn }}</button>
+    {% endif %}
   </form>
 </div>
 {% endblock %}

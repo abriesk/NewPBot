@@ -130,6 +130,9 @@ auth:
   email_label: "Ваш адрес электронной почты"     # TODO: review
   send_link: "Прислать ссылку"                   # TODO: review
   link_sent: "Если этот адрес здесь известен, ссылка для входа уже отправлена."   # TODO: review
+  confirm_book: "С вашим адресом электронной почты начата заявка на {when} ({session_type}). Отправить её или просто войти?"   # TODO: review
+  confirm_book_yes: "Отправить эту заявку"   # TODO: review
+  confirm_book_no: "Только войти, не записываться"   # TODO: review
   greeting: "Здравствуйте, {name}."               # TODO: review
   greeting_unnamed: "Здравствуйте, уважаемый клиент."   # TODO: review
 
@@ -195,6 +198,7 @@ intent:
   auth.login_link.client.subject: "Ссылка для входа"                            # TODO
   auth.login_link.client.body: "По этой ссылке вы откроете свою заявку. Она действует один раз, {minutes} минут."   # TODO
   auth.login_link.client.action.open: "Открыть заявку"                          # TODO
+  auth.login_link.client.books: "Кто-то выбрал {when} ({session_type}), указав ваш адрес электронной почты. Если это были вы, откройте ссылку и отправьте заявку. Ссылка действует один раз, {minutes} минут."   # TODO: review
   auth.login_link.client.telegram_hint: "Удобнее в Telegram? Подключите — уведомления будут приходить туда."   # TODO
   auth.login_link.client.action.telegram: "Подключить Telegram"                 # TODO
   auth.link_channel.client.body: "Подключите Telegram, чтобы получать уведомления о консультации там."   # TODO

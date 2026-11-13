@@ -157,6 +157,9 @@ auth:
   email_label: "Your email address"
   send_link: "Send me a link"
   link_sent: "If that address is known here, a sign-in link is on its way."
+  confirm_book: "A booking request for {when} ({session_type}) was started with your email address. Send it, or just sign in?"
+  confirm_book_yes: "Send this booking request"
+  confirm_book_no: "Just sign in, do not book"
   # Shown once, on the page an emailed link lands on (§12.1). The unnamed line
   # is a whole sentence rather than a word standing in for {name}: a client who
   # booked by email and skipped the name field has none.
@@ -237,6 +240,7 @@ intent:
   auth.login_link.client.subject: "Your sign-in link"
   auth.login_link.client.body: "Use this link to open your booking. It works once and expires in {minutes} minutes."
   auth.login_link.client.action.open: "Open my booking"
+  auth.login_link.client.books: "Someone chose {when} ({session_type}) using your email address. If that was you, open this link and send the booking request. It works once and expires in {minutes} minutes."
   auth.login_link.client.telegram_hint: "Prefer Telegram? Connect it and get updates there instead."
   auth.login_link.client.action.telegram: "Connect Telegram"
   auth.link_channel.client.body: "Connect Telegram to receive updates about your session there."

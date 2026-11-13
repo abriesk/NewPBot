@@ -30,6 +30,7 @@ from app.core.services import booking
 from app.core.services import slots as slot_service
 from tests.e2e.test_web_booking import (  # noqa: F401  (fixtures)
     EMAIL,
+    CLIENT_COOKIE,
     _csrf,
     _hold_a_slot,
     committed,
@@ -91,7 +92,7 @@ async def _login_url(committed: AsyncSession, email: str) -> str:
             await committed.execute(
                 select(OutboxMessage)
                 .where(
-                    OutboxMessage.intent_key == "auth.login_link.client",
+                    OutboxMessage.intent_key.like("auth.login%"),
                     OutboxMessage.address == email,
                 )
                 .order_by(OutboxMessage.id.desc())
@@ -110,7 +111,7 @@ def _follow(web: TestClient, url: str) -> None:
     from tests.e2e.test_web_booking import _follow_login
 
     token = parse_qs(urlparse(url).query)["token"][0]
-    assert _follow_login(web, token).status_code == 303
+    assert _follow_login(web, token, mode="book").status_code == 303
 
 
 async def test_an_unverified_booking_holds_briefly_and_does_not_notify(
@@ -324,3 +325,162 @@ async def test_a_proved_owner_on_a_new_browser_has_the_booking_filed_when_the_li
     assert not request.awaiting_verification
     assert await _admin_rows(committed, request.id)
     assert (await _slot(committed, web_slot)).status is SlotStatus.held
+
+
+# --- Review round 2 ----------------------------------------------------------------
+
+
+async def _spend_login_links(committed: AsyncSession, client_id: object) -> None:
+    from app.core.enums import TokenPurpose
+    from app.core.services.clients import issue_token
+
+    for _ in range(3):
+        await issue_token(
+            committed, TokenPurpose.login, client_id=client_id, payload={"email": EMAIL}
+        )
+    await committed.commit()
+
+
+def _message(html: str) -> str:
+    import re
+
+    found = re.search(r"<p>(.*?)</p>", html, re.S)
+    return found.group(1).strip() if found else html
+
+
+async def test_a_proved_owner_out_of_links_gets_the_same_refusal_as_a_new_address(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    from app.core.services.clients import resolve_client
+
+    client = await resolve_client(committed, Channel.email, EMAIL)
+    client_id = client.id
+    await committed.commit()
+    await _spend_login_links(committed, client_id)
+
+    new_address = await _book(web, committed, web_slot)
+    await committed.execute(
+        update(Identity).where(Identity.client_id == client_id).values(verified_at=datetime.now(UTC))
+    )
+    await committed.commit()
+    owner = await _book(web, committed, web_slot)
+
+    assert new_address.status_code == owner.status_code == 429
+    assert _message(new_address.text) == _message(owner.text)
+    assert await _request_for(committed, web_slot) is None
+
+
+async def _owner_with_a_carried_booking(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> tuple[object, str]:
+    from app.core.services.clients import resolve_client
+
+    owner_id = (await resolve_client(committed, Channel.email, EMAIL, verified=True)).id
+    await committed.commit()
+    await _book(web, committed, web_slot)
+    url = await _login_url(committed, EMAIL)
+    from urllib.parse import parse_qs, urlparse
+
+    return owner_id, parse_qs(urlparse(url).query)["token"][0]
+
+
+async def test_the_confirm_page_for_a_carried_booking_names_it_and_offers_both_choices(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    _owner, token = await _owner_with_a_carried_booking(web, web_slot, committed)
+
+    page = web.get("/auth/callback", params={"token": token})
+    assert page.status_code == 200
+    assert 'name="mode" value="book"' in page.text
+    assert 'name="mode" value="signin"' in page.text
+    assert (datetime.now(UTC) + timedelta(days=21)).strftime("%Y-%m-%d") in page.text
+
+    row = (
+        await committed.execute(
+            select(OutboxMessage)
+            .where(OutboxMessage.address == EMAIL, OutboxMessage.intent_key.like("auth.login%"))
+            .order_by(OutboxMessage.id.desc())
+        )
+    ).scalars().first()
+    assert row is not None and row.intent_key == "auth.login_link.client"
+    assert row.payload.get("when")
+
+
+async def test_signing_in_without_booking_files_nothing_and_a_replay_files_nothing_more(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    from tests.e2e.test_web_booking import CLIENT_COOKIE
+
+    _owner, token = await _owner_with_a_carried_booking(web, web_slot, committed)
+    web.get("/auth/callback", params={"token": token})
+    signed = web.post(
+        "/auth/callback",
+        data={"csrf_token": _csrf(web), "token": token, "mode": "signin"},
+        follow_redirects=False,
+    )
+    assert signed.status_code == 303
+    assert web.cookies.get(CLIENT_COOKIE)
+    assert await _request_for(committed, web_slot) is None
+
+    # The spent token cannot be used to book afterwards.
+    again = web.post(
+        "/auth/callback",
+        data={"csrf_token": _csrf(web), "token": token, "mode": "book"},
+        follow_redirects=False,
+    )
+    assert again.status_code == 400
+    assert await _request_for(committed, web_slot) is None
+
+
+async def test_following_a_carried_booking_twice_files_it_once(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    _owner, token = await _owner_with_a_carried_booking(web, web_slot, committed)
+    data = {"csrf_token": _csrf(web), "token": token, "mode": "book"}
+    first = web.post("/auth/callback", data=data, follow_redirects=False)
+    second = web.post("/auth/callback", data=data, follow_redirects=False)
+    assert first.status_code == 303
+    assert second.status_code == 400
+    await committed.rollback()
+    count = len(
+        (
+            await committed.execute(
+                select(BookingRequest).where(BookingRequest.slot_id == web_slot)
+            )
+        ).scalars().all()
+    )
+    assert count == 1
+
+
+async def test_a_carried_booking_whose_slot_has_gone_signs_in_and_files_nothing(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    from tests.e2e.test_web_booking import CLIENT_COOKIE
+
+    _owner, token = await _owner_with_a_carried_booking(web, web_slot, committed)
+    await committed.execute(update(Slot).where(Slot.id == web_slot).values(status=SlotStatus.blocked))
+    await committed.commit()
+
+    gone = web.post(
+        "/auth/callback",
+        data={"csrf_token": _csrf(web), "token": token, "mode": "book"},
+        follow_redirects=False,
+    )
+    assert gone.status_code == 409
+    assert web.cookies.get(CLIENT_COOKIE)
+    assert await _request_for(committed, web_slot) is None
+
+
+async def test_erasing_the_owner_removes_a_carried_booking_token(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    from app.core.models import AuthToken
+    from app.core.services.clients import erase_client
+
+    owner_id, _token = await _owner_with_a_carried_booking(web, web_slot, committed)
+    await erase_client(committed, owner_id)  # type: ignore[arg-type]
+    await committed.commit()
+    left = (
+        await committed.execute(select(AuthToken).where(AuthToken.client_id == owner_id))
+    ).scalars().all()
+    assert not left

@@ -168,7 +168,11 @@ CATALOGUE: dict[str, IntentSpec] = {
         # address has not proved itself hands a Telegram account the ability to
         # attach itself to somebody else's client record.
         actions=("open", "telegram"),
-        optional_parts=(("telegram_url", "intent.auth.login_link.client.telegram_hint"),),
+        optional_parts=(
+            ("telegram_url", "intent.auth.login_link.client.telegram_hint"),
+            # A link that will file a booking says so (NP2).
+            ("when", "intent.auth.login_link.client.books"),
+        ),
         email_subject_key="intent.auth.login_link.client.subject",
     ),
     "auth.link_channel.client": IntentSpec(

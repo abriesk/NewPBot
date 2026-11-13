@@ -106,6 +106,47 @@ LANGUAGES = ("ru", "hy", "en")
 # --- Page context -----------------------------------------------------------
 
 
+async def _book_summary(
+    session: AsyncSession, lang: str, book: dict[str, Any]
+) -> tuple[str, str]:
+    """(when, session type) of a booking a login link would file."""
+    practice = await get_practice(session)
+    zone = str(book.get("tz") or "")
+    if not _valid_zone(zone):
+        zone = practice.timezone
+    starts = (
+        await session.execute(select(Slot.starts_at).where(Slot.id == int(book["slot_id"])))
+    ).scalar_one_or_none()
+    when = (
+        f"{starts.astimezone(ZoneInfo(zone)).strftime('%Y-%m-%d %H:%M')} ({zone})"
+        if starts
+        else "?"
+    )
+    code = (
+        await session.execute(
+            select(SessionType.code).where(SessionType.id == int(book["session_type_id"]))
+        )
+    ).scalar_one_or_none()
+    return when, await session_type_name(session, lang, code) if code else "?"
+
+
+async def _carried_booking_text(
+    session: AsyncSession, context: dict[str, Any], payload: dict[str, Any]
+) -> dict[str, Any]:
+    book = payload.get("book")
+    if not isinstance(book, dict):
+        return {}
+    try:
+        when, kind = await _book_summary(session, context["lang"], book)
+    except (KeyError, ValueError):
+        return {}
+    return {
+        "book_text": await get_text(
+            session, context["lang"], "auth.confirm_book", when=when, session_type=kind
+        )
+    }
+
+
 async def _bad_email(session: AsyncSession, context: dict[str, Any]) -> Response:
     """The readable refusal for an address that is not one (REVIEW C15, F4)."""
     return _render(
@@ -126,6 +167,7 @@ async def _queue_login_link(
     email: str,
     request_uuid: UUID | None = None,
     book: dict[str, str] | None = None,
+    summary: tuple[str, str] | None = None,
 ) -> None:
     """Queue `auth.login_link.client` to an address that has not proved itself.
 
@@ -154,12 +196,15 @@ async def _queue_login_link(
         session, TokenPurpose.login, client_id=client_id, payload=payload
     )
     link_raw = await issue_token(session, TokenPurpose.link_channel, client_id=client_id)
+    # A link that will file a booking says so in the mail (and on the page).
+    carried = {"when": summary[0], "session_type": summary[1]} if book and summary else {}
     await notifications.enqueue(
         session,
         Envelope(
             "auth.login_link.client",
             Recipient.client,
             {
+                **carried,
                 "url": f"{settings.base_url}/auth/callback?token={raw}",
                 "minutes": 30,
                 "telegram_url": (
@@ -216,6 +261,8 @@ async def _labels(session: AsyncSession, lang: str) -> dict[str, str]:
         "email_label": "auth.email_label",
         "sign_in": "auth.sign_in",
         "continue_btn": "common.continue",
+        "confirm_book_yes": "auth.confirm_book_yes",
+        "confirm_book_no": "auth.confirm_book_no",
         "send_link": "auth.send_link",
         "link_sent": "auth.link_sent",
         "your_request": "request.title",
@@ -829,6 +876,21 @@ def build_router() -> APIRouter:
                 if address is None:
                     return await _bad_email(session, context)
                 email = address
+                # One answer for "no link left", before anything says whether the
+                # address is known: a proved owner gets the refusal a new
+                # address gets, and neither loses a booking silently.
+                if can_link and await magic_link_allowance_left(session, address) <= 0:
+                    return _render(
+                        "error.html",
+                        {
+                            **context,
+                            "heading": context["t"]["error"],
+                            "message": await get_text(
+                                session, context["lang"], "error.rate_limited"
+                            ),
+                        },
+                        status_code=429,
+                    )
                 owner = await verified_email_client(session, address)
                 if owner is not None:
                     if not can_link:
@@ -845,36 +907,24 @@ def build_router() -> APIRouter:
                     # typing it files nothing there: the owner is sent a link
                     # carrying the choice, which is filed when it is followed,
                     # and the page says what it says for a new address.
-                    if await magic_link_allowance_left(session, address) > 0:
-                        await _queue_login_link(
-                            session,
-                            client_id=owner,
-                            email=address,
-                            book={
-                                "slot_id": str(reservation["slot_id"]),
-                                "session_type_id": str(reservation["session_type_id"]),
-                                "modality": str(reservation.get("modality", "online")),
-                                "tz": str(reservation.get("tz") or ""),
-                                "name": (name or "")[:200],
-                                "contact": (contact or "")[:500],
-                            },
-                        )
+                    book = {
+                        "slot_id": str(reservation["slot_id"]),
+                        "session_type_id": str(reservation["session_type_id"]),
+                        "modality": str(reservation.get("modality", "online")),
+                        "tz": str(reservation.get("tz") or ""),
+                        "name": (name or "")[:200],
+                        "contact": (contact or "")[:500],
+                    }
+                    await _queue_login_link(
+                        session,
+                        client_id=owner,
+                        email=address,
+                        book=book,
+                        summary=await _book_summary(session, context["lang"], book),
+                    )
                     await notifications.publish(session)
                     return await _check_email_page(session, context)
-                if can_link and await magic_link_allowance_left(session, address) <= 0:
-                    # No link can be sent, so no short hold could be released:
-                    # refuse readably rather than lose the booking later.
-                    return _render(
-                        "error.html",
-                        {
-                            **context,
-                            "heading": context["t"]["error"],
-                            "message": await get_text(
-                                session, context["lang"], "error.rate_limited"
-                            ),
-                        },
-                        status_code=429,
-                    )
+
                 # §12.1 (IMPLEMENTATION.md): verification is never a
                 # precondition for booking -- the request is submitted either
                 # way. What it *is* a precondition for is anything that signs
@@ -1368,7 +1418,8 @@ def build_router() -> APIRouter:
         in a message, and a token they used up would be dead for the person."""
         async with unit_of_work() as session:
             context = await _context(session, request)
-            if await token_target(session, token, TokenPurpose.login) is None:
+            target = await token_target(session, token, TokenPurpose.login)
+            if target is None:
                 return _render(
                     "error.html",
                     {
@@ -1385,6 +1436,7 @@ def build_router() -> APIRouter:
                     "action": "/auth/callback",
                     "token": token,
                     "heading": context["t"]["sign_in"],
+                    **await _carried_booking_text(session, context, target.payload),
                 },
             )
 
@@ -1392,6 +1444,7 @@ def build_router() -> APIRouter:
     async def auth_callback(
         request: Request,
         token: str = Form(""),
+        mode: str = Form(""),
         csrf_token: str = Form("", alias=CSRF_FIELD),
     ) -> Response:
         if not csrf_ok(request, csrf_token):
@@ -1440,7 +1493,8 @@ def build_router() -> APIRouter:
             # the same checks as at the form (the slot may have gone since).
             carried = result.payload.get("book")
             carried_uuid = None
-            if isinstance(carried, dict):
+            # Only the explicit choice files it: the default is to sign in.
+            if isinstance(carried, dict) and mode == "book":
                 try:
                     if not _valid_modality(str(carried["modality"])) or (
                         carried.get("tz") and not _valid_zone(str(carried["tz"]))

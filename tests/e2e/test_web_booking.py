@@ -223,7 +223,9 @@ def _challenge_from(html: str) -> str:
     return found.group(1)
 
 
-def _follow_login(web: TestClient, raw: str, *, follow_redirects: bool = False) -> Any:
+def _follow_login(
+    web: TestClient, raw: str, *, follow_redirects: bool = False, mode: str = ""
+) -> Any:
     """What a person does with a login link: open it, press the button.
 
     The GET only shows the button (a scanner's GET must not spend the token);
@@ -233,7 +235,7 @@ def _follow_login(web: TestClient, raw: str, *, follow_redirects: bool = False) 
     assert page.status_code == 200, page.status_code
     return web.post(
         "/auth/callback",
-        data={"csrf_token": _csrf(web), "token": raw},
+        data={"csrf_token": _csrf(web), "token": raw, "mode": mode},
         follow_redirects=follow_redirects,
     )
 
