@@ -1,5 +1,9 @@
 """NP3c: follow-ups from the NP1-NP4a reviews and the NP2 deploy (one test module per slice, the
-item number in each docstring)."""
+item number in each docstring).
+
+Enforces IMPLEMENTATION.md §7.1 (a counter names an hour still offered), §10 (messages and their
+times), §12.1 (the client pages), §14 (the outbox) and §17 (CSRF).
+"""
 
 from __future__ import annotations
 

@@ -1,4 +1,7 @@
-"""NP3c items 11 and 12: failed-CSRF re-renders, the 429 page text, the on-site address."""
+"""NP3c items 11 and 12: failed-CSRF re-renders, the 429 page text, the on-site address.
+
+Enforces IMPLEMENTATION.md §12.1 (the client pages) and §17 (CSRF, rate limits).
+"""
 
 from __future__ import annotations
 

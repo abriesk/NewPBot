@@ -1,4 +1,7 @@
-"""NP3c item 9: stored translations reach production (the data migration and its helper)."""
+"""NP3c item 9: stored translations reach production (the data migration and its helper).
+
+Enforces IMPLEMENTATION.md §15 (the catalogue: a deploy never overwrites an edited row).
+"""
 
 from __future__ import annotations
 
