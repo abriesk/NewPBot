@@ -41,6 +41,7 @@ from app.core.models import (
     Slot,
 )
 from app.core.policies import now_utc
+from app.core.ref import short_ref
 from app.core.services import booking, flow, notifications
 from app.core.services.clients import link_identity, resolve_client
 from app.core.services.flow import Step
@@ -208,7 +209,7 @@ async def test_the_full_scenario_on_the_telegram_channel(
 
     # Approve from the therapist's Telegram surface (§13.2).
     reply = await handle(db, Update(chat_id=1, callback_data=f"{kb.APPROVE}:{request.id}"))
-    assert reply is not None and str(request.uuid) in reply.text
+    assert reply is not None and short_ref(request.uuid) in reply.text
 
     await db.refresh(request)
     assert request.status is RequestStatus.confirmed

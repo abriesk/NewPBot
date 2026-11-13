@@ -41,7 +41,7 @@ try {
     <button type="submit">Sign out</button>
   </form>
   {% set here = request.url.path %}
-  {% set links = [
+  {% set nav_items = [
     ("/admin/requests", t.nav_requests), ("/admin/waitlist", t.nav_waitlist),
     ("/admin/slots", t.nav_slots), ("/admin/content", t.nav_content),
     ("/admin/translations", t.nav_translations), ("/admin/session-types", t.nav_session_types),
@@ -50,7 +50,7 @@ try {
     ("/admin/privacy", t.nav_privacy), ("/admin/settings", t.nav_settings),
     ("/admin/help", t.nav_help)] %}
   <nav aria-label="Admin sections">
-    {% for href, label in links %}
+    {% for href, label in nav_items %}
       <a href="{{ href }}"{% if here == href or here.startswith(href ~ "/") %} aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
   </nav>

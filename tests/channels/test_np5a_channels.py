@@ -1,4 +1,7 @@
-"""NP5a: the onsite {url} is escaped on both paths; one short request reference in text."""
+"""NP5a: the onsite {url} is escaped on both paths; one short request reference in text.
+
+Enforces IMPLEMENTATION.md §13 (Telegram) and §12.1 (the request reference).
+"""
 
 from __future__ import annotations
 

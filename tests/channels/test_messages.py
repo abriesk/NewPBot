@@ -611,7 +611,7 @@ async def test_a_note_reaches_telegram_as_the_note_itself(db: AsyncSession) -> N
         base_url="https://example.test",
     )
 
-    assert "Ab added information to request abc." in message.text
+    assert "Ab added information to request ABC." in message.text
     assert "I may be five minutes late." in message.text
     # §13.4's reasoning is about inboxes, and this is not one -- but a short
     # note and its announcement are still one message, not two.
@@ -631,7 +631,7 @@ async def test_the_same_note_by_email_stays_an_announcement(db: AsyncSession) ->
         base_url="https://example.test",
     )
 
-    assert "Ab added information to request abc." in message.text
+    assert "Ab added information to request ABC." in message.text
     assert "five minutes" not in message.text
     assert "They wrote" not in message.text
 
@@ -651,7 +651,7 @@ async def test_a_note_from_a_client_with_no_name_does_not_open_on_a_blank(
         base_url="https://example.test",
     )
 
-    assert message.text.startswith("New information on request abc.")
+    assert message.text.startswith("New information on request ABC.")
     assert "a thought" in message.text
 
 

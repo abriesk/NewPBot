@@ -1,4 +1,7 @@
-"""NP5a: her photo joins the config export and import; migration 0011 for the privacy text."""
+"""NP5a: her photo joins the config export and import; migration 0011 for the privacy text.
+
+Enforces IMPLEMENTATION.md §16.7 (the config file) and §12.2 (the admin settings).
+"""
 
 from __future__ import annotations
 

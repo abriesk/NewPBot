@@ -30,6 +30,7 @@ from app.core.models import (
     Slot,
     WaitlistEntry,
 )
+from app.core.ref import short_ref
 from app.core.services import booking, clients, content, flow
 from app.core.services.clients import issue_token, resolve_client
 from app.core.services.flow import Step
@@ -191,7 +192,7 @@ async def test_a_full_update_sequence_produces_a_pending_request_with_a_held_slo
 
     # §13.1 step 8: the confirmation carries the request UUID.
     assert reply is not None
-    assert str(request.uuid) in reply.text
+    assert short_ref(request.uuid) in reply.text
 
 
 async def test_a_redelivered_text_update_is_not_applied_to_the_next_step(
@@ -526,7 +527,7 @@ async def test_a_given_address_is_mailed_a_link_and_stays_unverified(
     ).scalar_one()
     assert request.status is RequestStatus.pending
     assert request.contact_note == "anna@example.test"
-    assert reply is not None and str(request.uuid) in reply.text
+    assert reply is not None and short_ref(request.uuid) in reply.text
 
 
 async def test_an_address_held_by_someone_else_is_not_reassigned(
@@ -1174,7 +1175,7 @@ async def test_the_free_text_path_reaches_a_submitted_request(
     assert request.desired_time_text == "some evening next week?"
     assert request.problem_text == "work stress"
     assert request.session_type_id == session_type_id
-    assert reply is not None and str(request.uuid) in reply.text
+    assert reply is not None and short_ref(request.uuid) in reply.text
 
     # The flow is finished, not stranded mid-way.
     assert await flow.get(db, client.id, Channel.telegram) is None

@@ -743,7 +743,7 @@ async def test_the_translations_page_is_grouped_and_shows_the_english_wording(
     assert "What should I call you?" in page.text
     # And a key with no Russian row yet is offered for editing rather than
     # merely named.
-    assert 'name="key" value="auth.sign_in"' in page.text
+    assert 'name="value__auth.sign_in"' in page.text
 
     await committed.rollback()
     await committed.execute(delete(AdminSession))
@@ -1599,9 +1599,11 @@ async def test_cancel_on_a_negotiation_is_greyed_with_its_reason(
     page = web.get(f"/admin/requests/{scratch['request_uuid']}")
     assert page.status_code == 200
 
-    cancel = _action_form(page.text, scratch["request_uuid"], "cancel")
-    assert "Only a confirmed session can be cancelled" in cancel
-    assert "<button" not in cancel, "a greyed action must not still be pressable"
+    # NP5a: what the status forbids is folded away with its reason, not greyed in place.
+    assert "Only a confirmed session can be cancelled" in page.text
+    assert f"/admin/requests/{scratch['request_uuid']}/cancel" not in page.text, (
+        "an unavailable action must not still be pressable"
+    )
 
     # Reject is the verb that fits a request which was never confirmed, and §7.1
     # allows it from here -- so it keeps its button.
@@ -1691,7 +1693,7 @@ async def test_marking_contacted_with_a_note_queues_a_client_notification(
         follow_redirects=False,
     )
     assert response.status_code == 303
-    assert response.headers["location"] == "/admin/waitlist?flash=done"
+    assert response.headers["location"] == "/admin/waitlist?flash=waitlist-contacted"
 
     await _fresh(committed)
     row = (
