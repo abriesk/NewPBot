@@ -23,7 +23,8 @@ def test_healthz_returns_200_without_a_database() -> None:
     with TestClient(create_app()) as client:
         response = client.get("/healthz")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    # (NP3c: a not-yet-registered Telegram webhook adds a "webhook" field; liveness stays "ok")
+    assert response.json()["status"] == "ok"
 
 
 def test_readyz_reports_503_when_the_database_is_unreachable() -> None:

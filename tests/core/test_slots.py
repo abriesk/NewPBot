@@ -716,3 +716,22 @@ async def test_a_held_slot_is_not_offered(
     )
     found = await slot_service.list_available_slots(db, window_from=window[0], window_to=window[1])
     assert future_slot.id not in {s.id for s in found}
+
+
+async def test_open_slot_start_refuses_a_slot_over_a_booked_one(
+    db: AsyncSession, future_slot: Slot, practice: Practice, request_id: int
+) -> None:
+    """NP3c/2: the one helper every stale-screen re-read uses. An overlapping slot is still
+    `available` in the table (F12 derives the closing), so the status alone is not enough."""
+    future_slot.modality = Modality.online
+    overlapping = await _sibling(
+        db, practice, future_slot, starts_at=future_slot.starts_at + timedelta(minutes=30)
+    )
+    assert await slot_service.open_slot_start(db, overlapping.id) == overlapping.starts_at
+
+    await slot_service.book_slot(db, future_slot.id, request_id=request_id)
+
+    assert overlapping.status is SlotStatus.available
+    assert await slot_service.open_slot_start(db, overlapping.id) is None
+    assert await slot_service.open_slot_start(db, future_slot.id) is None  # booked itself
+    assert await slot_service.open_slot_start(db, None) is None

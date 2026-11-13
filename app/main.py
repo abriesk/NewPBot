@@ -10,9 +10,10 @@ Routers are mounted from M5 onward; M0 provides the health surface only.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 
 from fastapi import FastAPI, Request, Response
 from fastapi.exception_handlers import http_exception_handler
@@ -21,8 +22,12 @@ from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.channels.telegram.webhook import (
+    WebhookStatus,
+    healthz_webhook_field,
+    keep_webhook_registered,
+)
 from app.channels.telegram.webhook import build_router as telegram_router
-from app.channels.telegram.webhook import register_webhook
 from app.channels.web.admin import MAX_CONFIG_UPLOAD
 from app.channels.web.admin import build_router as admin_router
 from app.channels.web.client import build_router as web_router
@@ -79,11 +84,18 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     # lets /healthz answer without one.
     #
     # §16.1: registering the webhook refuses loudly rather than failing quietly
-    # when nothing is terminating TLS in front of this deployment.
-    await register_webhook()
+    # when nothing is terminating TLS in front of this deployment. It runs in the
+    # background and retries with backoff: a network that is not up yet must not
+    # leave the bot deaf until a restart, nor hold startup (/healthz says so).
+    status = WebhookStatus()
+    app.state.webhook = status
+    app.state.webhook_task = asyncio.create_task(keep_webhook_registered(status))
     try:
         yield
     finally:
+        app.state.webhook_task.cancel()
+        with suppress(asyncio.CancelledError):
+            await app.state.webhook_task
         await dispose_engine()
 
 
@@ -166,11 +178,23 @@ def create_app() -> FastAPI:
     app.include_router(telegram_router())
 
     @app.get("/healthz", include_in_schema=False)
-    async def healthz() -> dict[str, str]:
+    async def healthz(request: Request) -> dict[str, str]:
         """Liveness. Deliberately does not touch the database -- the Compose
         healthcheck gates the worker on this, and a slow database should not
-        make the process look dead."""
-        return {"status": "ok"}
+        make the process look dead.
+
+        A Telegram webhook that is wanted but not (yet) registered adds
+        `"webhook": "not registered"`; the status stays "ok", because a bot
+        waiting for the network is not a dead process."""
+        body = {"status": "ok"}
+        field = (
+            healthz_webhook_field(request.app.state.webhook)
+            if hasattr(request.app.state, "webhook")
+            else None
+        )
+        if field:
+            body["webhook"] = field
+        return body
 
     @app.get("/readyz", include_in_schema=False)
     async def readyz() -> JSONResponse:

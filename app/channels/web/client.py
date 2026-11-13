@@ -34,7 +34,7 @@ from app.channels.web.security import (
     issue_csrf,
 )
 from app.config import get_settings
-from app.core.enums import Channel, Modality, SenderType, SlotStatus, TokenPurpose
+from app.core.enums import Channel, Modality, SenderType, TokenPurpose
 from app.core.errors import DomainError, NotFound, SlotUnavailable, TokenInvalid
 from app.core.models import (
     BookingRequest,
@@ -68,7 +68,7 @@ from app.core.services.clients import (
 from app.core.services.flow import Step
 from app.core.services.notifications import Envelope, Recipient
 from app.core.services.settings import get_practice
-from app.core.services.slots import list_available_slots
+from app.core.services.slots import list_available_slots, open_slot_start
 from app.core.services.translations import get_text
 from app.db import unit_of_work
 from app.render.dates import day_label, when_label
@@ -1823,11 +1823,7 @@ async def _countered_instant(
             wanted = int(slot_id)
         except ValueError:
             return _SLOT_GONE
-        found = (
-            await session.execute(
-                select(Slot.starts_at).where(Slot.id == wanted, Slot.status == SlotStatus.available)
-            )
-        ).scalar_one_or_none()
+        found = await open_slot_start(session, wanted)
         return found if found is not None else _SLOT_GONE
 
     return _parse_local_naive(proposed_start, tz)

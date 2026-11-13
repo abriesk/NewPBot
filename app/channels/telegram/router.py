@@ -22,14 +22,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels.telegram import keyboards as kb
 from app.config import get_settings
-from app.core.enums import Channel, Modality, RequestStatus, SenderType, SlotStatus, TokenPurpose
+from app.core.enums import Channel, Modality, RequestStatus, SenderType, TokenPurpose
 from app.core.errors import DomainError, MergeRefused, SlotUnavailable, TokenInvalid
 from app.core.models import (
     BookingRequest,
     Client,
     Practice,
     SessionType,
-    Slot,
     TimezoneOption,
 )
 from app.core.policies import BookingPath, now_utc, parse_client_time, resolve_booking_mode
@@ -50,7 +49,7 @@ from app.core.services.clients import (
 from app.core.services.flow import Step
 from app.core.services.notifications import Envelope, Recipient
 from app.core.services.settings import get_practice
-from app.core.services.slots import list_available_slots
+from app.core.services.slots import list_available_slots, open_slot_start
 from app.core.services.translations import get_text
 from app.render.dates import day_label
 from app.render.labels import session_type_name
@@ -1486,11 +1485,7 @@ async def _counter_with_slot(
     request's original slot, and one request holding two is not a state worth
     inventing.
     """
-    starts_at = (
-        await session.execute(
-            select(Slot.starts_at).where(Slot.id == slot_id, Slot.status == SlotStatus.available)
-        )
-    ).scalar_one_or_none()
+    starts_at = await open_slot_start(session, slot_id)
     if starts_at is None:
         return Reply(await get_text(session, client.language, "booking.slot.taken"))
 
@@ -1649,13 +1644,7 @@ async def _propose_screen(
     if action == kb.PROPOSE_SLOT:
         # Re-read: the panel may have been sitting in her chat for an hour, and
         # a slot taken since is not hers to offer.
-        starts_at = (
-            await session.execute(
-                select(Slot.starts_at).where(
-                    Slot.id == _int_or_none(rest), Slot.status == SlotStatus.available
-                )
-            )
-        ).scalar_one_or_none()
+        starts_at = await open_slot_start(session, _int_or_none(rest))
         if starts_at is None:
             return await _admin_request(session, request, toast="That time has gone.")
         return await _propose_at(session, chat_id, request, starts_at, practice)

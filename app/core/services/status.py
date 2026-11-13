@@ -185,7 +185,7 @@ async def _outbox_dead(session: AsyncSession) -> Check:
     since = now_utc() - DEAD_WINDOW
     rows = (
         await session.execute(
-            select(func.count(), func.min(OutboxMessage.created_at)).where(
+            select(func.count(), func.min(OutboxMessage.next_attempt_at)).where(
                 OutboxMessage.status == OutboxStatus.dead,
                 OutboxMessage.created_at >= since,
             )
@@ -267,13 +267,17 @@ async def _outbox_stuck(session: AsyncSession) -> Check:
     exactly what nobody knows, and a sweep that guessed would reintroduce the
     duplicate the `sending` state exists to prevent. So it is surfaced for a
     person to decide about instead.
+
+    "Since when" is `next_attempt_at`, which the worker stamps with the claim (and
+    again with each attempt) while a row is `sending`; `created_at` is when the
+    message was written, and an old row retried a minute ago is not stuck.
     """
     cutoff = now_utc() - STUCK_GRACE
     rows = (
         await session.execute(
             select(func.count(), func.min(OutboxMessage.created_at)).where(
                 OutboxMessage.status == OutboxStatus.sending,
-                OutboxMessage.created_at < cutoff,
+                OutboxMessage.next_attempt_at < cutoff,
             )
         )
     ).one()

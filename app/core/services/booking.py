@@ -1124,6 +1124,14 @@ async def client_accept(session: AsyncSession, request_id: int) -> BookingReques
     ):
         await slot_service.book_slot(session, own.id, request.id)
     else:
+        if own is not None and own.held_by_request == request.id:
+            # The agreed time is another one: the hour this request was holding is
+            # nobody's session, so it goes back on the picker now rather than at
+            # expiry (`admin_approve` does the same). Locked as a set, in id order,
+            # before anything is released.
+            await slot_service.lock_for_move(session, own.id, proposal.proposed_start)
+            await slot_service.release_slot(session, own.id, request.id)
+            request.slot_id = None
         await _book_matching(session, request, proposal.proposed_start)
 
     session_type = (

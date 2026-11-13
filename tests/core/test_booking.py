@@ -1904,3 +1904,32 @@ async def test_cancelling_still_frees_the_hour_by_default(
 
     await db.refresh(future_slot)
     assert future_slot.status is SlotStatus.available
+
+
+async def test_accepting_another_time_releases_the_requests_own_held_slot(
+    db: AsyncSession,
+    client: Client,
+    session_type_id: int,
+    future_slot: Slot,
+    practice: Practice,
+) -> None:
+    """NP3c/3: the proposal names a different hour than the slot the request holds; confirming
+    must hand that slot back now, not at expiry."""
+    request = await _submit(db, client, session_type_id, future_slot)
+    assert future_slot.status is SlotStatus.held
+    request = await booking.admin_propose(db, request.id, proposed_start=LATER)
+    # admin_propose releases a held slot when the time differs; hold it again as a client
+    # whose proposal came in over a held slot would be (the same-time case keeps it).
+    if future_slot.status is SlotStatus.available:
+        await slot_service.hold_slot(db, future_slot.id, request.id)
+        request.slot_id = future_slot.id
+        await db.flush()
+    assert future_slot.status is SlotStatus.held
+
+    confirmed = await booking.client_accept(db, request.id)
+
+    assert confirmed.status is RequestStatus.confirmed
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.available
+    assert future_slot.held_by_request is None
+    assert confirmed.slot_id is None

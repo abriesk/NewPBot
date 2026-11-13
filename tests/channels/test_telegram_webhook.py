@@ -162,3 +162,106 @@ async def test_polling_mode_does_not_register_a_webhook(
         assert await register_webhook() is False
     finally:
         get_settings.cache_clear()
+
+
+# --- NP3c item 1: registration survives a network blip ---------------------------
+
+
+async def test_registration_is_retried_in_the_background_until_it_works(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The first calls fail (the network came up late after a power cut): it registers later, and
+    the status says "not registered" until then."""
+    from app.channels.telegram import webhook as wh
+
+    calls = {"n": 0}
+    seen_while_failing: list[str | None] = []
+    status = wh.WebhookStatus()
+
+    async def flaky() -> bool:
+        calls["n"] += 1
+        seen_while_failing.append(wh.healthz_webhook_field(status))
+        return calls["n"] > 3
+
+    slept: list[float] = []
+
+    async def no_sleep(seconds: float) -> None:
+        slept.append(seconds)
+
+    monkeypatch.setattr(wh, "register_webhook", flaky)
+    await wh.keep_webhook_registered(status, sleep=no_sleep)
+
+    assert calls["n"] == 4
+    assert status.registered is True
+    assert seen_while_failing == ["not registered"] * 4
+    assert wh.healthz_webhook_field(status) is None
+    assert len(slept) == 3
+    assert slept == sorted(slept)  # backs off, never faster
+
+
+def test_the_retry_never_blocks_startup_and_stops_with_the_app(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import asyncio
+
+    from app.channels.telegram import webhook as wh
+
+    async def never() -> bool:
+        return False
+
+    async def slow_sleep(seconds: float) -> None:
+        await asyncio.sleep(3600)
+
+    monkeypatch.setattr(wh, "register_webhook", never)
+    monkeypatch.setattr(wh, "RETRY_SLEEP", slow_sleep)
+    app = create_app()
+    with TestClient(app) as client:
+        body = client.get("/healthz").json()
+        assert body["status"] == "ok"
+        assert body["webhook"] == "not registered"
+    # leaving the context cancelled the task: nothing is left running
+    assert app.state.webhook_task.done()
+
+
+async def test_registration_that_works_first_time_reports_nothing_extra(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from app.channels.telegram import webhook as wh
+
+    async def fine() -> bool:
+        return True
+
+    status = wh.WebhookStatus()
+    monkeypatch.setattr(wh, "register_webhook", fine)
+    await wh.keep_webhook_registered(status)
+    assert wh.healthz_webhook_field(status) is None
+
+
+async def test_a_refused_registration_is_not_retried_but_still_reported(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Plain http cannot succeed by waiting: one attempt (it logs the refusal), no loop."""
+    from app.channels.telegram import webhook as wh
+
+    monkeypatch.setenv("BASE_URL", "http://localhost:8000")
+    monkeypatch.setenv("TELEGRAM_MODE", "webhook")
+    get_settings.cache_clear()
+    status = wh.WebhookStatus()
+    try:
+        await wh.keep_webhook_registered(status)
+    finally:
+        get_settings.cache_clear()
+    assert wh.healthz_webhook_field(status) == "not registered"
+
+
+async def test_polling_mode_reports_nothing(monkeypatch: pytest.MonkeyPatch) -> None:
+    from app.channels.telegram import webhook as wh
+
+    monkeypatch.setenv("TELEGRAM_MODE", "polling")
+    get_settings.cache_clear()
+    status = wh.WebhookStatus()
+    try:
+        await wh.keep_webhook_registered(status)
+    finally:
+        get_settings.cache_clear()
+    assert wh.healthz_webhook_field(status) is None

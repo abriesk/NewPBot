@@ -180,7 +180,7 @@ async def test_an_interrupted_send_is_red_only_once_it_is_stale(
         db,
         practice,
         status=OutboxStatus.sending,
-        created_delta=-STUCK_GRACE + timedelta(minutes=1),
+        next_delta=-STUCK_GRACE + timedelta(minutes=1),
     )
     assert (await _one(db, "outbox_stuck")).state is CheckState.ok
 
@@ -188,7 +188,7 @@ async def test_an_interrupted_send_is_red_only_once_it_is_stale(
         db,
         practice,
         status=OutboxStatus.sending,
-        created_delta=-STUCK_GRACE - timedelta(minutes=1),
+        next_delta=-STUCK_GRACE - timedelta(minutes=1),
     )
     assert (await _one(db, "outbox_stuck")).state is CheckState.fail
 
@@ -344,3 +344,18 @@ def test_the_worst_state_wins() -> None:
     assert CheckState.worst([CheckState.ok, CheckState.warn]) is CheckState.warn
     assert CheckState.worst([CheckState.warn, CheckState.fail]) is CheckState.fail
     assert CheckState.worst([]) is CheckState.ok
+
+
+async def test_an_old_row_retried_a_minute_ago_is_not_stuck(
+    db: AsyncSession, practice: Practice
+) -> None:
+    """NP3c/4: the stuck check reads the claim time (`next_attempt_at`, stamped by the worker), not
+    `created_at`: a message written two days ago and claimed a minute ago is being sent."""
+    await _outbox(
+        db,
+        practice,
+        status=OutboxStatus.sending,
+        created_delta=-timedelta(days=2),
+        next_delta=-timedelta(minutes=1),
+    )
+    assert (await _one(db, "outbox_stuck")).state is CheckState.ok

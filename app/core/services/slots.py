@@ -98,6 +98,28 @@ def overlaps_a_booked_slot() -> Any:
     )
 
 
+async def open_slot_start(session: AsyncSession, slot_id: int | None) -> datetime | None:
+    """The start of this slot if it can still be offered, else None.
+
+    "Can be offered" is what a re-read of a stale screen needs: the slot is
+    `available` **and** no booked slot overlaps it (F12 -- an overlapping slot
+    stays `available` in the table, it is only closed by the booking next to
+    it). One answer for the Telegram counter, the therapist's proposal and the
+    web counter, so none of them can name an hour the practice has since lost.
+    """
+    if slot_id is None:
+        return None
+    return (
+        await session.execute(
+            select(Slot.starts_at).where(
+                Slot.id == slot_id,
+                Slot.status == SlotStatus.available,
+                ~overlaps_a_booked_slot(),
+            )
+        )
+    ).scalar_one_or_none()
+
+
 def _overlaps(base: Slot) -> Any:
     """SQL condition on `Slot`: shares part of `base`'s interval (same practice)."""
     return and_(

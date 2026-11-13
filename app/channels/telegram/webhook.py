@@ -9,9 +9,12 @@ caller must not be able to make the process do work, and JSON parsing is work.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import secrets
+from collections.abc import Awaitable, Callable
 from contextlib import suppress
+from dataclasses import dataclass
 
 from fastapi import APIRouter, Header, Request, Response
 
@@ -239,3 +242,57 @@ async def register_webhook() -> bool:
 
     logger.info("Telegram webhook registered")
     return True
+
+
+#: Seconds between attempts to register the webhook, growing; the last value repeats for as long as
+#: it takes. After a power cut everything restarts at once and the network may come up late.
+RETRY_DELAYS: tuple[float, ...] = (2, 5, 10, 30, 60, 120, 300)
+
+
+async def RETRY_SLEEP(seconds: float) -> None:
+    await asyncio.sleep(seconds)
+
+
+@dataclass
+class WebhookStatus:
+    """What `/healthz` says about the webhook: nothing when it is registered or not wanted."""
+
+    wanted: bool = False
+    registered: bool = False
+    attempts: int = 0
+
+
+def healthz_webhook_field(status: WebhookStatus) -> str | None:
+    """The `webhook` field of `/healthz`, or None when there is nothing to report."""
+    if status.wanted and not status.registered:
+        return "not registered"
+    return None
+
+
+async def keep_webhook_registered(
+    status: WebhookStatus,
+    sleep: Callable[[float], Awaitable[None]] | None = None,
+) -> None:
+    """Register the webhook, and keep trying with backoff until it works.
+
+    Run as a background task by the app's lifespan so startup never waits for Telegram. A failure
+    is logged by `register_webhook` on every attempt (never silent) and shows in `/healthz` until
+    it succeeds. A registration that cannot succeed by waiting -- polling mode, or a BASE_URL that
+    is not https -- is attempted once, for its log line, and not retried.
+    """
+    settings = get_settings()
+    status.wanted = settings.telegram_mode == "webhook"
+    retryable = status.wanted and settings.base_url.startswith("https://")
+    delays = RETRY_DELAYS
+    while True:
+        status.attempts += 1
+        if await register_webhook():
+            status.registered = True
+            return
+        if not retryable:
+            return
+        delay = delays[min(status.attempts - 1, len(delays) - 1)]
+        logger.warning(
+            "Telegram webhook not registered (attempt %s); retrying in %ss", status.attempts, delay
+        )
+        await (sleep or RETRY_SLEEP)(delay)
