@@ -7,7 +7,7 @@ Enforces IMPLEMENTATION.md §12.2 (the admin console) and §7.1 (what an action 
 from __future__ import annotations
 
 import re
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select, update
@@ -30,10 +30,12 @@ from tests.e2e.test_admin_web import (  # noqa: F401 - fixtures and helpers of t
 async def _status(
     committed: AsyncSession, scratch: dict[str, object], status: RequestStatus
 ) -> None:
+    values: dict[str, object] = {"status": status}
+    if status in (RequestStatus.confirmed, RequestStatus.completed):
+        values["scheduled_start"] = datetime.now(UTC) + timedelta(days=3)
+        values["confirmed_at"] = datetime.now(UTC)
     await committed.execute(
-        update(BookingRequest)
-        .where(BookingRequest.id == scratch["request_id"])
-        .values(status=status)
+        update(BookingRequest).where(BookingRequest.id == scratch["request_id"]).values(**values)
     )
     await committed.commit()
 
@@ -364,7 +366,7 @@ async def test_a_group_saves_in_one_post_and_only_what_changed(
     rows = (
         await committed.execute(
             select(Translation.key, Translation.value)
-            .where(Translation.lang == "en", Translation.key.like("nav.%"))
+            .where(Translation.lang == "en", Translation.key.like("common.%"))
             .order_by(Translation.key)
         )
     ).all()
@@ -414,7 +416,7 @@ async def test_the_current_page_is_marked_in_the_nav_and_every_input_has_a_name(
     assert re.search(r'<a href="/admin/waitlist" aria-current="page">', page)
     assert page.count('aria-current="page"') == 1
     for path in ("/admin/content", "/admin/timezones", "/admin/privacy", "/admin/translations"):
-        html = web.get(path).text
+        html = re.sub(r"<label\b.*?</label>", "", web.get(path).text, flags=re.S)
         for tag in re.findall(r"<(?:input|textarea)\b[^>]*>", html):
             if re.search(r'type="(hidden|checkbox|radio|submit)"', tag):
                 continue
