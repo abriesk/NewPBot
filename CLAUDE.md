@@ -86,14 +86,6 @@ than from her: inside those thirty days nothing caps the Telegram picker, which
 builds one inline button per slot, so a densely filled month can exceed what
 Telegram will render. Read the entry before starting.
 
-One more thing is worth knowing before the next session, and it is not in
-§20.4: the suite still shares the deployment's database (§20.3's last entry),
-so six `test_booking.py` schedule assertions and one seed assertion fail on
-rows nobody wrote deliberately. They fail on a clean checkout too, and the
-count **grows on its own** — an eighth went red the day "eight days from now"
-rolled onto a request left behind in August. The stale-asset trap is under
-Commands below, and closing it is still not built.
-
 **The waitlist page was the next thing looked at**, after the third round and
 not part of it. Two things were wrong with it and only one was visible: it
 showed `contact_note` — the client's own sentence, optional and often empty —
@@ -110,13 +102,13 @@ empty box still sends nothing, deliberately. Note the payload field is
 `message`: `EMAIL_FORBIDDEN_FIELDS` strips anything called `note`, so the one
 name that looked obvious is the one that silently drops it from email.
 
-On the shared-database entry above: the suite is **green against a separate
-database** — `psychobooking_test` exists on the same server, and
-`docker compose run --rm -e DATABASE_URL=…/psychobooking_test web pytest`
-passes all of it, with none of the seven failures the deployment database
-produces. That is not the fix (nothing points the suite there by default, and
-`docker compose exec web pytest` still uses the deployment's), but it says the
-failures really are shared state and nothing else.
+**The suite never runs against the deployment's database.** A guard refuses any
+`DATABASE_URL` whose database name does not end in `_test` (some end-to-end tests
+commit like production), so `docker compose exec web pytest` against the deployment
+exits at once. Run it against a `_test` database instead, migrated and seeded first:
+the `docker run` recipe under "Tests" in `README.md` does exactly that, and CI does
+the same (`alembic upgrade head`, `python -m app.seed`, `pytest -q` on
+`psychobooking_test`).
 
 Milestones run M0 → M13 (`IMPLEMENTATION.md` §19). Work them **in order**. Each
 one's acceptance criteria must pass before starting the next. Do not implement
@@ -229,10 +221,10 @@ docker compose exec web alembic revision --autogenerate -m "short description"
 docker compose exec web alembic upgrade head
 docker compose exec web alembic heads          # MUST print exactly one head
 
-# tests
-docker compose exec web pytest
-docker compose exec web pytest tests/core -q   # core only, fastest signal
-docker compose exec web pytest -k architecture # the import-boundary test
+# tests -- only against a database named *_test (README, "Tests"); the deployment's is refused
+docker compose run --rm -e DATABASE_URL=postgresql+asyncpg://USER:PASS@HOST:5432/psychobooking_test web \
+    sh -c 'alembic upgrade head && python -m app.seed && pytest -q'
+# same container, narrower: append e.g. `tests/core -q` or `-k architecture` (the import-boundary test)
 
 # lint / types
 docker compose exec web ruff check app
