@@ -5,9 +5,47 @@
 #   plain            web + worker + db          -- something else terminates TLS
 #   plain,cloudflared  above plus a Cloudflare Tunnel, no inbound ports
 
+# Shared by every service (NP3): a container's log is capped at three 10 MB files
+# instead of growing until the disk is full.
+x-logging: &logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
+# No capability and no privilege escalation, for the services that start without
+# either. The two that run as root to fix ownership (db, backup) add back only
+# what that takes.
+x-hardened: &hardened
+  cap_drop: [ALL]
+  security_opt: ["no-new-privileges:true"]
+
 services:
   db:
+    <<: *hardened
+    # What the entrypoint needs to chown and then drop to the postgres user.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER, SETGID, SETUID]
     image: postgres:16
+    # Time limits (NP3): a stuck client cannot hold a lock or a transaction open
+    # for ever, and a runaway query is cut off. pg_dump sets its own statement
+    # timeout, and alembic/env.py lifts all three for the migration connection.
+    # Bound parameters are kept out of the slow-query log: they are client data.
+    command:
+      - postgres
+      - -c
+      - idle_in_transaction_session_timeout=60s
+      - -c
+      - lock_timeout=10s
+      - -c
+      - statement_timeout=30s
+      - -c
+      - log_min_duration_statement=500
+      - -c
+      - log_parameter_max_length=0
+      - -c
+      - log_parameter_max_length_on_error=0
+    mem_limit: 512m
+    logging: *logging
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-psychobooking}
       POSTGRES_USER: ${POSTGRES_USER:-psycho}
@@ -30,8 +68,19 @@ services:
     restart: unless-stopped
 
   web:
+    <<: *hardened
     build: .
     env_file: .env
+    environment:
+      # Where the caller's address is read from (C2). `X-Forwarded-For` suits
+      # Caddy and any one proxy that appends; the cloudflared overlay sets
+      # `CF-Connecting-IP`. uvicorn itself trusts no forwarded header.
+      CLIENT_IP_HEADER: ${CLIENT_IP_HEADER:-X-Forwarded-For}
+    mem_limit: 512m
+    logging: *logging
+    # `exec` so uvicorn is PID 1 and gets SIGTERM: under `sh -c` the signal died
+    # in the shell and every stop waited out the grace period (F13).
+    stop_grace_period: 60s
     depends_on:
       db:
         condition: service_healthy
@@ -40,8 +89,7 @@ services:
     command: >
       sh -c "alembic upgrade head &&
              python -m app.seed &&
-             uvicorn app.main:app --host 0.0.0.0 --port 8000
-             --proxy-headers --forwarded-allow-ips='*'"
+             exec uvicorn app.main:app --host 0.0.0.0 --port 8000"
     expose:
       - "8000"
     # Read-only on purpose: the admin UI lists and downloads dumps, and there
@@ -61,8 +109,12 @@ services:
     restart: unless-stopped
 
   worker:
+    <<: *hardened
     build: .
     env_file: .env
+    mem_limit: 384m
+    logging: *logging
+    stop_grace_period: 60s
     depends_on:
       web:
         condition: service_healthy
@@ -80,13 +132,22 @@ services:
   # switched on is a backup most installs do not have. Same image as db, so
   # pg_dump can never be older than the server it dumps.
   backup:
+    <<: *hardened
+    # chown and chmod of a 0700 directory owned by another uid, as root.
+    cap_add: [CHOWN, DAC_OVERRIDE, FOWNER]
     image: postgres:16
-    env_file: .env
+    logging: *logging
     depends_on:
       db:
         condition: service_healthy
+    # Only what backup.sh reads (F14) -- not the whole .env, which holds the
+    # session key, the bot token and the admin password.
     environment:
       PGPASSWORD: ${POSTGRES_PASSWORD:?required}
+      POSTGRES_USER: ${POSTGRES_USER:-psycho}
+      POSTGRES_DB: ${POSTGRES_DB:-psychobooking}
+      BACKUP_HOUR_UTC: ${BACKUP_HOUR_UTC:-3}
+      BACKUP_RETENTION_DAYS: ${BACKUP_RETENTION_DAYS:-30}
     volumes:
       - ./backup.sh:/backup.sh:ro
       - ${BACKUP_DIR:-./backups}:/backups
@@ -96,6 +157,7 @@ services:
   caddy:
     image: caddy:2-alpine
     profiles: ["tls"]
+    logging: *logging
     environment:
       # Soft defaults on purpose: Compose interpolates every service before it
       # filters by profile, so a hard `:?` here would force a tunnel-only

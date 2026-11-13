@@ -29,6 +29,7 @@ from app.channels.web.security import (
     csrf_ok,
     csrf_token_for,
     current_client_id,
+    client_session_value,
     issue_client_session,
     issue_csrf,
 )
@@ -1223,10 +1224,16 @@ def build_router() -> APIRouter:
                 or (await get_practice(session)).timezone
             )
 
+            # A page that arrives by login token starts the session in the same
+            # response, so its forms carry a CSRF token bound to the session
+            # about to exist -- the cookie in this request is not it yet.
+            new_session = client_session_value(client.id) if arrived_by_token else None
+
             response = _render(
                 "request.html",
                 {
                     **context,
+                    "csrf_token": csrf_token_for(request, new_client_cookie=new_session),
                     "req": booking_request,
                     # The enum value is a database word, not a client-facing one
                     # (§15): the page used to read "pending" in every language.
@@ -1261,7 +1268,7 @@ def build_router() -> APIRouter:
                 # The token is spent (§6.2). A session is what makes the same
                 # link work when the client opens it again an hour later, and
                 # what lets the form on this page post back at all.
-                issue_client_session(response, client.id)
+                issue_client_session(response, client.id, new_session)
             return response
 
     @router.post("/r/{uuid}/enter", include_in_schema=False)
@@ -1296,8 +1303,9 @@ def build_router() -> APIRouter:
             except TokenInvalid:
                 return RedirectResponse("/auth/email", status_code=303)
             response = RedirectResponse(f"/r/{UUID(uuid)}?{WELCOME_PARAM}=1", status_code=303)
-            issue_client_session(response, owner.id)
-            issue_csrf(response, csrf_token_for(request))
+            started = client_session_value(owner.id)
+            issue_client_session(response, owner.id, started)
+            issue_csrf(response, csrf_token_for(request, new_client_cookie=started))
             return response
 
     @router.post("/r/{uuid}/{action}", include_in_schema=False)
@@ -1549,8 +1557,9 @@ def build_router() -> APIRouter:
             # §12.1: the arrival is what greets, so the marker rides on this
             # redirect and not in the session it also issues.
             response = RedirectResponse(f"{target}?{WELCOME_PARAM}=1", status_code=303)
-            issue_client_session(response, result.client_id)
-            issue_csrf(response, csrf_token_for(request))
+            started = client_session_value(result.client_id)
+            issue_client_session(response, result.client_id, started)
+            issue_csrf(response, csrf_token_for(request, new_client_cookie=started))
             return response
 
     return router

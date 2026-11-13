@@ -12,6 +12,51 @@
 
 set -eu
 
+# A number as written in .env may carry a leading zero (`08`), which shell
+# arithmetic and printf read as octal. Strip it first.
+plain_number() {
+  n=$(printf '%s' "$1" | sed 's/^0*//')
+  printf '%s' "${n:-0}"
+}
+
+# `--decide-startup DIR NOW_EPOCH` prints `dump` or `skip` and exits. The rule
+# for "does a restart need a dump", as a pure function of a directory listing and
+# a clock so it can be tested without Postgres: dump when the newest dump's NAME
+# is over 24 h old, or there is none. Never the mtime -- a folder copy or a
+# restore resets every mtime to that day, and a September dump then reads as
+# fresh (F9). A date-only name has no time; the schedule's hour stands in.
+decide_startup() {
+  dir=$1
+  now=$2
+  hour=${BACKUP_HOUR_UTC:-3}
+  hh=$(printf '%02d' "$(plain_number "$hour")")
+  # One sortable key per dump, `YYYY-MM-DD-HHMMSS`: a date-only name counts from
+  # the schedule's hour. Sorting the names themselves puts `...-13-100000.dump`
+  # before `...-13.dump` and loses a second dump of the same day.
+  stamp=$(find "$dir" -maxdepth 1 -type f -name 'psychobooking-*.dump' 2>/dev/null \
+    | sed -n \
+      -e "s|^.*/psychobooking-\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)\.dump\$|\1-${hh}0000|p" \
+      -e "s|^.*/psychobooking-\([0-9]\{4\}-[0-9]\{2\}-[0-9]\{2\}\)-\([0-9]\{6\}\)\.dump\$|\1-\2|p" \
+    | sort | tail -n 1)
+  if [ -z "$stamp" ]; then
+    echo dump
+    return 0
+  fi
+  day=$(printf '%s' "$stamp" | cut -c1-10)
+  time=$(printf '%s' "$stamp" | cut -c12-17 | sed 's/\(..\)\(..\)\(..\)/\1:\2:\3/')
+  taken=$(date -u -d "$day $time" +%s 2>/dev/null) || { echo dump; return 0; }
+  if [ $(( now - taken )) -gt 86400 ]; then
+    echo dump
+  else
+    echo skip
+  fi
+}
+
+if [ "${1:-}" = "--decide-startup" ]; then
+  decide_startup "${2:?directory}" "${3:?now epoch}"
+  exit 0
+fi
+
 DIR=${BACKUP_TARGET:-/backups}
 HOUR=${BACKUP_HOUR_UTC:-3}
 RETENTION=${BACKUP_RETENTION_DAYS:-30}
@@ -36,6 +81,7 @@ case "$HOUR" in
   ''|*[!0-9]*) log "FATAL: BACKUP_HOUR_UTC must be 0-23, not '$HOUR'"; exit 1 ;;
 esac
 [ "$HOUR" -le 23 ] || { log "FATAL: BACKUP_HOUR_UTC must be 0-23, not '$HOUR'"; exit 1; }
+HOUR=$(plain_number "$HOUR")
 
 mkdir -p "$DIR"
 chown "$APP_UID:$APP_GID" "$DIR" 2>/dev/null || log "WARNING: could not chown $DIR"
@@ -106,9 +152,11 @@ seconds_until_hour() {
 log "started; dumping daily at ${HOUR}:00 UTC into $DIR, keeping $RETENTION days"
 
 # A fresh install would otherwise show an empty backups page for up to a day,
-# which reads as "backups are not working" rather than "not yet".
-if [ -z "$(find "$DIR" -maxdepth 1 -type f -name 'psychobooking-*.dump' 2>/dev/null)" ]; then
-  log "no dump exists yet; taking one now"
+# which reads as "backups are not working" rather than "not yet". The same goes
+# for a restart after an outage or a copied folder: the newest dump's name, not
+# its mtime, says whether one is due now (F9).
+if [ "$(decide_startup "$DIR" "$(date -u +%s)")" = "dump" ]; then
+  log "no dump from the last 24 h (by name); taking one now"
   dump || exit 1
 fi
 

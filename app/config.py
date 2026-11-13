@@ -20,6 +20,9 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 TelegramMode = Literal["webhook", "polling"]
 LanguageCode = Literal["ru", "hy", "en"]
 
+#: Telegram allows 256; 16 keeps a guessed secret out of reach.
+MIN_WEBHOOK_SECRET = 16
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -37,7 +40,9 @@ class Settings(BaseSettings):
     # --- Telegram ---------------------------------------------------------
     telegram_bot_token: str
     telegram_bot_username: str
-    telegram_webhook_secret: str
+    #: Required in webhook mode, at least 16 characters (F16). Empty is allowed
+    #: only for polling, which has no webhook to protect.
+    telegram_webhook_secret: str = ""
     telegram_webhook_path: str = ""
     telegram_mode: TelegramMode = "webhook"
     telegram_admin_ids: str = ""
@@ -61,6 +66,11 @@ class Settings(BaseSettings):
     worker_poll_seconds: int = 20
     log_level: str = "INFO"
     trust_proxy_headers: bool = True
+
+    #: The request header that carries the caller's address (C2): `CF-Connecting-IP`
+    #: on the cloudflared profile, `X-Forwarded-For` behind one appending proxy,
+    #: empty for none. Compose sets it per profile; see ratelimit.client_ip.
+    client_ip_header: str = ""
 
     #: Container-side path of the directory the `backup` sidecar writes to
     #: (§16.6). `web` mounts it read-only and only ever lists and streams it.
@@ -119,6 +129,17 @@ class Settings(BaseSettings):
             )
         elif not self.telegram_webhook_path.startswith("/"):
             object.__setattr__(self, "telegram_webhook_path", f"/{self.telegram_webhook_path}")
+        return self
+
+    @model_validator(mode="after")
+    def _webhook_secret_is_long_enough(self) -> Settings:
+        secret = self.telegram_webhook_secret
+        if self.telegram_mode == "webhook" and not secret:
+            raise ValueError("TELEGRAM_WEBHOOK_SECRET is required when TELEGRAM_MODE=webhook")
+        if secret and len(secret) < MIN_WEBHOOK_SECRET:
+            raise ValueError(
+                f"TELEGRAM_WEBHOOK_SECRET must be at least {MIN_WEBHOOK_SECRET} characters"
+            )
         return self
 
     @model_validator(mode="after")

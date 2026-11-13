@@ -63,6 +63,17 @@ async def run_migrations_online() -> None:
         config.get_section(config.config_ini_section, {}),
         prefix="sqlalchemy.",
         poolclass=pool.NullPool,
+        # The database runs with short statement, lock and idle-in-transaction
+        # timeouts for the application (docker-compose.yml). A migration may
+        # legitimately wait for a lock or run for minutes, and must not be
+        # killed half-way into a crash loop of the web container.
+        connect_args={
+            "server_settings": {
+                "statement_timeout": "0",
+                "lock_timeout": "0",
+                "idle_in_transaction_session_timeout": "0",
+            }
+        },
     )
     async with connectable.connect() as connection:
         await connection.run_sync(_do_run_migrations)

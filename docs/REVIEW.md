@@ -1,5 +1,28 @@
 # Project review — 2026-10-03
 
+## Status 2026-11
+
+What the NewPBot hardening slices closed. §7 deviations are the owner's call and
+stay open; so do the items not listed here.
+
+| Finding | Closed in |
+|---|---|
+| Double-booking: guarded slot release, refused submit rolled back, proposal for the held time, request lock, token consumed once (review 2026-11 findings 1, 2, 6, 17) | NP1 |
+| Unverified email held a slot 48 h; per-IP booking limit; captcha on (review 2026-11 finding 3) | NP2 |
+| Line break in an address broke the outbox batch; alert-about-alert loop; outbox dead after 62 minutes, stuck `sending`, SMTP timeout, Retry button; Telegram "unauthorized" transient (findings 4, 5, 7, 8; C1) | NP2 |
+| Login links spent by a GET (finding 11); C4, C5 and the C15 bullets on empty translations, escaping, splitting, the Bot per pass, waitlist purge | NP2 |
+| Backup freshness read mtimes; 36 h warning silent; no dump at start after an outage (finding 9) | NP3 |
+| Argon2 on the event loop; no global login cap; `X-Forwarded-For` trusted from anyone (finding 10, C2) | NP3 |
+| CSRF token unbound and unexpiring; empty webhook secret accepted; `/readyz` leaked the exception class (findings 15, 16, 18) | NP3 |
+| Config upload buffered before the cap (C3); no security headers and `build-essential` in the image (C15) | NP3 |
+| `sh -c` as PID 1; backup container held all of `.env`; cloudflared `:latest`; no limits, log rotation, Postgres timeouts; retention jobs every 20 s (findings 13, 14; review § Tuning) | NP3 |
+
+Not done: the owner's calls in §7, a heartbeat for a dead worker (finding 18's
+first bullet), encrypted off-box backups, a restore check deeper than the table
+of contents, and the remaining C15 duplicated-rule bullets.
+
+---
+
 Reviewed at commit `0fabdd8` (master, clean tree). The deployment on this
 machine was running during the review and was read, not changed.
 

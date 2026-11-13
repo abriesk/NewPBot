@@ -9,6 +9,7 @@ Every instant here is timezone-aware UTC. `datetime.utcnow()` must never appear
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from enum import StrEnum
@@ -165,3 +166,30 @@ def is_within_cancellation_window(
     policy call rather than a schema change.
     """
     return scheduled_start - (at or now_utc()) >= timedelta(hours=practice.cancel_window_hours)
+
+
+#: What `backup.sh` writes: a date, and a time only when a second run lands on
+#: the same day. The only untrusted input is a file name, matched, never trusted.
+DUMP_NAME = re.compile(r"^psychobooking-(\d{4})-(\d{2})-(\d{2})(?:-(\d{2})(\d{2})(\d{2}))?\.dump$")
+
+
+def dump_taken_at(name: str, schedule_hour_utc: int = 3) -> datetime | None:
+    """When a dump was taken, read from its *name* -- never its mtime.
+
+    A folder copy or a restore resets every mtime to the day it happened, which
+    made a September dump look fresh (F9). A date-only name carries no time, so
+    the nightly schedule's hour stands in for it; a `-HHMMSS` name is exact.
+    None for a name that is not one of ours or is not a real date.
+    """
+    match = DUMP_NAME.match(name)
+    if match is None:
+        return None
+    year, month, day = (int(match.group(i)) for i in (1, 2, 3))
+    if match.group(4) is None:
+        hour, minute, second = schedule_hour_utc, 0, 0
+    else:
+        hour, minute, second = (int(match.group(i)) for i in (4, 5, 6))
+    try:
+        return datetime(year, month, day, hour, minute, second, tzinfo=UTC)
+    except ValueError:
+        return None

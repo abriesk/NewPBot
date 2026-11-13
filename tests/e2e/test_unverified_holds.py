@@ -440,7 +440,10 @@ async def test_following_a_carried_booking_twice_files_it_once(
     first = web.post("/auth/callback", data=data, follow_redirects=False)
     second = web.post("/auth/callback", data=data, follow_redirects=False)
     assert first.status_code == 303
-    assert second.status_code == 400
+    # The replay is refused: 400 (token spent) or 403 (the first answer started
+    # the session, and the CSRF token the form carried is bound to the anonymous
+    # one). Either way it files nothing, which is what the count below proves.
+    assert second.status_code in (400, 403)
     await committed.rollback()
     count = len(
         (

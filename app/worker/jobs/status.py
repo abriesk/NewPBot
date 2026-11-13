@@ -27,7 +27,7 @@ from typing import Any
 
 from app.config import get_settings
 from app.core.enums import CheckState
-from app.core.policies import now_utc
+from app.core.policies import dump_taken_at, now_utc
 from app.core.services.notifications import alert_admin_health
 from app.core.services.status import Check, ok, run_checks
 from app.db import unit_of_work
@@ -131,20 +131,22 @@ def _filesystem_checks() -> list[Check]:
 
 
 def _dumps(directory: Path) -> list[tuple[str, datetime]]:
-    """Newest first. Unreadable is empty, and the checks below say so."""
+    """Newest first, by the date in the name. Unreadable is empty, and the checks
+    below say so."""
     try:
         entries = sorted(directory.glob(DUMP_GLOB), key=lambda p: p.name, reverse=True)
     except OSError:
         return []
 
+    # The date comes from the name, not the mtime: a folder copy resets every
+    # mtime to the day of the copy (F9).
+    hour = get_settings().backup_hour_utc
     found: list[tuple[str, datetime]] = []
     for entry in entries:
-        try:
-            found.append(
-                (entry.name, datetime.fromtimestamp(entry.stat().st_mtime, tz=now_utc().tzinfo))
-            )
-        except OSError:
-            continue
+        taken = dump_taken_at(entry.name, hour)
+        if taken is not None:
+            found.append((entry.name, taken))
+    found.sort(key=lambda item: item[1], reverse=True)
     return found
 
 
@@ -245,27 +247,42 @@ def _disk_space(directory: Path) -> Check:
 # --- Notification -----------------------------------------------------------
 
 
+def _alerting(state: CheckState, checks: list[Check]) -> bool:
+    """Whether the therapist is to be told: a failure, or a backup that has gone
+    over its 36 h warning. That warning is as urgent as the 7-day failure -- by
+    the time the failure is reached, six days of clients are unprotected (F9)."""
+    return state is CheckState.fail or any(
+        check.id == "backup_fresh" and check.state is CheckState.warn for check in checks
+    )
+
+
 async def _maybe_notify(
     state: CheckState, checks: list[Check], previous: dict[str, Any]
 ) -> tuple[str | None, str | None]:
     """§16.10: on the way into `fail`, and on the way back out.
 
     Returns what to record in the file, so the next pass can tell a transition
-    from a continuation without a table.
+    from a continuation without a table. A stale-backup warning notifies the
+    same way a failure does and is recorded as `fail` in `notified_state`.
     """
     was = previous.get("state")
     notified_state = previous.get("notified_state")
     notified_at = _parse(previous.get("notified_at"))
 
-    if state is CheckState.fail:
-        entering = was != CheckState.fail.value
+    if _alerting(state, checks):
+        entering = was == CheckState.ok.value or notified_state != CheckState.fail.value
         stale = notified_at is None or now_utc() - notified_at >= NOTIFY_FLOOR
         if not entering and not stale:
             return notified_state, _iso(notified_at)
 
         # §16.10: check ids, never a `detail` string -- those are written for
         # a different reader, under looser rules than §13.4 allows for email.
-        failing = ", ".join(check.id for check in checks if check.state is CheckState.fail)
+        failing = ", ".join(
+            check.id
+            for check in checks
+            if check.state is CheckState.fail
+            or (check.id == "backup_fresh" and check.state is CheckState.warn)
+        )
         if await _send(
             "system.health.degraded.admin",
             {
@@ -274,7 +291,7 @@ async def _maybe_notify(
                 "url": f"{get_settings().base_url}/admin/status",
             },
         ):
-            return state.value, _iso(now_utc())
+            return CheckState.fail.value, _iso(now_utc())
         return notified_state, _iso(notified_at)
 
     if notified_state == CheckState.fail.value and state is CheckState.ok:

@@ -30,14 +30,3 @@ pydantic==2.13.4
 pydantic-settings==2.15.0
 argon2-cffi==25.1.0
 pyyaml==6.0.3
-
-# --- Tooling. Shipped in the image because the documented commands run inside
-# --- the web container (`docker compose exec web pytest`).
-pytest==9.1.1
-pytest-asyncio==1.4.0
-time-machine==3.4.0
-httpx==0.28.1
-ruff==0.16.4
-mypy==2.3.1
-# Type stubs only -- no runtime code, required for `mypy app` to check seed.py.
-types-PyYAML==6.0.12.20250915

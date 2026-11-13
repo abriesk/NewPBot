@@ -316,6 +316,11 @@ def build_router() -> APIRouter:
         if not ratelimit.check(ratelimit.ADMIN_LOGIN, ratelimit.client_ip(request)):
             logger.warning("admin login rate limit reached")
             return Response(status_code=429)
+        # And for all addresses together: each attempt costs an Argon2 verify,
+        # and an address is free to vary (F10).
+        if not ratelimit.check(ratelimit.ADMIN_LOGIN_GLOBAL, "all"):
+            logger.warning("admin login global cap reached")
+            return Response(status_code=429)
 
         async with unit_of_work() as session:
             admin = await authenticate_admin(session, username, password)
@@ -335,8 +340,8 @@ def build_router() -> APIRouter:
                 )
 
             response = _back("/admin/requests")
-            await start_admin_session(session, response, admin)
-            issue_csrf(response, csrf_token_for(request))
+            raw_session = await start_admin_session(session, response, admin)
+            issue_csrf(response, csrf_token_for(request, new_admin_cookie=raw_session))
             return response
 
     @router.post("/logout", include_in_schema=False)

@@ -11,8 +11,19 @@
 # Isolating the service in an overlay scopes the guard to the runs that actually
 # use it, and mirrors the precedent the spec already sets for `plain`.
 services:
+  # Behind the tunnel the caller's address is the one Cloudflare wrote, which a
+  # caller cannot forge; X-Forwarded-For here would be theirs (C2).
+  web:
+    environment:
+      CLIENT_IP_HEADER: CF-Connecting-IP
+
   cloudflared:
-    image: cloudflare/cloudflared:latest
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+    image: cloudflare/cloudflared:2026.11.0
     profiles: ["cloudflared"]
     command: tunnel --no-autoupdate run --token ${TUNNEL_TOKEN:?required}
     depends_on:

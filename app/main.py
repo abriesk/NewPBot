@@ -22,7 +22,13 @@ from sqlalchemy import text
 from app.channels.telegram.webhook import build_router as telegram_router
 from app.channels.telegram.webhook import register_webhook
 from app.channels.web.admin import build_router as admin_router
+from app.channels.web.admin import MAX_CONFIG_UPLOAD
 from app.channels.web.client import build_router as web_router
+from app.channels.web.middleware import (
+    SECURITY_HEADERS,
+    BodyLimitMiddleware,
+    SecurityHeadersMiddleware,
+)
 from app.config import get_settings
 from app.core.enums import ErrorSource
 from app.core.services.status import record_error, where
@@ -32,16 +38,21 @@ logger = logging.getLogger(__name__)
 
 
 class StripQueryFromAccessLog(logging.Filter):
-    """Drop `?...` from uvicorn's access line.
+    """Drop `?...` from uvicorn's access line, and the Compose healthcheck's
+    `/healthz` line altogether.
 
     Login and request links carry their token in the query string, and a token in
-    a log file outlives its 30 minutes in whoever can read the logs.
+    a log file outlives its 30 minutes in whoever can read the logs. The
+    healthcheck fires every 10 s and would otherwise be most of the log.
     """
 
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
         if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str):
-            record.args = (*args[:2], args[2].split("?", 1)[0], *args[3:])
+            path = args[2].split("?", 1)[0]
+            if path == "/healthz":
+                return False
+            record.args = (*args[:2], path, *args[3:])
         return True
 
 
@@ -83,6 +94,14 @@ def create_app() -> FastAPI:
         openapi_url=None,
     )
 
+    # Innermost first: the body cap sits closest to the app, the headers wrap it
+    # so that a 413 carries them too.
+    app.add_middleware(
+        BodyLimitMiddleware,
+        limits={"/admin/maintenance/config/import": MAX_CONFIG_UPLOAD + 64 * 1024},
+    )
+    app.add_middleware(SecurityHeadersMiddleware)
+
     @app.exception_handler(Exception)
     async def record_unhandled(request: Request, exc: Exception) -> Response:
         """§6.9: the one failure that otherwise leaves no trace at all.
@@ -108,7 +127,13 @@ def create_app() -> FastAPI:
         except Exception:
             logger.warning("could not record the unhandled error")
 
-        return PlainTextResponse("Internal Server Error", status_code=500)
+        # Built outside the middleware stack by Starlette's error layer, so it
+        # carries the security headers itself.
+        return PlainTextResponse(
+            "Internal Server Error",
+            status_code=500,
+            headers={name.decode(): value.decode() for name, value in SECURITY_HEADERS},
+        )
 
     # One ASGI ingress: the client UI, the Telegram webhook, and (from M7) the
     # admin UI are all routes on this one app (DESIGN.md §3.3).
@@ -133,11 +158,10 @@ def create_app() -> FastAPI:
             async with get_session_factory()() as session:
                 await session.execute(text("SELECT 1"))
         except Exception as exc:  # reported, not raised: a probe must not 500
+            # The class goes to the log only: this answer is public, and an
+            # exception name tells a stranger what is behind the door (F18).
             logger.warning("readiness probe failed: %s", type(exc).__name__)
-            return JSONResponse(
-                status_code=503,
-                content={"status": "unavailable", "detail": type(exc).__name__},
-            )
+            return JSONResponse(status_code=503, content={"status": "fail"})
         return JSONResponse(status_code=200, content={"status": "ok"})
 
     # Admin before the client router: "/admin/..." must not be swallowed by the

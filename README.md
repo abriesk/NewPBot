@@ -44,7 +44,7 @@ without them:
 | `BASE_URL` | Your public origin, no trailing slash. |
 | `TELEGRAM_BOT_TOKEN` | From [@BotFather](https://t.me/BotFather). |
 | `TELEGRAM_BOT_USERNAME` | The bot's `@name`, without the `@`. |
-| `TELEGRAM_WEBHOOK_SECRET` | Another `openssl rand -hex 32`. |
+| `TELEGRAM_WEBHOOK_SECRET` | Another `openssl rand -hex 32`. **At least 16 characters, and required in webhook mode** (the default): the app refuses to start without it. |
 | `TELEGRAM_ADMIN_IDS` | Your own Telegram user id. Without it the bot has no admin. |
 | `ADMIN_USERNAME`, `ADMIN_PASSWORD` | The web admin login. Hashed at first start; the plaintext is never stored. |
 
@@ -56,7 +56,13 @@ Leave `SMTP_HOST` empty to run without email: no email identities are created,
 no email is queued, and clients sign in through Telegram. Set it (with
 `SMTP_FROM`) to turn the channel on.
 
-`.env` is git-ignored and must stay that way. Only `.env.example` is committed.
+`CLIENT_IP_HEADER` (optional) names the header the per-IP rate limits read the
+caller's address from. Compose sets it: `CF-Connecting-IP` on the `cloudflared`
+profile (Cloudflare writes it, the caller cannot), `X-Forwarded-For` otherwise
+(the *last* entry, which the one proxy in front wrote). uvicorn trusts no
+forwarded header itself. Set it to empty only if nothing sits in front.
+
+`.env` is git-ignored and must stay that way. Keep it `chmod 600`. Only `.env.example` is committed.
 
 ### 2. Start
 
@@ -102,6 +108,58 @@ docker compose logs -f web worker
 ```
 
 ---
+
+## What changed for an operator (NP1-NP3)
+
+- **A web booking from an unverified address holds its slot briefly.** The hold
+  is `unverified_hold_minutes` in `/admin/settings` (default **15**, 1-120). The
+  therapist is told, and the slot takes the normal hold, only when the client
+  follows the login link. With SMTP off the booking files normally; a client
+  with no login link left is refused rather than held.
+- **The captcha is on by default** for a new practice (`captcha_on`, same page);
+  a practice that already existed keeps the value it had. Turn it on if it is off.
+- **Per-IP limit on booking** (`book_per_ip_per_hour`, default 10), and a
+  **global cap on admin sign-ins**: 30 attempts in 15 minutes across all
+  addresses, besides the 5 per address. While an attack from many addresses lasts
+  it can keep the therapist from signing in; it clears 15 minutes after the
+  attempts stop, and sessions already signed in are unaffected. Every Argon2 run
+  (password checks, and the one-off dummy hash for unknown users) is in a thread,
+  two at a time (each uses 64 MB), and the rest wait.
+- **Delivery: a Retry button** on `/admin/delivery` for a dead message. Messages
+  are retried over about 24 hours before they die, and a message stuck in
+  `sending` is reclaimed after 15 minutes.
+- **Login and request links confirm on GET and spend on POST**, so a mail
+  scanner cannot use them up. The access log drops query strings and the
+  `/healthz` line.
+- **Backups:** freshness by file name; the 36 hour warning messages the
+  therapist; a restart dumps if the newest dump is over 24 hours old (see
+  [Backup](#backup)).
+- **`TELEGRAM_WEBHOOK_SECRET` must be at least 16 characters** and is required in
+  webhook mode. **Check its length before upgrading**: a shorter one stops the
+  app from starting.
+- **CSRF tokens are bound to the session and expire after 12 hours**; the cookie
+  is `__Host-pb_csrf`. A form left open overnight is refused once; reload it.
+- **Every response carries** `X-Content-Type-Options`, `X-Frame-Options`,
+  `frame-ancestors 'none'` and `Referrer-Policy: no-referrer`. `/readyz` answers
+  `{"status":"ok"}` or `{"status":"fail"}` and nothing more. The configuration
+  upload is cut off at 5 MB while it streams (413).
+- **Memory limits:** web 512 MB, worker 384 MB, database 512 MB. A container over
+  its limit is killed and restarted, so the numbers are generous against the
+  measured 181 / 179 / 27 MB.
+- **Postgres timeouts:** a transaction idle for 60 s is ended, a lock wait over
+  10 s fails, a statement over 30 s is cancelled, and a statement over 500 ms is
+  logged (without its parameters, which are client data). `pg_dump` sets its own
+  statement timeout and the migrations run without these three timeouts. The pool recycles
+  connections after 30 minutes.
+- **Containers** drop all capabilities (the database and backup add back only
+  what they need to fix ownership), cannot gain privileges, log to three 10 MB
+  files each, and `web` and `worker` get 60 s to stop (`web` now receives
+  SIGTERM). `cloudflared` is pinned to `2026.11.0`. The backup container no longer
+  receives `.env`, only the five variables it reads. `caddy` and `cloudflared`
+  are not capability-dropped.
+- **The retention jobs** (content purge, token, revision and error-event
+  pruning) run hourly, not every 20 s.
+- **The image is the runtime only** (see [Development](#development) for tests).
 
 ## Operations
 
@@ -165,6 +223,15 @@ container cannot know where "off-host" is.
 docker compose logs backup          # when the last one ran, and whether it worked
 ls -la backups/                     # what is on disk
 ```
+
+**Freshness is read from the file's name, not its time stamp.** A dump is
+`psychobooking-YYYY-MM-DD.dump` (a date-only name counts from `BACKUP_HOUR_UTC`)
+or `...-HHMMSS.dump`. Copying the folder or restoring files resets every
+modification time, which used to make a months-old dump look fresh. The health
+check warns at 36 hours and fails at 7 days by that date, and **the 36 hour
+warning now messages the therapist, as the failure does**. When the backup
+container starts and the newest dump's name is over 24 hours old (or there is
+none), it takes a dump at once instead of waiting for the next night.
 
 They are also listed at `/admin/maintenance` with a download link, for a
 therapist with no shell access on the server.
@@ -280,22 +347,43 @@ that survives the server going away, and it takes about two minutes to set up.
 
 ## Development
 
+The deployed image holds the application and its runtime requirements only: no
+compiler, no pytest, mypy or ruff, no `tests/`. The tools live in
+`requirements-dev.txt` and in the Dockerfile's `test` stage, which CI builds too.
+
 ```bash
-docker compose exec web pytest
-docker compose exec web pytest tests/core -q
-docker compose exec web pytest -k architecture
-docker compose exec web ruff check app tests
-docker compose exec web ruff format --check app tests
-docker compose exec web mypy app
+docker build --target test -t newpbot-test .      # runtime image + dev tools + tests/
+```
+
+Tests need a PostgreSQL **whose name ends in `_test`** — the suite refuses any
+other database, because some end-to-end tests commit like production:
+
+```bash
+docker network create np-test
+docker run -d --name np-pg --network np-test -e POSTGRES_DB=psychobooking_test \
+    -e POSTGRES_USER=psycho -e POSTGRES_PASSWORD=psycho postgres:16
+docker run --rm --network np-test -v "$PWD/docs:/app/docs:ro" \
+    -e DATABASE_URL=postgresql+asyncpg://psycho:psycho@np-pg:5432/psychobooking_test \
+    -e SECRET_KEY=ci-secret-key-that-is-at-least-32-bytes-long -e BASE_URL=https://ci.example.test \
+    -e TELEGRAM_BOT_TOKEN=0000000000:ci-token -e TELEGRAM_BOT_USERNAME=ci_bot \
+    -e TELEGRAM_WEBHOOK_SECRET=ci-webhook-secret -e TELEGRAM_ADMIN_IDS=1 \
+    -e ADMIN_USERNAME=admin -e ADMIN_PASSWORD=ci-admin-password \
+    newpbot-test sh -c 'alembic upgrade head && python -m app.seed && pytest -q'
+```
+
+For an edit-and-run loop use the dev overlay, which builds the `test` stage and
+mounts the working tree over the copies in the image:
+
+```bash
+docker compose -f docker-compose.yml -f docker-compose.dev.yml build web
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec web pytest tests/core -q
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec web ruff check app tests
+docker compose -f docker-compose.yml -f docker-compose.dev.yml exec web mypy app
 ```
 
 Tests run against real PostgreSQL. **Never** substitute SQLite — the schema
 depends on native enums, arrays, partial indexes, `NULLS NOT DISTINCT`, and
-`FOR UPDATE SKIP LOCKED`.
-
-Some end-to-end tests commit like production rather than rolling back, and clean
-up after themselves. They are safe to run repeatedly against a development
-database, but do not point them at a live one.
+`FOR UPDATE SKIP LOCKED`. Do not point the end-to-end tests at a live database.
 
 ### Migrations
 

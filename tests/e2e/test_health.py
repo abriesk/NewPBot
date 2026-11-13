@@ -30,4 +30,4 @@ def test_readyz_reports_503_when_the_database_is_unreachable() -> None:
     with TestClient(create_app()) as client:
         response = client.get("/readyz")
     assert response.status_code in (200, 503)
-    assert response.json()["status"] in ("ok", "unavailable")
+    assert response.json()["status"] in ("ok", "fail")

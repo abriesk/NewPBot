@@ -160,13 +160,15 @@ async def test_an_unreachable_database_is_reported_not_raised(
 
 
 def _dump(tmp: Path, name: str, age: timedelta) -> Path:
-    import os
-
+    """A dump whose *name* says it is `age` old. The mtime is left at now: the
+    freshness rule reads the name, because a folder copy resets every mtime."""
     path = tmp / name
     path.write_bytes(b"PGDMP")
-    when = (now_utc() - age).timestamp()
-    os.utime(path, (when, when))
     return path
+
+
+def _named(age: timedelta) -> str:
+    return f"psychobooking-{now_utc() - age:%Y-%m-%d-%H%M%S}.dump"
 
 
 async def test_backup_freshness_is_amber_then_red(state_dir: Path, tmp_path: Path) -> None:
@@ -174,14 +176,49 @@ async def test_backup_freshness_is_amber_then_red(state_dir: Path, tmp_path: Pat
 
     assert job._backup_fresh(job._dumps(backups)).state is CheckState.fail  # none at all
 
-    _dump(backups, "psychobooking-2026-08-26.dump", timedelta(hours=1))
+    _dump(backups, _named(timedelta(hours=1)), timedelta(hours=1))
     assert job._backup_fresh(job._dumps(backups)).state is CheckState.ok
 
-    _dump(backups, "psychobooking-2026-08-26.dump", job.DUMP_WARN_AGE + timedelta(hours=1))
+    for stale in backups.iterdir():
+        stale.unlink()
+    _dump(backups, _named(job.DUMP_WARN_AGE + timedelta(hours=1)), timedelta(0))
     assert job._backup_fresh(job._dumps(backups)).state is CheckState.warn
 
-    _dump(backups, "psychobooking-2026-08-26.dump", job.DUMP_FAIL_AGE + timedelta(hours=1))
+    for stale in backups.iterdir():
+        stale.unlink()
+    _dump(backups, _named(job.DUMP_FAIL_AGE + timedelta(hours=1)), timedelta(0))
     assert job._backup_fresh(job._dumps(backups)).state is CheckState.fail
+
+
+async def test_freshness_reads_the_name_not_the_mtime(state_dir: Path, tmp_path: Path) -> None:
+    """F9: after a folder copy every file carries today's mtime. The newest dump
+    here is from September by its name, and must read as stale."""
+    backups = tmp_path / "backups"
+    old = now_utc() - timedelta(days=40)
+    for day in range(3):
+        name = f"psychobooking-{old - timedelta(days=day):%Y-%m-%d}.dump"
+        _dump(backups, name, timedelta(0))  # mtime = today
+
+    check = job._backup_fresh(job._dumps(backups))
+
+    assert check.state is CheckState.fail, check
+
+
+async def test_a_date_only_name_counts_from_the_backup_hour(
+    state_dir: Path, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A date-only name carries no time; the schedule's hour stands in, so a
+    nightly dump does not read as a day older than it is."""
+    monkeypatch.setenv("BACKUP_HOUR_UTC", "3")
+    from app.config import get_settings
+
+    get_settings.cache_clear()
+    backups = tmp_path / "backups"
+    _dump(backups, f"psychobooking-{now_utc():%Y-%m-%d}.dump", timedelta(0))
+
+    check = job._backup_fresh(job._dumps(backups))
+
+    assert check.state is CheckState.ok, check
 
 
 async def test_verification_failure_is_red(state_dir: Path, tmp_path: Path) -> None:
@@ -303,3 +340,67 @@ async def test_the_alert_payload_carries_ids_and_no_detail(
     assert payload["checks"] == "outbox_dead, disk_space"
     assert "lena@x.test" not in json.dumps(payload)
     assert "535" not in json.dumps(payload)
+
+
+# --- F9: the 36 h warning notifies like the 7-day failure ---------------------
+
+
+async def test_a_stale_backup_warning_notifies(
+    state_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent: list[tuple[str, dict]] = []
+
+    async def fake_send(intent_key: str, payload: dict) -> bool:
+        sent.append((intent_key, payload))
+        return True
+
+    monkeypatch.setattr(job, "_send", fake_send)
+    warn = [Check("backup_fresh", CheckState.warn, "Backups may have stopped.", "age 40h")]
+
+    state, at = await job._maybe_notify(CheckState.warn, warn, {})
+
+    assert [key for key, _ in sent] == ["system.health.degraded.admin"]
+    assert sent[0][1]["checks"] == "backup_fresh"
+    assert state == "fail" and at is not None
+
+    # Same warning on the next pass, inside the floor: silence.
+    previous = {"state": "warn", "notified_state": state, "notified_at": at}
+    await job._maybe_notify(CheckState.warn, warn, previous)
+    assert len(sent) == 1
+
+
+async def test_another_warning_stays_silent(
+    state_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent: list[str] = []
+
+    async def fake_send(intent_key: str, payload: dict) -> bool:
+        sent.append(intent_key)
+        return True
+
+    monkeypatch.setattr(job, "_send", fake_send)
+    warn = [Check("disk_space", CheckState.warn, "Low disk.", "12% free")]
+
+    await job._maybe_notify(CheckState.warn, warn, {})
+
+    assert sent == []
+
+
+async def test_recovery_after_a_backup_warning_notifies(
+    state_dir: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sent: list[str] = []
+
+    async def fake_send(intent_key: str, payload: dict) -> bool:
+        sent.append(intent_key)
+        return True
+
+    monkeypatch.setattr(job, "_send", fake_send)
+
+    await job._maybe_notify(
+        CheckState.ok,
+        [],
+        {"state": "warn", "notified_state": "fail", "notified_at": now_utc().isoformat()},
+    )
+
+    assert sent == ["system.health.recovered.admin"]

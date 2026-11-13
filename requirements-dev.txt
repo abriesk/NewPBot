@@ -1,0 +1,14 @@
+# Test and lint tooling. NOT in the runtime image (NP3): the Dockerfile's `test`
+# stage installs this on top of requirements.txt, and CI does the same.
+#
+#   docker build --target test -t newpbot-test .
+-r requirements.txt
+
+pytest==9.1.1
+pytest-asyncio==1.4.0
+time-machine==3.4.0
+httpx==0.28.1
+ruff==0.16.4
+mypy==2.3.1
+# Type stubs only -- no runtime code, required for `mypy app` to check seed.py.
+types-PyYAML==6.0.12.20250915

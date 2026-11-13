@@ -157,7 +157,7 @@ def test_spent_windows_do_not_accumulate_for_ever() -> None:
     ratelimit.reset()
     stale = time.monotonic() - ratelimit._MAX_WINDOW - 1
     for i in range(ratelimit._SWEEP_AT):
-        ratelimit._hits[("admin_login", f"10.0.0.{i}")] = deque([stale])
+        ratelimit._hits[("admin_login", f"198.51.100.{i}")] = deque([stale])
 
     assert len(ratelimit._hits) == ratelimit._SWEEP_AT
 

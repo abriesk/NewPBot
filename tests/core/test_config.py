@@ -118,3 +118,18 @@ def test_the_suite_accepts_a_database_named_for_testing() -> None:
     refuse_a_database_that_is_not_a_test_one(
         "postgresql+asyncpg://psycho:pw@db:5432/psychobooking_test"
     )
+
+
+def test_webhook_mode_refuses_to_start_without_a_secret() -> None:
+    with pytest.raises(ValidationError):
+        _settings(telegram_mode="webhook", telegram_webhook_secret="")
+
+
+def test_a_webhook_secret_under_16_characters_is_refused() -> None:
+    with pytest.raises(ValidationError):
+        _settings(telegram_webhook_secret="x" * 15)
+    assert _settings(telegram_webhook_secret="x" * 16).telegram_webhook_secret == "x" * 16
+
+
+def test_polling_mode_needs_no_webhook_secret() -> None:
+    assert _settings(telegram_mode="polling", telegram_webhook_secret="").telegram_mode == "polling"

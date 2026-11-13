@@ -30,6 +30,9 @@ def get_engine() -> AsyncEngine:
         _engine = create_async_engine(
             settings.database_url,
             pool_pre_ping=True,
+            # Below the idle timeouts of anything between us and Postgres, so a
+            # connection is replaced rather than found dead.
+            pool_recycle=1800,
             future=True,
         )
     return _engine

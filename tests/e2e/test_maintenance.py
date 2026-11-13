@@ -223,14 +223,13 @@ def test_a_file_that_is_not_ours_is_refused(web: TestClient) -> None:
 
 
 def test_an_oversized_upload_is_refused_before_parsing(web: TestClient) -> None:
-    """§17: the cap is enforced on what was read, not on Content-Length."""
+    """§17 / C3: refused while streaming, before the body reaches the parser."""
     _sign_in(web)
     payload = json.dumps({"format": "psychobooking.config", "version": 1, "pad": "x" * 6_000_000})
 
     response = _import(web, payload, apply="1")
 
-    assert response.status_code == 400
-    assert "larger than 5 MB" in response.text
+    assert response.status_code == 413
 
 
 # --- Backups ----------------------------------------------------------------

@@ -12,12 +12,14 @@ deliberately short.
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import hashlib
 import hmac
 import json
 import secrets
 import time
+import weakref
 from datetime import UTC, datetime, timedelta
 from typing import Any
 from uuid import UUID
@@ -35,8 +37,20 @@ from app.core.models import AdminSession, AdminUser
 SESSION_TTL_SECONDS = 14 * 24 * 3600
 
 CLIENT_COOKIE = "pb_client"
-CSRF_COOKIE = "pb_csrf"
+#: `__Host-` makes the browser refuse the cookie unless it is Secure, Path=/ and
+#: has no Domain, so a sibling subdomain cannot plant one (F15). It cannot be
+#: used over plain http, which only development does; there the bare name stands.
+CSRF_COOKIE = "__Host-pb_csrf"
+CSRF_COOKIE_PLAIN = "pb_csrf"
 CSRF_FIELD = "csrf_token"
+
+#: A token is good for this long. A form left open overnight is refused and the
+#: page reload mints a new one; a stolen token stops working on its own (F15).
+CSRF_TTL_SECONDS = 12 * 3600
+
+#: A token with less than this left is replaced when a page is rendered, so a
+#: page loaded late in a token's life does not post into a 403 minutes later.
+CSRF_REFRESH_BELOW_SECONDS = 2 * 3600
 
 
 def _sign(payload: bytes) -> str:
@@ -86,9 +100,15 @@ def _cookie_kwargs() -> dict[str, Any]:
     }
 
 
-def issue_client_session(response: Response, client_id: UUID) -> None:
+def client_session_value(client_id: UUID) -> str:
+    """The signed cookie value for a client session, so a page rendered in the
+    same response that starts the session can bind its CSRF token to it."""
+    return _encode({"cid": str(client_id), "exp": int(time.time()) + SESSION_TTL_SECONDS})
+
+
+def issue_client_session(response: Response, client_id: UUID, value: str | None = None) -> None:
     """Start a session. Called after a login token is consumed."""
-    value = _encode({"cid": str(client_id), "exp": int(time.time()) + SESSION_TTL_SECONDS})
+    value = value or client_session_value(client_id)
     response.set_cookie(CLIENT_COOKIE, value, max_age=SESSION_TTL_SECONDS, **_cookie_kwargs())
 
 
@@ -111,22 +131,59 @@ def end_client_session(response: Response) -> None:
 
 
 # --- CSRF (§17: a token on every mutating form) -----------------------------
+#
+# Double-submit, bound to the session (F15): the token is `nonce.expiry.mac`,
+# the mac an HMAC over the nonce, the expiry and the caller's session cookies.
+# A token minted for one session is therefore refused on another, even though it
+# is validly signed and the cookie and the field agree -- which is exactly what
+# an attacker who can plant a cookie but not read the victim's session has.
+
+
+def csrf_cookie_name() -> str:
+    return CSRF_COOKIE if get_settings().base_url.startswith("https://") else CSRF_COOKIE_PLAIN
+
+
+def _binding(
+    request: Request, client_cookie: str | None = None, admin_cookie: str | None = None
+) -> str:
+    admin = admin_cookie if admin_cookie is not None else request.cookies.get(ADMIN_COOKIE, "")
+    client = client_cookie if client_cookie is not None else request.cookies.get(CLIENT_COOKIE, "")
+    return f"{admin}|{client}"
+
+
+def _csrf_mac(nonce: str, expiry: str, binding: str) -> str:
+    return _sign(f"csrf|{nonce}|{expiry}|{binding}".encode())
+
+
+def _mint_csrf(binding: str) -> str:
+    nonce = secrets.token_urlsafe(16)
+    expiry = str(int(time.time()) + CSRF_TTL_SECONDS)
+    return f"{nonce}.{expiry}.{_csrf_mac(nonce, expiry, binding)}"
+
+
+def _csrf_valid(token: str, binding: str, *, min_left: float = 0) -> bool:
+    parts = token.split(".")
+    if len(parts) != 3:
+        return False
+    nonce, expiry, mac = parts
+    if not expiry.isdigit() or int(expiry) - time.time() < min_left:
+        return False
+    return hmac.compare_digest(mac, _csrf_mac(nonce, expiry, binding))
 
 
 def issue_csrf(response: Response, token: str | None = None) -> str:
     """Set the CSRF cookie, to the value the form is carrying.
 
-    Double-submit: the same value goes in an httpOnly-free cookie and in a
-    hidden field, and the two must match. `token` MUST be the value rendered
-    into the page -- minting a fresh one here would set a cookie that disagrees
-    with every form on the page just served, and every submission would be
-    rejected.
+    `token` MUST be the value rendered into the page -- minting a fresh one here
+    would set a cookie that disagrees with every form on the page just served,
+    and every submission would be rejected. Without one the cookie is bound to
+    no session at all and the next page replaces it.
     """
-    token = token or _encode({"t": int(time.time())})
+    token = token or _mint_csrf("|")
     response.set_cookie(
-        CSRF_COOKIE,
+        csrf_cookie_name(),
         token,
-        max_age=SESSION_TTL_SECONDS,
+        max_age=CSRF_TTL_SECONDS,
         httponly=False,
         secure=get_settings().base_url.startswith("https://"),
         samesite="lax",
@@ -135,21 +192,33 @@ def issue_csrf(response: Response, token: str | None = None) -> str:
     return token
 
 
-def csrf_token_for(request: Request) -> str:
-    """The token to embed in a form, reusing the cookie's when it is valid."""
-    existing = request.cookies.get(CSRF_COOKIE)
-    if existing and _decode(existing) is not None:
+def csrf_token_for(
+    request: Request,
+    *,
+    new_client_cookie: str | None = None,
+    new_admin_cookie: str | None = None,
+) -> str:
+    """The token to embed in a form, reusing the cookie's while it is valid for
+    this session. The `new_*` cookies are a session this very response starts."""
+    binding = _binding(request, new_client_cookie, new_admin_cookie)
+    existing = request.cookies.get(csrf_cookie_name())
+    # Only a full page replaces a token that is running out. An HTMX partial
+    # lands inside a page whose other forms still carry the old one, so it keeps
+    # any token that is still valid.
+    partial = request.headers.get("hx-request") == "true"
+    min_left = 0 if partial else CSRF_REFRESH_BELOW_SECONDS
+    if existing and _csrf_valid(existing, binding, min_left=min_left):
         return existing
-    return _encode({"t": int(time.time())})
+    return _mint_csrf(binding)
 
 
 def csrf_ok(request: Request, submitted: str | None) -> bool:
-    cookie = request.cookies.get(CSRF_COOKIE)
+    cookie = request.cookies.get(csrf_cookie_name())
     if not cookie or not submitted:
         return False
-    if _decode(submitted) is None:
+    if not hmac.compare_digest(cookie, submitted):
         return False
-    return hmac.compare_digest(cookie, submitted)
+    return _csrf_valid(submitted, _binding(request))
 
 
 # --- Admin sessions (§6.3, §17) ---------------------------------------------
@@ -164,6 +233,36 @@ ADMIN_SESSION_TTL = timedelta(days=7)
 def _hash_token(raw: str) -> str:
     """Only the digest is stored, exactly as for client tokens (§6.2)."""
     return hashlib.sha256(raw.encode()).hexdigest()
+
+
+#: Each Argon2 verify holds 64 MiB (argon2-cffi's default). Run in threads with
+#: no bound, a few parallel logins from a few addresses would put the 512 MB web
+#: container over its limit. Two at a time; the rest queue and are never refused.
+MAX_PARALLEL_VERIFIES = 2
+
+#: A semaphore or lock belongs to the loop it first waited on, so one set per
+#: loop. In production there is one loop and so one set.
+_gates: weakref.WeakKeyDictionary[
+    asyncio.AbstractEventLoop, tuple[asyncio.Semaphore, asyncio.Lock]
+] = weakref.WeakKeyDictionary()
+
+
+def _loop_gates() -> tuple[asyncio.Semaphore, asyncio.Lock]:
+    loop = asyncio.get_running_loop()
+    found = _gates.get(loop)
+    if found is None:
+        found = _gates[loop] = (asyncio.Semaphore(MAX_PARALLEL_VERIFIES), asyncio.Lock())
+    return found
+
+
+def _verify_gate() -> asyncio.Semaphore:
+    return _loop_gates()[0]
+
+
+async def _verify_off_loop(hasher: Any, stored: str, password: str) -> None:
+    """`hasher.verify` in a thread, at most `MAX_PARALLEL_VERIFIES` at once."""
+    async with _verify_gate():
+        await asyncio.to_thread(hasher.verify, stored, password)
 
 
 async def authenticate_admin(
@@ -187,13 +286,16 @@ async def authenticate_admin(
         # Argon2 over a throwaway hash, so a missing user costs the same as a
         # wrong password.
         try:
-            hasher.verify(_dummy(), password)
+            await _verify_off_loop(hasher, await _dummy(), password)
         except (VerifyMismatchError, VerificationError, InvalidHashError):
             pass
         return None
 
+    # Argon2 is deliberately slow and holds the GIL-free C routine for tens of
+    # milliseconds; run on the loop it stalls the site and the Telegram webhook
+    # for every login attempt (F10). A thread keeps the loop turning.
     try:
-        hasher.verify(admin.password_hash, password)
+        await _verify_off_loop(hasher, admin.password_hash, password)
     except (VerifyMismatchError, VerificationError, InvalidHashError):
         return None
 
@@ -205,19 +307,28 @@ async def authenticate_admin(
 _dummy_hash: str | None = None
 
 
-def _dummy() -> str:
+async def _dummy() -> str:
     """A real Argon2id hash of a value nobody knows.
 
     It has to be genuine: a fabricated string fails parsing immediately, which
     would make the unknown-user path measurably faster than a wrong password
     and give away which usernames exist. Computed once, lazily, so importing
-    this module does not cost a KDF round.
+    this module does not cost a KDF round -- and inside the same gate as every
+    verify, behind a lock with a second look, so a burst of unknown-user logins
+    right after a restart computes it once and never holds more than the
+    allowed 64 MiB hashes at a time.
     """
     global _dummy_hash
     if _dummy_hash is None:
-        from argon2 import PasswordHasher
+        _, lock = _loop_gates()
+        async with lock:
+            if _dummy_hash is None:
+                from argon2 import PasswordHasher
 
-        _dummy_hash = PasswordHasher().hash(secrets.token_urlsafe(32))
+                async with _verify_gate():
+                    _dummy_hash = await asyncio.to_thread(
+                        PasswordHasher().hash, secrets.token_urlsafe(32)
+                    )
     return _dummy_hash
 
 

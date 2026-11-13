@@ -15,6 +15,7 @@ import asyncio
 import contextlib
 import logging
 import signal
+import time
 from collections.abc import Awaitable, Callable
 
 from app.config import get_settings
@@ -39,6 +40,33 @@ logger = logging.getLogger(__name__)
 
 Job = Callable[[], Awaitable[object]]
 
+#: The four retention jobs delete rows that expire over days; running them every
+#: twenty seconds was a query per table per pass for nothing (NP3).
+HOURLY = 3600.0
+
+
+def due(last_run: float | None, now: float, every: float) -> bool:
+    """Pure: a job that has never run, or last ran `every` seconds ago or more."""
+    return last_run is None or now - last_run >= every
+
+
+def every(seconds: float, job: Job) -> Job:
+    """`job`, but a pass that comes sooner than `seconds` after its last run
+    skips it. The clock is monotonic and per process: a restart runs it at once,
+    which is the safe side for a retention sweep."""
+    last: float | None = None
+
+    async def gated() -> object:
+        nonlocal last
+        now = time.monotonic()
+        if not due(last, now, seconds):
+            return None
+        last = now
+        return await job()
+
+    gated.__name__ = getattr(job, "__name__", "job")
+    return gated
+
 #: §14, in the order a pass runs them. Expiry before dispatch, so a request that
 #: lapsed since the last pass has its notification in the outbox by the time the
 #: dispatcher looks. Every job is idempotent and safe beside a second worker.
@@ -51,10 +79,10 @@ JOBS: list[Job] = [
     # already in force for the messages this pass renders (§15).
     refresh_translations,
     dispatch_outbox,
-    purge_content,
-    prune_tokens,
-    prune_revisions,
-    prune_error_events,
+    every(HOURLY, purge_content),
+    every(HOURLY, prune_tokens),
+    every(HOURLY, prune_revisions),
+    every(HOURLY, prune_error_events),
     # Last, so the file it writes describes the pass that has just finished
     # rather than the one before it (§16.8).
     write_status,

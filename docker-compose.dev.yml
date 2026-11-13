@@ -27,6 +27,11 @@
 # mounted -- changing any of those still needs `docker compose build web`.
 services:
   web:
+    # The runtime image has no pytest, mypy or tests/; the dev loop builds the
+    # `test` stage instead (NP3).
+    build:
+      context: .
+      target: test
     volumes:
       - ./app:/app/app:ro
       - ./tests:/app/tests:ro

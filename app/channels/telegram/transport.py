@@ -11,9 +11,11 @@ attached to the last one, so the buttons sit under the text they belong to.
 
 from __future__ import annotations
 
+import asyncio
 import logging
 
 from aiogram import Bot
+from aiogram.client.session.aiohttp import AiohttpSession
 from aiogram.exceptions import (
     TelegramBadRequest,
     TelegramForbiddenError,
@@ -52,6 +54,14 @@ def inline_keyboard(actions: list[Action]) -> InlineKeyboardMarkup | None:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
+#: The outbox sends inside an open transaction, and Postgres ends one that sits
+#: idle for 60 s (`idle_in_transaction_session_timeout`). A send therefore has to
+#: end -- delivered or not -- before that: aiogram's default request timeout is
+#: 60 s, and a message of several parts is several requests, so the bound is on
+#: the whole send as well as on each request.
+SEND_TIMEOUT_SECONDS = 45
+
+
 class TelegramTransport:
     """`Transport` for the Telegram channel."""
 
@@ -59,19 +69,23 @@ class TelegramTransport:
 
     def __init__(self, bot: Bot | None = None, settings: Settings | None = None) -> None:
         self._settings = settings or get_settings()
-        self._bot = bot or Bot(token=self._settings.telegram_bot_token)
+        self._bot = bot or Bot(
+            token=self._settings.telegram_bot_token,
+            session=AiohttpSession(timeout=SEND_TIMEOUT_SECONDS),
+        )
 
     async def send(self, address: str, message: RenderedMessage) -> DeliveryResult:
         markup = inline_keyboard(message.actions)
         try:
-            for index, part in enumerate(message.parts):
-                is_last = index == len(message.parts) - 1
-                await self._bot.send_message(
-                    chat_id=int(address),
-                    text=part,
-                    parse_mode=PARSE_MODE,
-                    reply_markup=markup if is_last else None,
-                )
+            async with asyncio.timeout(SEND_TIMEOUT_SECONDS):
+                for index, part in enumerate(message.parts):
+                    is_last = index == len(message.parts) - 1
+                    await self._bot.send_message(
+                        chat_id=int(address),
+                        text=part,
+                        parse_mode=PARSE_MODE,
+                        reply_markup=markup if is_last else None,
+                    )
         except TelegramForbiddenError as exc:
             # The client blocked the bot. Retrying six times helps nobody.
             return DeliveryResult.permanent(f"forbidden: {exc}")

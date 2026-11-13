@@ -27,9 +27,12 @@ limited.
 
 from __future__ import annotations
 
+import ipaddress
 import time
 from collections import deque
 from dataclasses import dataclass
+
+from app.config import get_settings
 
 #: §17, verbatim.
 ADMIN_LOGIN_PER_IP = 5
@@ -38,6 +41,12 @@ ADMIN_LOGIN_WINDOW = 15 * 60
 MAGIC_LINK_PER_EMAIL = 3
 MAGIC_LINK_PER_IP = 10
 MAGIC_LINK_WINDOW = 3600
+
+#: Beside the per-IP limit, for everyone together (F10). Argon2 makes each guess
+#: cost real CPU on the one process, and an address is cheap to vary; this is the
+#: ceiling on what any number of addresses can ask of it. The therapist is one
+#: person: thirty failed or successful sign-ins in 15 minutes is not her.
+ADMIN_LOGIN_GLOBAL_CAP = 30
 
 BOOKING_PER_CLIENT = 5
 BOOKING_WINDOW = 3600
@@ -51,6 +60,7 @@ class Limit:
 
 
 ADMIN_LOGIN = Limit("admin_login", ADMIN_LOGIN_PER_IP, ADMIN_LOGIN_WINDOW)
+ADMIN_LOGIN_GLOBAL = Limit("admin_login_global", ADMIN_LOGIN_GLOBAL_CAP, ADMIN_LOGIN_WINDOW)
 MAGIC_LINK_IP = Limit("magic_link_ip", MAGIC_LINK_PER_IP, MAGIC_LINK_WINDOW)
 
 #: {(limit name, key): timestamps}.
@@ -119,11 +129,36 @@ def reset() -> None:
 
 
 def client_ip(request: object) -> str:
-    """The caller's address.
+    """The caller's address, from the one place that cannot be written by them.
 
-    uvicorn runs with --proxy-headers, so `request.client.host` is already the
-    real address behind Caddy or a tunnel rather than the proxy's (§16.3).
+    `CLIENT_IP_HEADER` names it: `CF-Connecting-IP` behind a Cloudflare tunnel
+    (Cloudflare sets it itself, overwriting the caller's), or `X-Forwarded-For`
+    behind a single proxy that appends (Caddy, nginx), where the *last* entry is
+    the one that proxy wrote and anything to its left is the caller's claim. Left
+    empty, no header is read and the answer is the socket's peer. uvicorn is not
+    asked to trust forwarded headers at all (C2): `--forwarded-allow-ips='*'`
+    took the leftmost, attacker-written entry.
+
+    A header that is missing or not an IP address falls back to the peer, never
+    to something the caller chose.
     """
     client = getattr(request, "client", None)
-    host = getattr(client, "host", None)
-    return str(host) if host else "unknown"
+    peer = getattr(client, "host", None)
+    fallback = str(peer) if peer else "unknown"
+
+    header = get_settings().client_ip_header.strip()
+    headers = getattr(request, "headers", None)
+    if not header or headers is None:
+        return fallback
+
+    raw = headers.get(header)
+    if not raw:
+        return fallback
+    entries = [part.strip() for part in raw.split(",") if part.strip()]
+    if not entries:
+        return fallback
+    candidate = entries[-1] if header.lower() == "x-forwarded-for" else entries[0]
+    try:
+        return str(ipaddress.ip_address(candidate))
+    except ValueError:
+        return fallback
