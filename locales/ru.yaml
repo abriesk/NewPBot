@@ -93,7 +93,8 @@ booking:
   type.without_price: "{name} — {duration} мин"
   choose_timezone: "Пожалуйста, укажите ваш часовой пояс."
   timezone.detected: "Время показано в вашем часовом поясе. Если это не так, выберите другой."   # TODO: review
-  choose_slot: "Выберите удобное время."   # TODO: review
+  choose_slot: "Выберите удобное время. Время указано в поясе {timezone}."   # TODO
+  choose_slot_web: "Выберите удобное время."   # TODO: review
   slot.none_available: "Свободного времени сейчас нет."                       # TODO
   slot.none_online: "Сейчас нет свободного времени для онлайн-встреч. Есть время для очных."   # TODO: review
   slot.none_onsite: "Сейчас нет свободного времени для очных встреч. Есть время для онлайн-встреч."   # TODO: review
@@ -119,7 +120,7 @@ booking:
   captcha_wait: "Секунду — заканчиваем быструю проверку."   # TODO: review
   cancelled_by_user: "Запись отменена. Вы вернулись в главное меню."
   unavailable: "Сейчас приём заявок закрыт."   # TODO: review
-  onsite_no_address: "Адрес придёт вместе с подтверждением."   # TODO: review
+  onsite_no_address: "Адрес я согласую с вами."   # TODO: review
   timezone.shown: "Время указано в поясе: {zone}."   # TODO: review
   email_hint: "Только для ссылки подтверждения и напоминаний."   # TODO: review
   slot.taken_title: "Это время уже занято"   # TODO: review

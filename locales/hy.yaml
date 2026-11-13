@@ -99,7 +99,8 @@ booking:
   type.without_price: "{name} — {duration} րոպե"
   choose_timezone: "Նշեք ձեր ժամային գոտին։"   # TODO: review
   timezone.detected: "Ժամերը ցուցադրված են ձեր ժամային գոտով։ Եթե դա այդպես չէ, ընտրեք մեկ այլ գոտի։"   # TODO: review
-  choose_slot: "Ընտրեք ձեզ հարմար ժամը։"   # TODO: review
+  choose_slot: "Ընտրեք ձեզ հարմար ժամանակը։ Ժամերը ցուցադրված են {timezone} գոտով։"   # TODO: review
+  choose_slot_web: "Ընտրեք ձեզ հարմար ժամը։"   # TODO: review
   slot.none_available: "Այս պահին ազատ ժամեր չկան։"   # TODO: review
   slot.none_online: "Այս պահին ազատ առցանց ժամեր չկան։ Առկա ժամեր կան։"       # TODO: review
   slot.none_onsite: "Այս պահին ազատ առկա ժամեր չկան։ Առցանց ժամեր կան։"       # TODO: review
@@ -125,7 +126,7 @@ booking:
   captcha_wait: "Մեկ վայրկյան — ավարտում եմ արագ ստուգումը։"   # TODO: review
   cancelled_by_user: "Ամրագրումը չեղարկվեց։ Դուք վերադարձել եք գլխավոր մենյու։"   # TODO: review
   unavailable: "Այս պահին նոր գրանցումները փակ են։"   # TODO: review
-  onsite_no_address: "Հասցեն կուղարկվի հաստատման հետ միասին։"   # TODO: review
+  onsite_no_address: "Հասցեն կհամաձայնեցնեմ ձեզ հետ։"   # TODO: review
   timezone.shown: "Ժամերը ցուցադրված են՝ {zone}։"   # TODO: review
   email_hint: "Միայն հաստատման հղման և հիշեցումների համար։"   # TODO: review
   slot.taken_title: "Այդ ժամը զբաղված է"   # TODO: review

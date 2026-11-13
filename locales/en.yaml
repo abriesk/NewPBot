@@ -108,7 +108,8 @@ booking:
   type.without_price: "{name} — {duration} min"
   choose_timezone: "Which timezone are you in?"
   timezone.detected: "We detected {timezone}. Is that right?"
-  choose_slot: "Choose a time that suits you."
+  choose_slot: "Choose a time that suits you. Times are shown in {timezone}."
+  choose_slot_web: "Choose a time that suits you."
   slot.none_available: "There are no free times at the moment."
   # Offered as a labelled switch rather than by quietly showing the other kind:
   # a client looking at in-person times after asking for online has to work out
@@ -133,7 +134,7 @@ booking:
   contact.email_taken: "That address is already connected to another profile. Please use a different one."
   contact.email_sent: "I have sent a confirmation link to {email}. Open it and confirmations and reminders will reach you by email as well."
   submitted: "Thank you. Your request has been sent, number {uuid}. I will get back to you shortly."
-  check_email: "Check your inbox. If this address is known here, a link is on its way — it can take a minute."
+  check_email: "A sign-in link is on its way to your address. Follow it to open this request and to receive reminders."
   # §17. Seen only when somebody submits faster than their browser finished the
   # check, which is rare and lasts about a second.
   captcha_wait: "One moment — finishing a quick check."
@@ -144,7 +145,7 @@ booking:
 # wording names no address on purpose -- the screen is drawn before anyone has
 # proved they can read that mailbox, so naming it would tell whoever is holding
 # the phone whose it is.
-  onsite_no_address: "The address will come with your confirmation."
+  onsite_no_address: "I will agree the address with you."
   timezone.shown: "Times are shown in {zone}."
   email_hint: "Only for the confirmation link and reminders."
   slot.taken_title: "That time is taken"

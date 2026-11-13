@@ -186,3 +186,12 @@ def test_control_borders_and_the_progress_strip_reach_3_to_1_in_light_and_dark()
         start = css.index(selector)
         block = css[start : css.index("}", start)]
         assert "var(--control)" in block and "line-strong" not in block, selector
+
+
+def test_the_skip_link_shows_itself_when_a_keyboard_user_focuses_it() -> None:
+    css = (WEB / "static" / "style.css").read_text(encoding="utf-8")
+    assert ".skip-link:focus" in css
+    block = css[css.index(".skip-link:focus") :]
+    block = block[: block.index("}")]
+    assert "clip: auto" in block and "var(--ring)" in block and "width: auto" in block
+    assert 'class="skip-link"' in (WEB / "templates" / "base.html").read_text(encoding="utf-8")

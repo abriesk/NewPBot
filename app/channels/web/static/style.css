@@ -857,6 +857,9 @@ button.secondary:hover, button.switch-modality:hover {
 }
 
 .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+/* The skip link is out of sight until a keyboard user lands on it (WCAG 2.4.1 / 2.4.7). */
+.skip-link { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.skip-link:focus { position: fixed; top: .5rem; left: .5rem; z-index: 10; width: auto; height: auto; margin: 0; padding: .6rem 1rem; clip: auto; overflow: visible; background: var(--surface); color: var(--ink); border: 2px solid var(--ring); border-radius: var(--radius-sm); }
 .optional, .hint { color: var(--muted); font-size: .85rem; font-weight: 400; }
 .hint { display: block; margin: .3rem 0 0; }
 /* A refused field: the message sits beside it and the field says so. */

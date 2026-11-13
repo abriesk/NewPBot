@@ -339,7 +339,7 @@ async def _labels(session: AsyncSession, lang: str) -> dict[str, str]:
         "choose_timezone": "booking.choose_timezone",
         "timezone_shown": "booking.timezone.shown",
         "email_hint": "booking.email_hint",
-        "choose_slot": "booking.choose_slot",
+        "choose_slot": "booking.choose_slot_web",
         "no_slots": "booking.slot.none_available",
         "slot_held": "booking.slot.held",
         "slot_taken": "booking.slot.taken",
@@ -689,12 +689,13 @@ def build_router() -> APIRouter:
                         "id": st.id,
                         # A price is shown only when she stored one (quick win 13); never invented.
                         "label": await get_text(
-                            session,
-                            context["lang"],
-                            "booking.type.with_price" if price else "booking.type.without_price",
-                            name=name,
-                            duration=st.duration_min,
-                            price=price,
+                            session, context["lang"], "booking.type.with_price",
+                            name=name, duration=st.duration_min, price=price,
+                        )
+                        if price
+                        else await get_text(
+                            session, context["lang"], "booking.type.without_price",
+                            name=name, duration=st.duration_min,
                         ),
                     }
                 )
@@ -720,10 +721,7 @@ def build_router() -> APIRouter:
                 {"iana_name": iana, "label": zone_label(iana, context["lang"], now)} for iana in ids
             ]
 
-            labels = {
-                **context["t"],
-                "choose_slot": await get_text(session, context["lang"], "booking.choose_slot"),
-            }
+            labels = context["t"]
 
             # §12.1: the twin of the on-site rule below it. Someone choosing to
             # meet online is told which platforms that means, where the choice

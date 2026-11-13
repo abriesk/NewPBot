@@ -146,3 +146,47 @@ def test_one_voice_in_armenian_and_the_word_for_a_request_in_russian() -> None:
     """NP4a: she speaks in the first person ("Խնդրում եմ", not "Խնդրում ենք"); ru says "заявка", never "запрос"."""
     assert not [k for k, v in CATALOGUE["hy"].items() if "Խնդրում ենք" in v]
     assert not [k for k, v in CATALOGUE["ru"].items() if "запрос" in v.lower().replace("запросите", "")]
+
+
+def _literal_get_text_calls() -> list[tuple[str, str, int, frozenset[str]]]:
+    """(file, key, line, keyword names) of every `get_text(..., "literal.key", name=...)` call in app/."""
+    import ast
+    from pathlib import Path
+
+    found = []
+    for path in sorted((Path(__file__).resolve().parents[2] / "app").rglob("*.py")):
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+            if not isinstance(node, ast.Call):
+                continue
+            func = node.func
+            name = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+            if name != "get_text" or len(node.args) < 3:
+                continue
+            key = node.args[2]
+            if not (isinstance(key, ast.Constant) and isinstance(key.value, str)):
+                continue
+            if any(k.arg is None for k in node.keywords):  # **fmt: not checkable statically
+                continue
+            found.append((path.name, key.value, node.lineno, frozenset(k.arg for k in node.keywords)))
+    return found
+
+
+#: An argument a call passes that no language's text uses (it was there before NP4a; passing it loses nothing).
+HARMLESS_EXTRA_ARGUMENTS = {"intent.request.confirmed.client.body": frozenset({"uuid"})}
+
+
+def test_a_text_and_every_call_that_formats_it_agree_on_their_placeholders() -> None:
+    """NP4a: `get_text` returns the text unformatted when a placeholder is missing, and a deploy never overwrites a stored
+    row. So a call site and every language of the key must name the same placeholders: a call without arguments against
+    text holding `{timezone}` shows the braces to a client, and an argument the new text dropped silently loses its
+    information (Telegram's zone line)."""
+    problems = []
+    for where, key, line, kwargs in _literal_get_text_calls():
+        for lang in ("en", "ru", "hy"):
+            text = CATALOGUE[lang].get(key)
+            if text is None:
+                continue
+            placeholders = set(PLACEHOLDER.findall(text))
+            if placeholders != set(kwargs - HARMLESS_EXTRA_ARGUMENTS.get(key, frozenset())):
+                problems.append(f"{where}:{line} {key} [{lang}] text {sorted(placeholders)} vs call {sorted(kwargs)}")
+    assert not problems, "\n".join(problems)
