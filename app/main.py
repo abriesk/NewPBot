@@ -39,6 +39,7 @@ from app.channels.web.middleware import (
 )
 from app.config import get_settings
 from app.core.enums import ErrorSource
+from app.core.services.photo import MAX_UPLOAD_BYTES
 from app.core.services.status import record_error, where
 from app.db import dispose_engine, get_session_factory, unit_of_work
 
@@ -116,7 +117,11 @@ def create_app() -> FastAPI:
     # so that a 413 carries them too.
     app.add_middleware(
         BodyLimitMiddleware,
-        limits={"/admin/maintenance/config/import": MAX_CONFIG_UPLOAD + 64 * 1024},
+        limits={
+            "/admin/maintenance/config/import": MAX_CONFIG_UPLOAD + 64 * 1024,
+            # NP4b: her photo. The service reads one byte past its own cap as well.
+            "/admin/settings/photo": MAX_UPLOAD_BYTES + 64 * 1024,
+        },
     )
     app.add_middleware(SecurityHeadersMiddleware)
 

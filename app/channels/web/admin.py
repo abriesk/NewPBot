@@ -28,6 +28,7 @@ from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, Redirect
 from fastapi.templating import Jinja2Templates
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.datastructures import UploadFile as StarletteUploadFile
 
 from app.channels.web import ratelimit
 from app.channels.web.backups import list_dumps, resolve_dump
@@ -71,6 +72,7 @@ from app.core.models import (
 )
 from app.core.policies import now_utc
 from app.core.services import booking, content, notifications, waitlist
+from app.core.services import photo as photo_service
 from app.core.services import slots as slot_service
 from app.core.services.clients import (
     erase_client,
@@ -983,7 +985,13 @@ def build_router() -> APIRouter:
                 return _back("/admin/login")
             return _render(
                 "admin/settings.html",
-                await _context(session, request, admin, fields=sorted(MUTABLE_FIELDS)),
+                await _context(
+                    session,
+                    request,
+                    admin,
+                    fields=sorted(MUTABLE_FIELDS),
+                    photo_version=await photo_service.photo_version(session),
+                ),
             )
 
     @router.post("/settings", include_in_schema=False)
@@ -1007,6 +1015,39 @@ def build_router() -> APIRouter:
                 return _back("/admin/settings", f"rejected: {exc}")
             labels = await _labels(session)
             return _back("/admin/settings", labels["settings_saved"])
+
+    @router.post("/settings/photo", include_in_schema=False)
+    async def photo_upload(request: Request) -> Response:
+        """NP4b: her photo. Multipart, capped by the body limit and again here; what is stored is a
+        re-encoded JPEG (`services/photo.py`), never the upload."""
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+            form = await request.form()
+            if not csrf_ok(request, str(form.get(CSRF_FIELD, ""))):
+                return Response(status_code=403)
+            upload = form.get("photo")
+            if not isinstance(upload, StarletteUploadFile):
+                return _back("/admin/settings", "rejected: No file was chosen.")
+            raw = await upload.read(photo_service.MAX_UPLOAD_BYTES + 1)
+            try:
+                await photo_service.set_photo(session, raw)
+            except photo_service.PhotoRejected as exc:
+                return _back("/admin/settings", f"rejected: {exc}")
+            return _back("/admin/settings", "Photo saved.")
+
+    @router.post("/settings/photo/delete", include_in_schema=False)
+    async def photo_remove(request: Request) -> Response:
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+            form = await request.form()
+            if not csrf_ok(request, str(form.get(CSRF_FIELD, ""))):
+                return Response(status_code=403)
+            await photo_service.delete_photo(session)
+            return _back("/admin/settings", "Photo removed.")
 
     # --- Session types and timezones ---------------------------------------
 
@@ -1984,6 +2025,9 @@ def _settings_changes(form: Any) -> dict[str, Any]:
     mode = form.get("booking_mode")
     if mode:
         changes["booking_mode"] = BookingMode(str(mode))
+
+    if "languages" in form:
+        changes["languages"] = str(form.get("languages") or "")
 
     for field in ("clinic_onsite_url", "online_meeting_url"):
         if field in form:

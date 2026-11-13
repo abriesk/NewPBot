@@ -35,6 +35,7 @@ MUTABLE_FIELDS = frozenset(
         "cancel_window_hours",
         "reminder_offsets_min",
         "retention_months",
+        "languages",
         "social_links",
         "captcha_on",
         "captcha_difficulty",
@@ -47,6 +48,9 @@ MUTABLE_FIELDS = frozenset(
 #: booking form unusable; hours-long ones defeat the point of a short hold.
 UNVERIFIED_HOLD_MIN, UNVERIFIED_HOLD_MAX = 1, 120
 BOOK_PER_IP_MIN, BOOK_PER_IP_MAX = 1, 1000
+
+#: NP4b: the one line of languages a client reads among the three facts on the front page.
+LANGUAGES_MAX = 120
 
 #: §17: leading zero bits of SHA-256 the browser must find before the booking
 #: and waitlist forms are accepted. Bounded here because the cost doubles with
@@ -140,6 +144,12 @@ async def update_settings(session: AsyncSession, **changes: Any) -> Practice:
     # rule the other can walk around.
     if "social_links" in changes:
         changes["social_links"] = normalise_social_links(changes["social_links"])
+
+    if "languages" in changes:
+        text = " ".join(str(changes["languages"] or "").split())
+        if len(text) > LANGUAGES_MAX:
+            raise ValueError(f"languages: longer than {LANGUAGES_MAX} characters")
+        changes["languages"] = text or None
 
     if "captcha_difficulty" in changes:
         difficulty = int(changes["captcha_difficulty"])

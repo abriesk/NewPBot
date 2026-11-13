@@ -70,6 +70,12 @@ CONTENT_TOPICS = (
     # a platform is a question mark left hanging exactly where a nervous person
     # cannot afford one.
     {"code": "online_platforms", "sort_order": 4, "show_in_menu": False},
+    # NP4b: three more she writes and no client menu lists. The short bio beside her photo on the
+    # front page, the cancellation rule the "what happens next" block quotes, and the client
+    # privacy page (empty = the general default text, which she reviews).
+    {"code": "about_me", "sort_order": 5, "show_in_menu": False},
+    {"code": "cancellation", "sort_order": 6, "show_in_menu": False},
+    {"code": "privacy", "sort_order": 7, "show_in_menu": False},
 )
 
 #: §20. IANA names with friendly labels, never UTC offsets -- offsets break at

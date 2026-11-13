@@ -29,6 +29,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    LargeBinary,
     MetaData,
     Text,
     UniqueConstraint,
@@ -156,7 +157,27 @@ class Practice(Base):
         ARRAY(Integer), nullable=False, server_default="{1440,60}"
     )
     retention_months: Mapped[int] = mapped_column(Integer, nullable=False, server_default="12")
+    #: NP4b: the languages she sees clients in, written by her as one line ("Русский, English").
+    #: Empty until she writes it: the client site then leaves that fact out.
+    languages: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[datetime] = _tstz(nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = _updated_at()
+
+
+class PracticePhoto(Base):
+    """Her photo, as uploaded in the admin settings and resized by `services/photo.py`.
+
+    One row per practice, kept in the database like everything else she edits: it is backed up with
+    it and needs no volume. `etag` names the bytes, so the page can link `?v=<etag>` and let a
+    browser keep the image for a year.
+    """
+
+    __tablename__ = "practice_photo"
+
+    practice_id: Mapped[int] = mapped_column(ForeignKey("practice.id"), primary_key=True)
+    content_type: Mapped[str] = mapped_column(Text, nullable=False)
+    data: Mapped[bytes] = mapped_column(LargeBinary, nullable=False)
+    etag: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[datetime] = _updated_at()
 
 

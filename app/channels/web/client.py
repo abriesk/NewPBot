@@ -54,6 +54,7 @@ from app.core.policies import (
     resolve_booking_mode,
 )
 from app.core.services import booking, content, flow, notifications, waitlist
+from app.core.services import photo as photo_service
 from app.core.services.clients import (
     consume_token,
     issue_token,
@@ -672,6 +673,26 @@ def build_router() -> APIRouter:
                     "greeting": await _greeting(session, request, context["lang"]),
                 },
             )
+
+    @router.get("/media/photo", include_in_schema=False)
+    async def media_photo(request: Request, v: str = "") -> Response:
+        """NP4b: her photo. The page links it with `?v=<etag prefix>`, so a request that carries the
+        current version may be kept by the browser for a year; one that does not is kept briefly."""
+        async with unit_of_work() as session:
+            row = await photo_service.get_photo(session)
+            if row is None:
+                return Response(status_code=404)
+            etag = f'"{row.etag}"'
+            fresh = bool(v) and row.etag.startswith(v)
+            headers = {
+                "ETag": etag,
+                "Cache-Control": (
+                    "public, max-age=31536000, immutable" if fresh else "public, max-age=300"
+                ),
+            }
+            if request.headers.get("if-none-match") == etag:
+                return Response(status_code=304, headers=headers)
+            return Response(row.data, media_type=row.content_type, headers=headers)
 
     @router.get("/t/{topic_code}", response_class=HTMLResponse, include_in_schema=False)
     async def topic_page(request: Request, topic_code: str) -> Response:

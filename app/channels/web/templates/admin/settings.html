@@ -64,6 +64,12 @@
     <label>Clinic address link
       <input type="text" name="clinic_onsite_url" value="{{ practice.clinic_onsite_url or '' }}">
     </label>
+    <label>Languages you work in
+      <input type="text" name="languages" maxlength="120" value="{{ practice.languages or '' }}"
+             placeholder="Русский, English">
+      <small>Shown to clients among the three facts on the front page, as you write it.
+        Leave empty to show nothing.</small>
+    </label>
     <label>Standing meeting room
       <input type="text" name="online_meeting_url" value="{{ practice.online_meeting_url or '' }}">
     </label>
@@ -159,6 +165,34 @@
 
   <button type="submit">Save</button>
 </form>
+
+{# NP4b: her photo, on the front page beside the first lines about her. Its own form (a file cannot
+   ride the settings form), and the picture that is stored is a resized copy: the original is never
+   kept. With none, the client site shows a neutral illustration. #}
+<section class="card" id="photo-panel">
+  <h2>Your photo</h2>
+  {% if photo_version %}
+    <p><img src="/media/photo?v={{ photo_version }}" alt="Your photo as clients see it" width="120" height="120"
+            style="border-radius:50%;object-fit:cover"></p>
+  {% else %}
+    <p class="muted">No photo yet: clients see a plain illustration instead.</p>
+  {% endif %}
+  <form method="post" action="/admin/settings/photo" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <label>Choose a photo (JPEG, PNG or WebP, up to 6 MB)
+      <input type="file" name="photo" accept="image/jpeg,image/png,image/webp" required>
+    </label>
+    <p class="muted">It is resized and saved as a small copy, and the details your phone
+       adds (such as where it was taken) are removed.</p>
+    <button type="submit">Upload</button>
+  </form>
+  {% if photo_version %}
+  <form method="post" action="/admin/settings/photo/delete">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <button type="submit" class="secondary">Remove the photo</button>
+  </form>
+  {% endif %}
+</section>
 
 {# The one thing on this page that is not a database setting, and therefore not
    inside the form above: it posts to no route, and Save has nothing to do with

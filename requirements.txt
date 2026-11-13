@@ -22,6 +22,11 @@ aiogram==3.30.0
 markdown-it-py==4.2.0
 nh3==0.3.6
 
+# --- Her photo (NP4b) -------------------------------------------------------
+# Server-side resize and re-encode of the uploaded photo (strips EXIF, GPS included). Stdlib
+# cannot decode a JPEG or WebP, so there is no smaller honest way to do it.
+Pillow==11.3.0
+
 # --- Email -------------------------------------------------------------------
 aiosmtplib==5.1.2
 
