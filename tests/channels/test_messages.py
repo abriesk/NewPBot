@@ -314,7 +314,7 @@ async def test_a_reminder_email_carries_the_date_and_time(db: AsyncSession) -> N
         tz="Asia/Yerevan",
         base_url="https://example.test",
     )
-    assert "2026-09-15 18:30" in message.text
+    assert "18:30 (Yerevan, GMT+4)" in message.text  # as the web words it (NP3c/10)
 
 
 async def test_an_optional_part_appears_only_when_its_field_is_present(

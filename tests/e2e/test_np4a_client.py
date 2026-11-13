@@ -87,13 +87,14 @@ def test_a_stale_form_is_a_message_not_a_blank_403_and_keeps_the_text(anon: Test
         data={"problem": "typed long text", "email": "a@b.example", "csrf_token": "stale"},
     )
     assert response.status_code == 403
-    assert "typed long text" in response.text and "open for too long" in response.text
+    # NP3c/11: a request that failed the CSRF check is not repeated back (tests/e2e/test_np3c.py)
+    assert "typed long text" not in response.text and "open for too long" in response.text
     assert 'role="alert"' in response.text
     # the same for the sign-in form
     again = anon.post("/auth/email", data={"email": "a@b.example", "csrf_token": "stale"})
     assert (
         again.status_code == 403
-        and 'value="a@b.example"' in again.text
+        and 'value="a@b.example"' not in again.text
         and "open for too long" in again.text
     )
 

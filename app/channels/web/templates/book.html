@@ -49,7 +49,7 @@
     {# §12.1: on-site selection MUST show clinic_onsite_url. #}
     <p id="onsite-info" hidden class="muted">
       {% if practice.clinic_onsite_url %}
-        {{ t.onsite_info }} <a href="{{ practice.clinic_onsite_url }}">{{ practice.clinic_onsite_url }}</a>
+        {% set parts = t.onsite_info.split(practice.clinic_onsite_url, 1) %}{{ parts[0] }}<a href="{{ practice.clinic_onsite_url }}">{{ practice.clinic_onsite_url }}</a>{{ parts[1] if parts|length > 1 else '' }}
       {% else %}{{ t.onsite_no_address }}{% endif %}
     </p>
   </fieldset>

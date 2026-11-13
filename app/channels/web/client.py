@@ -451,7 +451,16 @@ async def _context(
         "practice": practice,
         "lang": resolved,
         "topics": topics,
-        "t": await _labels(session, resolved),
+        "t": {
+            **(await _labels(session, resolved)),
+            # {url} is the clinic's address: filled here, where the practice is known.
+            "onsite_info": await get_text(
+                session,
+                resolved,
+                "booking.onsite_info",
+                url=practice.clinic_onsite_url or "",
+            ),
+        },
         "csrf_token": csrf_token_for(request),
         "signed_in": client is not None,
         "email_enabled": get_settings().email_enabled,
@@ -1006,7 +1015,7 @@ def build_router() -> APIRouter:
                 return await _error_page(
                     context,
                     context["t"]["error_title"],
-                    await get_text(session, context["lang"], "error.rate_limited"),
+                    await get_text(session, context["lang"], "common.error.rate_limited"),
                     429,
                     action="home",
                 )
@@ -1054,7 +1063,7 @@ def build_router() -> APIRouter:
                     return await _error_page(
                         context,
                         context["t"]["error_title"],
-                        await get_text(session, context["lang"], "error.rate_limited"),
+                        await get_text(session, context["lang"], "common.error.rate_limited"),
                         429,
                         action="home",
                     )
@@ -1232,11 +1241,13 @@ def build_router() -> APIRouter:
         if not csrf_ok(request, csrf_token):
             async with unit_of_work() as session:
                 context = await _context(session, request)
+                # Without what was posted: a request that failed the CSRF check is not
+                # one whose text this page should repeat (NP3c/11).
                 return await _waitlist_form(
                     context,
                     context["practice"],
                     by_choice=True,
-                    values=typed,
+                    values=None,
                     errors={"form": context["t"]["stale"]},
                     status=403,
                 )
@@ -1564,7 +1575,7 @@ def build_router() -> APIRouter:
         if not csrf_ok(request, csrf_token):
             async with unit_of_work() as session:
                 context = await _context(session, request)
-                return _auth_form(context, email, context["t"]["stale"], 403)
+                return _auth_form(context, "", context["t"]["stale"], 403)
 
         settings = get_settings()
         address = normalise_email(email)

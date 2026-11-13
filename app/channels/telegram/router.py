@@ -51,7 +51,7 @@ from app.core.services.notifications import Envelope, Recipient
 from app.core.services.settings import get_practice
 from app.core.services.slots import list_available_slots, open_slot_start
 from app.core.services.translations import get_text
-from app.render.dates import day_label
+from app.render.dates import day_label, when_label
 from app.render.labels import session_type_name
 from app.render.markdown import escape_telegram
 
@@ -515,7 +515,7 @@ async def _my_appointments(session: AsyncSession, client: Client) -> Reply:
                     session, client.language, f"request.status.{request.status.value}"
                 ),
                 # Hard rule 8: status and time, never the problem text.
-                time=_local(when, client, practice)
+                time=await _local(session, when, client, practice)
                 or escape_telegram(request.desired_time_text or ""),
                 session_type=session_type,
                 modality=await get_text(
@@ -1557,7 +1557,9 @@ async def _negotiation_action(
                     client.language,
                     "intent.request.confirmed.client.body",
                     uuid=str(confirmed.uuid),
-                    time=_local(confirmed.scheduled_start, client, await get_practice(session)),
+                    time=await _local(
+                        session, confirmed.scheduled_start, client, await get_practice(session)
+                    ),
                 )
             )
         await booking.client_decline(session, request.id)
@@ -1593,12 +1595,14 @@ async def _request_for(
     return request
 
 
-def _local(value: datetime | None, client: Client, practice: Practice) -> str:
-    """An instant in the client's own zone. Storage stays UTC (DESIGN.md §8)."""
+async def _local(
+    session: AsyncSession, value: datetime | None, client: Client, practice: Practice
+) -> str:
+    """An instant in the client's own zone and language, as the web shows it
+    (`app.render.dates.when_label`). Storage stays UTC (DESIGN.md §8)."""
     if value is None:
         return ""
-    zone = ZoneInfo(client.timezone or practice.timezone)
-    return value.astimezone(zone).strftime("%Y-%m-%d %H:%M")
+    return await when_label(session, client.language, value, client.timezone or practice.timezone)
 
 
 # --- Negotiation, admin side (§13.2) ----------------------------------------

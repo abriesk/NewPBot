@@ -204,3 +204,102 @@ def test_a_text_and_every_call_that_formats_it_agree_on_their_placeholders() -> 
                     f"vs call {sorted(kwargs)}"
                 )
     assert not problems, "\n".join(problems)
+
+
+# --- NP3c item 13: guards the placeholder test above does not reach ------------------------------
+
+
+def _app_trees() -> list[tuple[str, object]]:
+    import ast
+    from pathlib import Path
+
+    return [
+        (path.name, ast.parse(path.read_text(encoding="utf-8")))
+        for path in sorted((Path(__file__).resolve().parents[2] / "app").rglob("*.py"))
+    ]
+
+
+def _text_keys_named_in_app() -> list[tuple[str, int, str, bool]]:
+    """(file, line, key, is_prefix) for every key `get_text` is asked for: a literal, or the
+    constant start of an f-string (`f"request.status.{x}"` -> prefix `request.status.`), and
+    every value of the `_labels` table in the web client (a label name -> its key)."""
+    import ast
+
+    found: list[tuple[str, int, str, bool]] = []
+    for name, tree in _app_trees():
+        for node in ast.walk(tree):  # type: ignore[arg-type]
+            if isinstance(node, ast.Call):
+                func = node.func
+                called = func.id if isinstance(func, ast.Name) else getattr(func, "attr", "")
+                if called == "get_text" and len(node.args) >= 3:
+                    key = node.args[2]
+                    if isinstance(key, ast.Constant) and isinstance(key.value, str):
+                        found.append((name, node.lineno, key.value, False))
+                    elif isinstance(key, ast.JoinedStr) and key.values:
+                        head = key.values[0]
+                        if isinstance(head, ast.Constant) and isinstance(head.value, str):
+                            found.append((name, node.lineno, head.value, True))
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "_labels":
+                for inner in ast.walk(node):
+                    if isinstance(inner, ast.Dict):
+                        for value in inner.values:
+                            if isinstance(value, ast.Constant) and isinstance(value.value, str):
+                                found.append((name, value.lineno, value.value, False))
+    return found
+
+
+def test_every_text_key_the_app_asks_for_exists_in_english() -> None:
+    """A key nobody wrote is shown to a client as the bare key (`error.rate_limited`, NP4a's Opus).
+    Covers literal keys, the start of f-string keys and the web client's `_labels` table."""
+    english = CATALOGUE["en"]
+    problems = []
+    for where, line, key, is_prefix in _text_keys_named_in_app():
+        exists = any(k.startswith(key) for k in english) if is_prefix else key in english
+        if not exists:
+            problems.append(f"{where}:{line} {key!r}{' (prefix)' if is_prefix else ''}")
+    assert not problems, "\n".join(problems)
+
+
+#: `_labels` keys whose text holds a placeholder, and who fills it: a `_labels` text is fetched
+#: with no arguments, so every one of these shows its braces unless the page overrides or
+#: `.replace`s it. Adding a key with a placeholder to `_labels` means adding it here, deliberately.
+LABELS_WITH_A_PLACEHOLDER = {
+    "onsite_info": "booking.onsite_info",  # `_context` overrides it with the clinic address
+    "timezone_shown": "booking.timezone.shown",  # templates .replace('{zone}', ...)
+    "slot_held": "booking.slot.held",  # `_details_page` overrides it with the hold minutes
+    "submitted": "booking.submitted",  # templates .replace('{uuid}', ...)
+    "step": "common.step",  # templates .replace('{n}'/'{total}', ...)
+    "reference": "request.reference",  # templates .replace('{ref}', ...)
+    # the admin console's own `_labels`
+    "delivery_credentials": "admin.delivery.credentials",  # delivery.html .replace('{count}')
+    "invalid_markdown": "admin.content.invalid_markdown",  # no template reads this label today
+}
+
+
+def _labels_table() -> dict[str, str]:
+    import ast
+
+    table: dict[str, str] = {}
+    for _name, tree in _app_trees():
+        for node in ast.walk(tree):  # type: ignore[arg-type]
+            if isinstance(node, ast.AsyncFunctionDef) and node.name == "_labels":
+                for inner in ast.walk(node):
+                    if isinstance(inner, ast.Dict):
+                        for k, v in zip(inner.keys, inner.values, strict=False):
+                            if isinstance(k, ast.Constant) and isinstance(v, ast.Constant):
+                                table[str(k.value)] = str(v.value)
+    return table
+
+
+def test_a_label_text_with_a_placeholder_is_on_the_list_of_those_filled_by_hand() -> None:
+    table = _labels_table()
+    assert table, "the `_labels` table was not found"
+    holding = {
+        name: key
+        for name, key in table.items()
+        if any(PLACEHOLDER.search(CATALOGUE[lang].get(key, "")) for lang in LANGUAGES)
+    }
+    assert holding == LABELS_WITH_A_PLACEHOLDER, (
+        "a `_labels` text holds a placeholder nothing is known to fill (or the list is stale): "
+        f"{sorted(set(holding) ^ set(LABELS_WITH_A_PLACEHOLDER))}"
+    )

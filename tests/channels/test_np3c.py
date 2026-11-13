@@ -185,7 +185,7 @@ def _request_with(cookies: dict[str, str]):  # type: ignore[no-untyped-def]
 
 
 def test_csrf_accepts_any_valid_token_of_the_same_session() -> None:
-    """NP3c/7: a full page load in tab B replaces the cookie; Save in tab A carries the old token."""
+    """NP3c/7: a page load in tab B replaces the cookie; Save in tab A carries the old token."""
     from app.channels.web.security import (
         ADMIN_COOKIE,
         _binding,
@@ -208,3 +208,34 @@ def test_csrf_accepts_any_valid_token_of_the_same_session() -> None:
     assert csrf_ok(_request_with({**session, csrf_cookie_name(): other}), tab_a) is False
     assert csrf_ok(_request_with(session), tab_a) is False  # no cookie at all
     assert csrf_ok(request, "") is False
+
+
+@pytest.mark.parametrize("channel", [Channel.email, Channel.telegram])
+async def test_outgoing_times_use_the_web_wording(db: AsyncSession, channel: Channel) -> None:
+    """NP3c/10: Telegram and email name a moment as the web does -- not `2026-09-15 18:30`."""
+    when = datetime(2026, 9, 15, 14, 30, tzinfo=UTC)
+    message = await render(
+        db,
+        intent_key="request.confirmed.client",
+        payload={"uuid": "abc", "time": when.isoformat(), "modality": "online"},
+        locale="en",
+        channel=channel,
+        tz="Asia/Yerevan",
+        base_url="https://example.test",
+    )
+    text = "\n".join(message.parts)
+    assert "18:30 (Yerevan, GMT+4)" in text
+    assert "2026-09-15 18:30" not in text
+
+
+async def test_free_text_in_the_time_field_comes_back_as_written(db: AsyncSession) -> None:
+    message = await render(
+        db,
+        intent_key="request.confirmed.client",
+        payload={"uuid": "abc", "time": "some evening next week", "modality": "online"},
+        locale="en",
+        channel=Channel.email,
+        tz="UTC",
+        base_url="https://example.test",
+    )
+    assert "some evening next week" in "\n".join(message.parts)

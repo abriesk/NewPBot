@@ -21,6 +21,7 @@ from app.channels.base import Action, Attachment, RenderedMessage
 from app.core.enums import Channel
 from app.core.services.translations import get_text
 from app.render.calendar import ICS_FILENAME, ICS_SUBTYPE, session_ics
+from app.render.dates import when_label
 from app.render.intents import action_label_key, body_key_for, spec_for
 from app.render.markdown import escape_telegram, pack_telegram_parts
 
@@ -66,6 +67,9 @@ async def render(
     """
     spec = spec_for(intent_key)
     fmt = _format_args(payload, tz)
+    # The same wording the web shows (`when_label`: weekday, day, month, 24-hour time and the zone
+    # by its city), not a numeric stamp.
+    fmt["time"] = await _time_text(session, locale, payload.get("time"), tz)
 
     body = await get_text(session, locale, body_key_for(intent_key, payload), **fmt)
     lines = [body]
@@ -128,6 +132,22 @@ async def render(
     return RenderedMessage(
         parts=["\n\n".join(lines)], subject=subject, actions=actions, parse_mode=None
     )
+
+
+async def _time_text(
+    session: AsyncSession, locale: str, value: str | datetime | None, tz: str
+) -> str:
+    """`format_instant`'s job in the client's words; free text a client wrote comes back as is."""
+    if value is None:
+        return ""
+    if isinstance(value, str):
+        try:
+            parsed = datetime.fromisoformat(value)
+        except ValueError:
+            return value
+    else:
+        parsed = value
+    return await when_label(session, locale, parsed, tz)
 
 
 def _format_args(payload: dict[str, Any], tz: str) -> dict[str, Any]:

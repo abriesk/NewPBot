@@ -311,9 +311,10 @@ async def test_an_active_request_is_listed_without_its_problem_text(
 
     assert reply is not None
     assert "something I would not want repeated" not in reply.text
-    # The slot's time, in the client's zone, even though nothing is approved yet.
+    # The slot's time, in the client's zone, even though nothing is approved yet, worded as the
+    # web words it (NP3c/10): local clock and the zone's city with its GMT offset.
     local = future_slot.starts_at.astimezone(ZoneInfo("Europe/Moscow"))
-    assert local.strftime("%Y-%m-%d %H:%M") in reply.text
+    assert f"{local:%H:%M} (Москва, GMT+3)" in reply.text
     assert client.id
 
 
