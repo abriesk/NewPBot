@@ -866,6 +866,10 @@ async def admin_approve(
     # A slot is the booking only while it is the time. A negotiation that
     # settled on another one leaves it for somebody else, rather than marking it
     # booked for a session that is not at it.
+    # Every slot this will touch, locked together and in id order, before the
+    # old one is released: see `lock_for_move`.
+    await slot_service.lock_for_move(session, request.slot_id, start)
+
     if request.slot_id is not None:
         held = await _slot(session, request.slot_id)
         if held is not None and held.starts_at == start:
@@ -1447,6 +1451,7 @@ async def admin_reschedule(
         # already started is moved by saying so out loud, not by this form.
         raise InvalidTransition("booking_request", request.status.value, "admin_reschedule")
 
+    await slot_service.lock_for_move(session, request.slot_id, new_start)
     if request.slot_id is not None:
         await slot_service.block_slot(session, request.slot_id)
         request.slot_id = None

@@ -477,6 +477,82 @@ async def test_looking_for_the_matching_slot_takes_no_row_lock(
     assert seen and not any("FOR UPDATE" in statement.upper() for statement in seen)
 
 
+async def _slot_lock_statements(db: AsyncSession, run: object) -> list[str]:
+    """The SQL of every slot row lock taken while `run()` executes, in order."""
+    from sqlalchemy import event
+
+    seen: list[str] = []
+
+    def capture(conn: object, cursor: object, statement: str, *rest: object) -> None:
+        if "FROM slot" in statement and "FOR UPDATE" in statement.upper():
+            seen.append(statement)
+
+    sync_conn = (await db.connection()).sync_connection
+    event.listen(sync_conn, "before_cursor_execute", capture)
+    try:
+        await run()  # type: ignore[operator]
+    finally:
+        event.remove(sync_conn, "before_cursor_execute", capture)
+    return seen
+
+
+async def test_approving_onto_another_slot_locks_the_slots_it_touches_in_one_ordered_statement(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot, practice: Practice
+) -> None:
+    """NP1 review: the old slot was locked on its own, and only then the new
+    slot's overlap set in id order. A submit for the new slot locks that set
+    first and then waits for the old one: a deadlock cycle. Every path has to
+    take the slots it needs in a single id-ordered statement, first."""
+    request = await _submit(db, client, session_type_id, future_slot)
+    later = Slot(
+        practice_id=practice.id,
+        starts_at=future_slot.starts_at + timedelta(minutes=30),
+        duration_min=60,
+        modality=Modality.onsite,
+        status=SlotStatus.available,
+    )
+    db.add(later)
+    await db.flush()
+
+    async def run() -> None:
+        await booking.admin_approve(db, request.id, scheduled_start=later.starts_at)
+
+    locks = await _slot_lock_statements(db, run)
+
+    assert locks, "no slot was locked at all"
+    assert "ORDER BY slot.id" in locks[0], locks[0]
+    await db.refresh(later)
+    assert later.status is SlotStatus.booked
+    await db.refresh(future_slot)
+    assert future_slot.status is SlotStatus.available
+
+
+async def test_rescheduling_locks_the_slots_it_touches_in_one_ordered_statement(
+    db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot, practice: Practice
+) -> None:
+    """NP1 review: same cycle for a move to a time overlapping the old slot."""
+    request = await _confirmed(db, client, session_type_id, future_slot)
+    later = Slot(
+        practice_id=practice.id,
+        starts_at=future_slot.starts_at + timedelta(minutes=30),
+        duration_min=60,
+        modality=Modality.onsite,
+        status=SlotStatus.available,
+    )
+    db.add(later)
+    await db.flush()
+
+    async def run() -> None:
+        await booking.admin_reschedule(db, request.id, new_start=later.starts_at)
+
+    locks = await _slot_lock_statements(db, run)
+
+    assert locks, "no slot was locked at all"
+    assert "ORDER BY slot.id" in locks[0], locks[0]
+    await db.refresh(request)
+    assert request.slot_id == later.id
+
+
 async def test_a_slot_taken_between_the_search_and_the_booking_still_confirms(
     db: AsyncSession,
     client: Client,

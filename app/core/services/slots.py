@@ -98,6 +98,43 @@ def overlaps_a_booked_slot() -> Any:
     )
 
 
+def _overlaps(base: Slot) -> Any:
+    """SQL condition on `Slot`: shares part of `base`'s interval (same practice)."""
+    return and_(
+        Slot.practice_id == base.practice_id,
+        Slot.starts_at < base.starts_at + timedelta(minutes=base.duration_min),
+        _ends_at(Slot) > base.starts_at,
+    )
+
+
+async def lock_for_move(
+    session: AsyncSession, old_slot_id: int | None, new_start: datetime
+) -> None:
+    """Take, in one id-ordered statement, every slot a move from `old_slot_id`
+    to whatever is published at `new_start` will touch: the old slot, the slots
+    at the new instant, and everything overlapping either.
+
+    Releasing or blocking the old slot, then booking the new one, used to lock
+    the old slot alone and the new slot's overlap set afterwards. A submit for
+    the new slot locks that set first (in id order) and then waits for the old
+    one -- a cycle Postgres ends with an uncaught DeadlockDetected. With the
+    whole set taken up front, in the one order every other path uses, the later
+    `release`/`block`/`book` calls find their rows already locked.
+    """
+    base_filter = Slot.starts_at == new_start
+    if old_slot_id is not None:
+        base_filter = or_(base_filter, Slot.id == old_slot_id)
+    bases = (await session.execute(select(Slot).where(base_filter))).scalars().all()
+    if not bases:
+        return
+    await session.execute(
+        select(Slot.id)
+        .where(or_(*[or_(Slot.id == b.id, _overlaps(b)) for b in bases]))
+        .order_by(Slot.id)
+        .with_for_update()
+    )
+
+
 async def _lock_with_siblings(session: AsyncSession, slot_id: int) -> tuple[Slot, list[Slot]]:
     """Lock a slot **and every slot overlapping it**, in one statement.
 
@@ -110,16 +147,11 @@ async def _lock_with_siblings(session: AsyncSession, slot_id: int) -> tuple[Slot
     if base is None:
         raise NotFound(f"slot {slot_id}")
 
-    overlapping = and_(
-        Slot.practice_id == base.practice_id,
-        Slot.starts_at < base.starts_at + timedelta(minutes=base.duration_min),
-        _ends_at(Slot) > base.starts_at,
-    )
     rows = (
         (
             await session.execute(
                 select(Slot)
-                .where(or_(Slot.id == slot_id, overlapping))
+                .where(or_(Slot.id == slot_id, _overlaps(base)))
                 .order_by(Slot.id)
                 .with_for_update()
                 .execution_options(populate_existing=True)
