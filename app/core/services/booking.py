@@ -1129,7 +1129,11 @@ async def _matching_slot(session: AsyncSession, starts_at: datetime) -> int | No
     return (
         await session.execute(
             select(Slot.id)
-            .where(Slot.starts_at == starts_at, Slot.status == SlotStatus.available)
+            .where(
+                Slot.starts_at == starts_at,
+                Slot.status == SlotStatus.available,
+                ~slot_service.overlaps_a_booked_slot(),
+            )
             .limit(1)
             .with_for_update()
         )

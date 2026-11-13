@@ -162,6 +162,87 @@ async def test_release_by_a_request_that_does_not_hold_the_slot_changes_nothing(
     assert slot.booked_request == request_id
 
 
+async def _sibling(db: AsyncSession, practice: Practice, of: Slot, **kw: object) -> Slot:
+    """Another slot of the same practice, by default at the same instant but the
+    other modality -- the unique index (§6.4) allows exactly that pair."""
+    sibling = Slot(
+        practice_id=practice.id,
+        starts_at=kw.pop("starts_at", of.starts_at),  # type: ignore[arg-type]
+        duration_min=kw.pop("duration_min", 60),  # type: ignore[arg-type]
+        modality=kw.pop("modality", Modality.onsite),  # type: ignore[arg-type]
+        status=SlotStatus.available,
+    )
+    db.add(sibling)
+    await db.flush()
+    return sibling
+
+
+async def test_booking_a_slot_closes_the_other_modality_at_the_same_hour(
+    db: AsyncSession, future_slot: Slot, practice: Practice, request_id: int, other_request_id: int
+) -> None:
+    """NP1/F12: the therapist is in one place at 09:00. An online and an on-site
+    slot at the same hour are one hour of her, not two."""
+    future_slot.modality = Modality.online
+    onsite = await _sibling(db, practice, future_slot)
+
+    await slot_service.book_slot(db, future_slot.id, request_id=request_id)
+
+    with pytest.raises(SlotUnavailable):
+        await slot_service.book_slot(db, onsite.id, request_id=other_request_id)
+    with pytest.raises(SlotUnavailable):
+        await slot_service.hold_slot(db, onsite.id, request_id=other_request_id)
+
+    offered = await slot_service.list_available_slots(
+        db,
+        window_from=future_slot.starts_at - timedelta(hours=1),
+        window_to=future_slot.starts_at + timedelta(hours=1),
+    )
+    assert onsite.id not in {view.id for view in offered}
+
+
+async def test_a_partly_overlapping_slot_is_closed_too_and_an_adjacent_one_is_not(
+    db: AsyncSession, future_slot: Slot, practice: Practice, request_id: int, other_request_id: int
+) -> None:
+    future_slot.modality = Modality.online
+    overlapping = await _sibling(
+        db, practice, future_slot, starts_at=future_slot.starts_at + timedelta(minutes=30)
+    )
+    adjacent = await _sibling(
+        db, practice, future_slot, starts_at=future_slot.starts_at + timedelta(minutes=60)
+    )
+    await slot_service.book_slot(db, future_slot.id, request_id=request_id)
+
+    with pytest.raises(SlotUnavailable):
+        await slot_service.hold_slot(db, overlapping.id, request_id=other_request_id)
+    held = await slot_service.hold_slot(db, adjacent.id, request_id=other_request_id)
+    assert held.status is SlotStatus.held
+
+
+async def test_releasing_the_booking_reopens_only_what_it_closed(
+    db: AsyncSession, future_slot: Slot, practice: Practice, request_id: int, other_request_id: int
+) -> None:
+    """NP1/F12: nothing was written to the sibling, so there is nothing to undo
+    wrongly -- a slot the therapist blocked herself stays blocked."""
+    future_slot.modality = Modality.online
+    reopened = await _sibling(db, practice, future_slot)
+    by_hand = await _sibling(
+        db,
+        practice,
+        future_slot,
+        starts_at=future_slot.starts_at + timedelta(minutes=15),
+        modality=Modality.online,
+    )
+    await slot_service.block_slot(db, by_hand.id)
+
+    await slot_service.book_slot(db, future_slot.id, request_id=request_id)
+    await slot_service.release_slot(db, future_slot.id, request_id)
+
+    held = await slot_service.hold_slot(db, reopened.id, request_id=other_request_id)
+    assert held.status is SlotStatus.held
+    await db.refresh(by_hand)
+    assert by_hand.status is SlotStatus.blocked
+
+
 async def test_block_and_unblock(db: AsyncSession, future_slot: Slot) -> None:
     blocked = await slot_service.block_slot(db, future_slot.id)
     assert blocked.status is SlotStatus.blocked

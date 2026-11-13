@@ -23,11 +23,13 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import aliased
 
 from app.core.enums import Modality, SlotStatus
 from app.core.errors import (
@@ -68,6 +70,76 @@ async def _lock(session: AsyncSession, slot_id: int) -> Slot:
     return slot
 
 
+def _ends_at(slot: Any) -> Any:
+    return slot.starts_at + func.make_interval(0, 0, 0, 0, 0, slot.duration_min)
+
+
+def overlaps_a_booked_slot() -> Any:
+    """SQL condition on `Slot`: another slot of the practice that is *booked*
+    overlaps this one's interval, whatever its modality.
+
+    The therapist is one person. An online and an on-site slot at 09:00 are one
+    hour of her, and a 09:30 slot overlaps a 09:00-10:00 one. Derived from the
+    bookings themselves rather than written onto the siblings: there is nothing
+    to undo when the booking is released, so reopening can only ever reopen what
+    the booking closed, and a slot she blocked by hand is never touched (F12).
+    """
+    other = aliased(Slot)
+    return (
+        select(other.id)
+        .where(
+            other.practice_id == Slot.practice_id,
+            other.id != Slot.id,
+            other.status == SlotStatus.booked,
+            other.starts_at < _ends_at(Slot),
+            Slot.starts_at < _ends_at(other),
+        )
+        .exists()
+    )
+
+
+async def _lock_with_siblings(session: AsyncSession, slot_id: int) -> tuple[Slot, list[Slot]]:
+    """Lock a slot **and every slot overlapping it**, in one statement.
+
+    Hard rule 7 for a reservation, widened: booking one of two overlapping slots
+    must serialise against booking the other, or both succeed. One statement in
+    id order, so two contenders lock the same set in the same order and wait on
+    each other rather than deadlocking.
+    """
+    base = (await session.execute(select(Slot).where(Slot.id == slot_id))).scalar_one_or_none()
+    if base is None:
+        raise NotFound(f"slot {slot_id}")
+
+    overlapping = and_(
+        Slot.practice_id == base.practice_id,
+        Slot.starts_at < base.starts_at + timedelta(minutes=base.duration_min),
+        _ends_at(Slot) > base.starts_at,
+    )
+    rows = (
+        (
+            await session.execute(
+                select(Slot)
+                .where(or_(Slot.id == slot_id, overlapping))
+                .order_by(Slot.id)
+                .with_for_update()
+                .execution_options(populate_existing=True)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    slot = next((row for row in rows if row.id == slot_id), None)
+    if slot is None:
+        raise NotFound(f"slot {slot_id}")
+    return slot, [row for row in rows if row.id != slot_id]
+
+
+def _refuse_if_a_sibling_is_booked(slot: Slot, siblings: list[Slot]) -> None:
+    for sibling in siblings:
+        if sibling.status is SlotStatus.booked:
+            raise SlotUnavailable(f"slot {slot.id} overlaps booked slot {sibling.id}")
+
+
 async def list_available_slots(
     session: AsyncSession,
     *,
@@ -89,6 +161,7 @@ async def list_available_slots(
         Slot.status == SlotStatus.available,
         Slot.starts_at >= window_from,
         Slot.starts_at <= window_to,
+        ~overlaps_a_booked_slot(),
     )
     if modality is not None:
         # A slot with modality NULL is offered as "either". This MUST NOT be
@@ -137,12 +210,13 @@ async def hold_slot(
     Never None: §6.4 makes `status='held'` ⟺ `hold_expires_at IS NOT NULL`, so
     "held indefinitely" is not a state this schema has.
     """
-    slot = await _lock(session, slot_id)
+    slot, siblings = await _lock_with_siblings(session, slot_id)
 
     if slot.status != SlotStatus.available:
         raise SlotUnavailable(f"slot {slot_id} is {slot.status.value}")
     if slot.starts_at <= now_utc():
         raise SlotInThePast(f"slot {slot_id} starts in the past")
+    _refuse_if_a_sibling_is_booked(slot, siblings)
 
     practice = await get_practice(session)
     slot.status = SlotStatus.held
@@ -172,13 +246,14 @@ async def book_slot(session: AsyncSession, slot_id: int, request_id: int) -> Slo
     From `held`, the hold must belong to this request -- otherwise approving one
     request would steal the slot another client is still filling in a form for.
     """
-    slot = await _lock(session, slot_id)
+    slot, siblings = await _lock_with_siblings(session, slot_id)
 
     if slot.status == SlotStatus.held:
         if slot.held_by_request != request_id:
             raise SlotUnavailable(f"slot {slot_id} is held by another request")
     elif slot.status != SlotStatus.available:
         raise SlotUnavailable(f"slot {slot_id} is {slot.status.value}")
+    _refuse_if_a_sibling_is_booked(slot, siblings)
 
     slot.status = SlotStatus.booked
     slot.hold_expires_at = None

@@ -388,6 +388,51 @@ async def test_accepting_a_proposal_for_the_held_time_books_the_held_slot(
     assert future_slot.hold_expires_at is None
 
 
+async def test_accepting_a_time_that_overlaps_a_booked_slot_confirms_without_taking_it(
+    db: AsyncSession,
+    client: Client,
+    session_type_id: int,
+    future_slot: Slot,
+    practice: Practice,
+    other_request_id: int,
+) -> None:
+    """NP1/F12: the other-modality slot at the booked hour is closed, so the
+    negotiation path must not try to book it (and must not fail either)."""
+    future_slot.modality = Modality.online
+    onsite = Slot(
+        practice_id=practice.id,
+        starts_at=future_slot.starts_at,
+        duration_min=60,
+        modality=Modality.onsite,
+        status=SlotStatus.available,
+    )
+    db.add(onsite)
+    await db.flush()
+    await slot_service.book_slot(db, future_slot.id, other_request_id)
+
+    request = await _negotiating(
+        db, client, session_type_id, await _spare_slot(db, practice), proposed=onsite.starts_at
+    )
+    confirmed = await booking.client_accept(db, request.id)
+
+    assert confirmed.status is RequestStatus.confirmed
+    await db.refresh(onsite)
+    assert onsite.status is SlotStatus.available
+    assert confirmed.slot_id is None
+
+
+async def _spare_slot(db: AsyncSession, practice: Practice) -> Slot:
+    spare = Slot(
+        practice_id=practice.id,
+        starts_at=datetime.now(UTC) + timedelta(days=40, microseconds=3),
+        duration_min=60,
+        status=SlotStatus.available,
+    )
+    db.add(spare)
+    await db.flush()
+    return spare
+
+
 async def test_client_accept_uses_the_most_recent_proposal(
     db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
 ) -> None:
