@@ -10,6 +10,8 @@
     <input type="hidden" name="token" value="{{ token }}">
     {% if book_text %}
     <p>{{ book_text }}</p>
+    {% if book_name %}<p>{{ book_name }}</p>{% endif %}
+    {% if book_contact %}<p>{{ book_contact }}</p>{% endif %}
     <button type="submit" name="mode" value="book">{{ t.confirm_book_yes }}</button>
     <button type="submit" name="mode" value="signin" class="secondary">{{ t.confirm_book_no }}</button>
     {% else %}

@@ -39,6 +39,9 @@ services:
       - -c
       - statement_timeout=30s
       - -c
+      # The slow-query log stays (500 ms) but without values: the app binds every value as a
+      # parameter, so the statement text carries $1, $2 ...; the two settings below stop the
+      # parameters being written beside it (PostgreSQL 13+; 0 = never), also on error.
       - log_min_duration_statement=500
       - -c
       - log_parameter_max_length=0

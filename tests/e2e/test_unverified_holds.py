@@ -39,7 +39,13 @@ from tests.e2e.test_web_booking import (  # noqa: F401  (fixtures)
 )
 
 
-async def _book(web: TestClient, committed: AsyncSession, slot_id: int, email: str = EMAIL):
+async def _book(
+    web: TestClient,
+    committed: AsyncSession,
+    slot_id: int,
+    email: str = EMAIL,
+    contact: str = "",
+):
     type_id = (
         await committed.execute(select(SessionType.id).order_by(SessionType.id).limit(1))
     ).scalar_one()
@@ -50,7 +56,7 @@ async def _book(web: TestClient, committed: AsyncSession, slot_id: int, email: s
             "csrf_token": _csrf(web),
             "problem": "p",
             "name": "N",
-            "contact": "",
+            "contact": contact,
             "email": email,
         },
     )
@@ -369,17 +375,31 @@ async def test_a_proved_owner_out_of_links_gets_the_same_refusal_as_a_new_addres
 
 
 async def _owner_with_a_carried_booking(
-    web: TestClient, web_slot: int, committed: AsyncSession
+    web: TestClient, web_slot: int, committed: AsyncSession, contact: str = ""
 ) -> tuple[object, str]:
     from app.core.services.clients import resolve_client
 
     owner_id = (await resolve_client(committed, Channel.email, EMAIL, verified=True)).id
     await committed.commit()
-    await _book(web, committed, web_slot)
+    await _book(web, committed, web_slot, contact=contact)
     url = await _login_url(committed, EMAIL)
     from urllib.parse import parse_qs, urlparse
 
     return owner_id, parse_qs(urlparse(url).query)["token"][0]
+
+
+async def test_the_confirm_page_shows_the_name_and_contact_that_one_click_files(
+    web: TestClient, web_slot: int, committed: AsyncSession
+) -> None:
+    """NP3c/5: the owner sees what the button files, not only when and what kind."""
+    _owner, token = await _owner_with_a_carried_booking(
+        web, web_slot, committed, contact="<b>+374 99 111222</b>"
+    )
+    page = web.get("/auth/callback", params={"token": token})
+    assert page.status_code == 200
+    assert "Имя в заявке: N" in page.text  # the test client reads Russian
+    assert "Контакт: &lt;b&gt;+374 99 111222&lt;/b&gt;" in page.text  # escaped, not markup
+    assert "<b>+374" not in page.text
 
 
 async def test_the_confirm_page_for_a_carried_booking_names_it_and_offers_both_choices(

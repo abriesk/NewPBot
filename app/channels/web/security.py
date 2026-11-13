@@ -213,12 +213,18 @@ def csrf_token_for(
 
 
 def csrf_ok(request: Request, submitted: str | None) -> bool:
+    """The cookie is present and valid for this session, and so is the submitted token.
+
+    Not "the two are equal": a full page load in tab B replaces the cookie, and Save in tab A
+    still carries the token it was rendered with. Any token still valid and bound to the same
+    session (the HMAC covers the session cookies) is as good as the cookie's own -- a token for
+    another session fails the binding, and a cross-site POST carries no (SameSite=Lax) cookie.
+    """
     cookie = request.cookies.get(csrf_cookie_name())
     if not cookie or not submitted:
         return False
-    if not hmac.compare_digest(cookie, submitted):
-        return False
-    return _csrf_valid(submitted, _binding(request))
+    binding = _binding(request)
+    return _csrf_valid(cookie, binding) and _csrf_valid(submitted, binding)
 
 
 # --- Admin sessions (§6.3, §17) ---------------------------------------------

@@ -156,6 +156,8 @@ auth:
   confirm_book: "Ձեր էլ. փոստի հասցեով սկսվել է հայտ {when} ({session_type}) համար։ Ուղարկե՞լ այն, թե՞ պարզապես մտնել։"   # TODO: review
   confirm_book_yes: "Ուղարկել այս հայտը"   # TODO: review
   confirm_book_no: "Միայն մտնել, չամրագրել"   # TODO: review
+  confirm_book_name: "Անունը հայտում՝ {name}"   # TODO: review
+  confirm_book_contact: "Կոնտակտ՝ {contact}"   # TODO: review
   greeting: "Բարև Ձեզ, {name}։"                  # TODO: review
   greeting_unnamed: "Բարև Ձեզ։"   # TODO: review
 
@@ -225,7 +227,7 @@ intent:
   auth.login_link.client.subject: "Ձեր մուտքի հղումը"   # TODO: review
   auth.login_link.client.body: "Այս հղումով կարող եք բացել ձեր ամրագրումը։ Այն գործում է մեկ անգամ և վավեր է {minutes} րոպե։"   # TODO: review
   auth.login_link.client.action.open: "Բացել իմ ամրագրումը"   # TODO: review
-  auth.login_link.client.books: "Ինչ-որ մեկը ընտրել է {when} ({session_type}) ձեր էլ. փոստի հասցեով։ Եթե դա դուք էիք, բացեք այս հղումը և ուղարկեք հայտը։ Այն գործում է մեկ անգամ և վավեր է {minutes} րոպե։"   # TODO: review
+  auth.login_link.client.books: "Ինչ-որ մեկը ընտրել է {when} ({session_type}) ձեր էլ. փոստի հասցեով։ Եթե դա դուք էիք, բացեք այս հղումը և ուղարկեք հայտը։"   # TODO: review
   auth.login_link.client.telegram_hint: "Telegram-ը ավելի հարմա՞ր է։ Միացրեք այն և ծանուցումները կստանաք այնտեղ։"   # TODO: review
   auth.login_link.client.action.telegram: "Միացնել Telegram"   # TODO: review
   auth.link_channel.client.body: "Միացրեք Telegram-ը՝ ձեր հանդիպման մասին ծանուցումներն այնտեղ ստանալու համար։"   # TODO: review

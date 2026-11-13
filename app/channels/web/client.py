@@ -136,10 +136,20 @@ async def _carried_booking_text(
         when, kind = await _book_summary(session, context["lang"], book)
     except (KeyError, ValueError):
         return {}
+    # What one click files, so the owner sees it before pressing (NP3c/5).
+    name = str(book.get("name") or "").strip()
+    contact = str(book.get("contact") or "").strip()
+    lang = context["lang"]
     return {
         "book_text": await get_text(
-            session, context["lang"], "auth.confirm_book", when=when, session_type=kind
-        )
+            session, lang, "auth.confirm_book", when=when, session_type=kind
+        ),
+        "book_name": await get_text(session, lang, "auth.confirm_book_name", name=name)
+        if name
+        else "",
+        "book_contact": await get_text(session, lang, "auth.confirm_book_contact", contact=contact)
+        if contact
+        else "",
     }
 
 

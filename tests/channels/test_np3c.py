@@ -5,6 +5,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime, timedelta
 
+import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -16,6 +17,8 @@ from app.core.models import BookingRequest, Client, NegotiationMessage, Practice
 from app.core.services import booking
 from app.core.services import slots as slot_service
 from app.core.services.translations import get_text
+from app.render.messages import render
+from tests.channels.test_telegram_flow import CHAT, _walk_to_contact
 
 _n = 0
 
@@ -132,3 +135,76 @@ async def test_web_counter_over_a_booked_slot_is_slot_gone(
         db, practice, client, session_type_id, future_slot, other_request_id
     )
     assert await _countered_instant(db, str(overlapping.id), "", "UTC") is _SLOT_GONE
+
+
+@pytest.mark.parametrize("locale", ["en", "ru", "hy"])
+async def test_the_books_mail_says_once_how_long_the_link_lasts(
+    db: AsyncSession, locale: str
+) -> None:
+    """NP3c/6: "works once, expires in 30 minutes" was in the body and again in the .books line."""
+    message = await render(
+        db,
+        intent_key="auth.login_link.client",
+        payload={
+            "url": "https://example.test/auth/callback?token=t",
+            "minutes": 30,
+            "when": "tomorrow at noon",
+            "session_type": "first meeting",
+        },
+        locale=locale,
+        channel=Channel.email,
+        tz="UTC",
+        base_url="https://example.test",
+    )
+    assert "tomorrow at noon" in message.text
+    assert message.text.count("30") == 1
+
+
+async def test_the_email_sent_line_escapes_the_address(
+    db: AsyncSession, future_slot: Slot, session_type_id: int, email_enabled: None
+) -> None:
+    """NP3c/6: `booking.contact.email_sent` is HTML for Telegram; an address with `&` in it is
+    escaped, not passed through."""
+    from app.channels.telegram.router import Update, handle
+
+    await _walk_to_contact(db, future_slot, session_type_id)
+    await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.CONTACT}:{kb.CONTACT_EMAIL}"))
+    reply = await handle(db, Update(chat_id=CHAT, text="R&D@Example.Test"))
+    assert reply is not None
+    assert "r&amp;d@example.test" in reply.extra[0]
+    assert "r&d@" not in reply.extra[0]
+
+
+def _request_with(cookies: dict[str, str]):  # type: ignore[no-untyped-def]
+    from starlette.requests import Request
+
+    header = "; ".join(f"{k}={v}" for k, v in cookies.items())
+    return Request(
+        {"type": "http", "method": "POST", "path": "/", "headers": [(b"cookie", header.encode())]}
+    )
+
+
+def test_csrf_accepts_any_valid_token_of_the_same_session() -> None:
+    """NP3c/7: a full page load in tab B replaces the cookie; Save in tab A carries the old token."""
+    from app.channels.web.security import (
+        ADMIN_COOKIE,
+        _binding,
+        _mint_csrf,
+        csrf_cookie_name,
+        csrf_ok,
+    )
+
+    session = {ADMIN_COOKIE: "one-session"}
+    binding = _binding(_request_with(session))
+    tab_a, tab_b = _mint_csrf(binding), _mint_csrf(binding)
+    assert tab_a != tab_b
+    # the cookie holds tab B's token (the later page load); tab A submits its own
+    request = _request_with({**session, csrf_cookie_name(): tab_b})
+    assert csrf_ok(request, tab_a) is True
+    assert csrf_ok(request, tab_b) is True
+
+    other = _mint_csrf(_binding(_request_with({ADMIN_COOKIE: "another-session"})))
+    assert csrf_ok(request, other) is False
+    assert csrf_ok(_request_with({**session, csrf_cookie_name(): other}), tab_a) is False
+    assert csrf_ok(_request_with(session), tab_a) is False  # no cookie at all
+    assert csrf_ok(request, "") is False
