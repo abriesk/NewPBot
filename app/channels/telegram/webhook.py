@@ -74,7 +74,13 @@ def build_router() -> APIRouter:
 
 def _parse(payload: dict[str, object]) -> Update | None:
     """Pull the parts the router uses out of a raw update."""
-    message = payload.get("message") or payload.get("edited_message")
+    raw_id = payload.get("update_id")
+    update_id = raw_id if isinstance(raw_id, int) else None
+
+    # `edited_message` is deliberately not read: a client fixing a typo in what
+    # they sent is not answering the question the flow has since moved on to,
+    # and stored as one it became their name (C5).
+    message = payload.get("message")
     if isinstance(message, dict):
         chat = message.get("chat")
         sender = message.get("from")
@@ -84,6 +90,7 @@ def _parse(payload: dict[str, object]) -> Update | None:
             chat_id=int(chat["id"]),
             text=message.get("text"),
             display_name=_display_name(sender),
+            update_id=update_id,
         )
 
     callback = payload.get("callback_query")
@@ -101,6 +108,7 @@ def _parse(payload: dict[str, object]) -> Update | None:
             # the therapist's client stops spinning on the tap.
             message_id=int(message_id) if message_id is not None else None,
             callback_id=str(callback.get("id")) if callback.get("id") else None,
+            update_id=update_id,
         )
 
     return None

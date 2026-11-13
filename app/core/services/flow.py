@@ -142,6 +142,32 @@ async def data(session: AsyncSession, client_id: UUID, channel: Channel) -> dict
     return dict(state.data or {}) if state else {}
 
 
+#: Where the last typed update applied to this flow is remembered, in `data`
+#: beside the answers -- it is exactly as transient as they are (C5).
+LAST_UPDATE_KEY = "last_update_id"
+
+
+async def last_update_id(session: AsyncSession, client_id: UUID, channel: Channel) -> int | None:
+    state = await get(session, client_id, channel)
+    value = (state.data or {}).get(LAST_UPDATE_KEY) if state else None
+    return value if isinstance(value, int) else None
+
+
+async def stamp_update(
+    session: AsyncSession, client_id: UUID, channel: Channel, update_id: int | None
+) -> None:
+    """Record that this update has been applied. Only on a live flow: one that
+    just finished (cleared on submit) has nothing left for a redelivery to
+    corrupt, and creating a row here would resurrect a flow nobody is in."""
+    if update_id is None:
+        return
+    state = await get(session, client_id, channel)
+    if state is None:
+        return
+    state.data = {**(state.data or {}), LAST_UPDATE_KEY: update_id}
+    await session.flush()
+
+
 async def clear(session: AsyncSession, client_id: UUID, channel: Channel) -> None:
     """Finish a flow. Called on submit, on cancel, and on /start."""
     await session.execute(

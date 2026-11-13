@@ -196,6 +196,26 @@ async def test_a_full_update_sequence_produces_a_pending_request_with_a_held_slo
     assert str(request.uuid) in reply.text
 
 
+async def test_a_redelivered_text_update_is_not_applied_to_the_next_step(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    """NP1/C5: Telegram redelivers an update whose first attempt was slow. The
+    problem text, delivered twice, must not become the client's name."""
+    client = await _walk_to_slot_pick(db, future_slot)
+
+    await handle(db, Update(chat_id=CHAT, text="work stress", update_id=500))
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.entering_name
+
+    again = await handle(db, Update(chat_id=CHAT, text="work stress", update_id=500))
+    assert again is None
+    assert "name" not in await flow.data(db, client.id, Channel.telegram)
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.entering_name
+
+    # A later update is a new answer and is applied.
+    await handle(db, Update(chat_id=CHAT, text="Anna", update_id=501))
+    assert (await flow.data(db, client.id, Channel.telegram))["name"] == "Anna"
+
+
 async def test_the_answers_reach_the_request(
     db: AsyncSession, future_slot: Slot, session_type_id: int
 ) -> None:

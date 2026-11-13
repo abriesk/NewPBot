@@ -110,6 +110,9 @@ class Update:
     #: (§13.2). Both are None for an ordinary message.
     message_id: int | None = None
     callback_id: str | None = None
+    #: Telegram's per-bot sequence number. Typed answers are not idempotent the
+    #: way a button tap is, so a redelivery is recognised by it (C5).
+    update_id: int | None = None
 
 
 async def handle(session: AsyncSession, update: Update) -> Reply | None:
@@ -151,12 +154,27 @@ async def handle(session: AsyncSession, update: Update) -> Reply | None:
         if update.callback_data:
             return await _callback(session, client, update)
         if update.text:
-            return await _text(session, client, update)
+            if await _already_applied(session, client, update):
+                return None
+            reply = await _text(session, client, update)
+            await flow.stamp_update(session, client.id, Channel.telegram, update.update_id)
+            return reply
     except DomainError as exc:
         logger.info("refused telegram action for chat %s: %s", update.chat_id, type(exc).__name__)
         return Reply(await get_text(session, client.language, "common.error.generic"))
 
     return None
+
+
+async def _already_applied(session: AsyncSession, client: Client, update: Update) -> bool:
+    """A typed update Telegram has delivered before (or one older than the last
+    applied): ignored, so a slow first attempt redelivered cannot be taken for
+    the answer to the *next* question. Updates without an id (tests, any other
+    adapter) are never skipped."""
+    if update.update_id is None:
+        return False
+    last = await flow.last_update_id(session, client.id, Channel.telegram)
+    return last is not None and update.update_id <= last
 
 
 def _client_name(client: Client | None) -> str | None:

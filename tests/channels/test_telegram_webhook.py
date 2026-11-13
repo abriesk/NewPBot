@@ -107,6 +107,23 @@ def test_an_unhandled_update_type_is_ignored_not_an_error() -> None:
     assert _parse({"update_id": 9, "poll": {"id": "p"}}) is None
 
 
+def test_an_edited_message_is_not_a_new_message() -> None:
+    """NP1/C5: fixing a typo in a sent message must not answer the next step."""
+    edited = {
+        "update_id": 11,
+        "edited_message": {"message_id": 1, "chat": {"id": 5, "type": "private"}, "text": "typo"},
+    }
+    assert _parse(edited) is None
+
+
+def test_the_update_id_travels_with_the_parsed_update() -> None:
+    update = _parse(
+        {"update_id": 77, "message": {"message_id": 1, "chat": {"id": 5}, "text": "hello"}}
+    )
+    assert update is not None
+    assert update.update_id == 77
+
+
 def test_an_update_without_a_chat_is_ignored() -> None:
     assert _parse({"message": {"message_id": 1, "text": "hi"}}) is None
 
