@@ -3,7 +3,7 @@
 {# §12.1: shown on the page an emailed link opened, and on no other visit. #}
 {% if greeting %}<p class="greeting">{{ greeting }}</p>{% endif %}
 <div class="page-head">
-  <h1>{{ practice.name }}</h1>
+  <h1>{{ t.welcome }}</h1>
 </div>
 {% if intro %}
   {# Her own words, written at /admin/content and sanitised by the web

@@ -134,3 +134,15 @@ def test_a_rejection_carries_the_therapist_words_without_a_label(lang: str) -> N
     value = CATALOGUE[lang][key]
     assert value == "{reason}", f"{lang}.yaml labels the note: {value}"
     assert "{reason}" in CATALOGUE[lang]["intent.request.cancelled.client.reason"]
+
+
+def test_no_armenian_value_ends_in_a_latin_colon() -> None:
+    """NP4a: the Armenian full stop is "։" (U+0589); a Latin ":" at the end of a sentence reads as a typo."""
+    bad = {k: v for k, v in CATALOGUE["hy"].items() if v.rstrip().endswith(":")}
+    assert not bad, f"hy values ending in ':': {sorted(bad)}"
+
+
+def test_one_voice_in_armenian_and_the_word_for_a_request_in_russian() -> None:
+    """NP4a: she speaks in the first person ("Խնդրում եմ", not "Խնդրում ենք"); ru says "заявка", never "запрос"."""
+    assert not [k for k, v in CATALOGUE["hy"].items() if "Խնդրում ենք" in v]
+    assert not [k for k, v in CATALOGUE["ru"].items() if "запрос" in v.lower().replace("запросите", "")]

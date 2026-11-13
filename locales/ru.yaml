@@ -20,7 +20,7 @@ common:
   skip: "Пропустить"
   back: "Назад"                                  # TODO: confirm
   cancel: "Отмена"                               # TODO: confirm
-  home: "Домой"
+  home: "На главную"   # TODO: review
   yes: "Да"                                      # TODO: confirm
   no: "Нет"                                      # TODO: confirm
   continue: "Продолжить"                         # TODO: confirm
@@ -29,9 +29,19 @@ common:
   welcome_back: "Вы вернулись в главное меню."
   error.generic: "Произошла ошибка. Пожалуйста, попробуйте позже."
   error.expired_link: "Ссылка больше не действует. Запросите новую."   # TODO
-  error.not_found: "Не найдено."                                        # TODO
+  error.not_found: "Такой страницы нет. Возможно, ссылка устарела."   # TODO: review
   error.rate_limited: "Слишком много попыток. Попробуйте позже."        # TODO
   error.captcha: "Не удалось проверить форму. Обновите страницу и отправьте её ещё раз — для проверки нужен включённый JavaScript."   # TODO: review
+  error.title: "Что-то пошло не так"   # TODO: review
+  error.not_found_title: "Страница не найдена"   # TODO: review
+  error.expired_link_title: "Ссылка не действует"   # TODO: review
+  error.stale: "Страница была открыта слишком долго, поэтому форма не отправилась. Ваш текст сохранён — нажмите кнопку ещё раз."   # TODO: review
+  change: "Изменить"   # TODO: review
+  optional: "(необязательно)"   # TODO: review
+  send_request: "Отправить заявку"   # TODO: review
+  step: "Шаг {n} из {total}"   # TODO: review
+  noscript: "Чтобы выбрать время, нужен JavaScript. Включите его и обновите страницу."   # TODO: review
+  skip_to_content: "Перейти к содержимому"   # TODO: review
 
 date:
   weekday.0: "пн"
@@ -82,11 +92,11 @@ booking:
   type.with_price: "{name} — {duration} мин ({price})"
   type.without_price: "{name} — {duration} мин"
   choose_timezone: "Пожалуйста, укажите ваш часовой пояс."
-  timezone.detected: "Определён часовой пояс {timezone}. Всё верно?"   # TODO
-  choose_slot: "Выберите удобное время. Время указано в поясе {timezone}."   # TODO
+  timezone.detected: "Время показано в вашем часовом поясе. Если это не так, выберите другой."   # TODO: review
+  choose_slot: "Выберите удобное время."   # TODO: review
   slot.none_available: "Свободного времени сейчас нет."                       # TODO
-  slot.none_online: "Свободных онлайн-времён сейчас нет. Очные есть."          # TODO: review
-  slot.none_onsite: "Свободных очных времён сейчас нет. Онлайн есть."          # TODO: review
+  slot.none_online: "Сейчас нет свободного времени для онлайн-встреч. Есть время для очных."   # TODO: review
+  slot.none_onsite: "Сейчас нет свободного времени для очных встреч. Есть время для онлайн-встреч."   # TODO: review
   switch.online: "Перейти к онлайн"                                            # TODO: review
   switch.onsite: "Перейти к очным"                                             # TODO: review
   slot.held: "Пожалуйста, завершите за {minutes} минут. Время не удерживается за вами, пока вы не отправите заявку, поэтому его ещё может выбрать кто-то другой."   # TODO
@@ -104,37 +114,43 @@ booking:
   contact.email_invalid: "Это не похоже на адрес электронной почты. Пожалуйста, проверьте и отправьте ещё раз."
   contact.email_taken: "Этот адрес уже привязан к другому профилю. Пожалуйста, укажите другой."
   contact.email_sent: "Я отправила ссылку для подтверждения на {email}. Откройте её — и подтверждения и напоминания будут приходить также на почту."
-  submitted: "Спасибо. Ваш запрос отправлен, номер {uuid}. Я свяжусь с вами в ближайшее время."
+  submitted: "Спасибо. Ваша заявка отправлена, номер {uuid}. Я свяжусь с вами в ближайшее время."   # TODO: review
   check_email: "На вашу почту отправлена ссылка для входа. Перейдите по ней, чтобы открыть эту заявку и получать напоминания."
   captcha_wait: "Секунду — заканчиваем быструю проверку."   # TODO: review
   cancelled_by_user: "Запись отменена. Вы вернулись в главное меню."
-  unavailable: "Сейчас запись закрыта."                                        # TODO
+  unavailable: "Сейчас приём заявок закрыт."   # TODO: review
+  onsite_no_address: "Адрес придёт вместе с подтверждением."   # TODO: review
+  timezone.shown: "Время указано в поясе: {zone}."   # TODO: review
+  email_hint: "Только для ссылки подтверждения и напоминаний."   # TODO: review
+  slot.taken_title: "Это время уже занято"   # TODO: review
+  choose_another: "Выбрать другое время"   # TODO: review
 
 merge:
-  confirm: "У вас здесь есть запись, сделанная по электронной почте. Присоединить её к этому Telegram-аккаунту, чтобы всё было в одном месте?"   # TODO: review
+  confirm: "У вас здесь есть заявка, поданная по электронной почте. Присоединить её к этому Telegram-аккаунту, чтобы всё было в одном месте?"   # TODO: review
   confirm.yes: "Да, это я"                                                    # TODO: review
   confirm.no: "Это не я"                                                      # TODO: review
-  done: "Готово. Теперь все ваши записи в одном месте."                       # TODO: review
+  done: "Готово. Теперь все ваши заявки в одном месте."   # TODO: review
   busy: "У вас здесь осталось незавершённое действие. Пожалуйста, закончите его, а потом снова откройте ссылку из письма."   # TODO: review
 
 waitlist:
-  intro: "К сожалению, сейчас нет свободных мест. Вы можете оставить заявку в лист ожидания."
-  from_picker: "Ни одно из этих времён мне не подходит"                        # TODO: review
+  intro: "Сейчас у меня нет свободного времени. Оставьте заявку в листе ожидания — я напишу, когда оно появится."   # TODO: review
+  from_picker: "Мне не подходит ни один вариант"   # TODO: review
   intro_by_choice: "Оставьте заявку, и я напишу вам, когда освободится подходящее время."  # TODO: review
   ask_problem: "Кратко опишите, с чем вы хотели бы обратиться."                 # TODO
   ask_contact: "Пожалуйста, оставьте ваши контакты для связи."
   submitted: "Спасибо. Ваша заявка принята, я свяжусь с вами."                  # TODO
+  join: "Встать в лист ожидания"   # TODO: review
 
 auth:
   sign_in: "Вход"                                # TODO: review
   email_label: "Ваш адрес электронной почты"     # TODO: review
   send_link: "Прислать ссылку"                   # TODO: review
-  link_sent: "Если этот адрес здесь известен, ссылка для входа уже отправлена."   # TODO: review
+  link_sent: "Проверьте почту. Если этот адрес мне известен, ссылка для входа уже в пути — иногда она идёт минуту."   # TODO: review
   confirm_book: "С вашим адресом электронной почты начата заявка на {when} ({session_type}). Отправить её или просто войти?"   # TODO: review
   confirm_book_yes: "Отправить эту заявку"   # TODO: review
   confirm_book_no: "Только войти, не записываться"   # TODO: review
   greeting: "Здравствуйте, {name}."               # TODO: review
-  greeting_unnamed: "Здравствуйте, уважаемый клиент."   # TODO: review
+  greeting_unnamed: "Здравствуйте."   # TODO: review
 
 request:
   title: "Ваша заявка"                           # TODO: review
@@ -160,6 +176,10 @@ request:
   counter.back_months: "« Месяцы"
   counter.back_days: "« Дни"
   when: "Когда"
+  you: "Вы"   # TODO: review
+  reference: "Номер заявки: {ref}"   # TODO: review
+  decline_ask: "Отказаться? Заявка будет закрыта."   # TODO: review
+  decline_yes: "Да, отказаться"   # TODO: review
 
 intent:
   request.proposal.client.body: "Предложено время по вашей заявке {uuid}: {time}."

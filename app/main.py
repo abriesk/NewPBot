@@ -15,15 +15,18 @@ from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, Request, Response
+from fastapi.exception_handlers import http_exception_handler
 from fastapi.responses import JSONResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
+from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.channels.telegram.webhook import build_router as telegram_router
 from app.channels.telegram.webhook import register_webhook
 from app.channels.web.admin import build_router as admin_router
 from app.channels.web.admin import MAX_CONFIG_UPLOAD
 from app.channels.web.client import build_router as web_router
+from app.channels.web.client import not_found_page
 from app.channels.web.middleware import (
     SECURITY_HEADERS,
     BodyLimitMiddleware,
@@ -101,6 +104,23 @@ def create_app() -> FastAPI:
         limits={"/admin/maintenance/config/import": MAX_CONFIG_UPLOAD + 64 * 1024},
     )
     app.add_middleware(SecurityHeadersMiddleware)
+
+    #: Paths that are not the client site: their 404s keep the framework's plain answer.
+    non_client = ("/admin", "/static", "/telegram", "/healthz", "/readyz")
+
+    @app.exception_handler(StarletteHTTPException)
+    async def http_error(request: Request, exc: StarletteHTTPException) -> Response:
+        """A visitor who follows a stale link meets the site's own 404 page (a heading, a sentence and a way on), not
+        the JSON `{"detail":"Not Found"}`. Only for browsers on the client site; every other answer is unchanged."""
+        path = request.url.path
+        if (
+            exc.status_code == 404
+            and request.method == "GET"
+            and not path.startswith(non_client)
+            and "json" not in request.headers.get("accept", "")
+        ):
+            return await not_found_page(request)
+        return await http_exception_handler(request, exc)
 
     @app.exception_handler(Exception)
     async def record_unhandled(request: Request, exc: Exception) -> Response:

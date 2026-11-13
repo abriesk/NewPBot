@@ -6,9 +6,11 @@
 <meta name="color-scheme" content="light dark">
 <title>{% block title %}{{ practice.name }}{% endblock %}</title>
 <link rel="stylesheet" href="/static/style.css">
-<script src="/static/htmx.min.js" defer></script>
+{# htmx only where a page uses it (/book): `{% block head %}` #}
+{% block head %}{% endblock %}
 </head>
 <body>
+<a class="sr-only" href="#main">{{ t.skip_to_content }}</a>
 <header>
   <div class="wrap">
     <a class="brand" href="/">{{ practice.name }}</a>
@@ -17,18 +19,23 @@
         <a href="/t/{{ topic.code }}"
            {% if request.url.path == '/t/' ~ topic.code %}aria-current="page"{% endif %}>{{ topic.title }}</a>
       {% endfor %}
+      {% if not signed_in and email_enabled %}
+        <a href="/auth/email" {% if request.url.path == '/auth/email' %}aria-current="page"{% endif %}>{{ t.sign_in }}</a>
+      {% endif %}
       <a class="cta" href="/book">{{ t.consultation }}</a>
     </nav>
-    <form class="lang" method="get" action="{{ request.url.path }}">
+    <form class="lang" method="get" role="group" aria-label="Language / Язык / Լեզու" action="{{ request.url.path }}">
       {# DESIGN.md §11: two client languages. `hy` is Armenian; `am` is Amharic
          and must never appear (hard rule 5). #}
-      <button name="lang" value="ru" {% if lang == 'ru' %}disabled{% endif %}>Русский</button>
-      <button name="lang" value="hy" {% if lang == 'hy' %}disabled{% endif %}>Հայերեն</button>
+      {# Each button names its own language (`lang`) so a screen reader pronounces it, and the current one says so. #}
+      <button name="lang" value="ru" lang="ru" {% if lang == 'ru' %}disabled aria-current="true"{% endif %}>Русский</button>
+      <button name="lang" value="hy" lang="hy" {% if lang == 'hy' %}disabled aria-current="true"{% endif %}>Հայերեն</button>
+      <button name="lang" value="en" lang="en" {% if lang == 'en' %}disabled aria-current="true"{% endif %}>English</button>
     </form>
   </div>
 </header>
 
-<main><div class="wrap">{% block content %}{% endblock %}</div></main>
+<main id="main"><div class="wrap">{% block content %}{% endblock %}</div></main>
 
 <footer>
   <div class="wrap">

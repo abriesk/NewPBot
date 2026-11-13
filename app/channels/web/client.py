@@ -71,8 +71,9 @@ from app.core.services.settings import get_practice
 from app.core.services.slots import list_available_slots
 from app.core.services.translations import get_text
 from app.db import unit_of_work
-from app.render.dates import day_label
-from app.render.labels import session_type_name
+from app.render.dates import day_label, when_label
+from app.render.labels import price_text, session_type_name
+from app.render.zones import zone_label
 from app.render.markdown import to_web_html
 
 logger = logging.getLogger(__name__)
@@ -118,11 +119,7 @@ async def _book_summary(
     starts = (
         await session.execute(select(Slot.starts_at).where(Slot.id == int(book["slot_id"])))
     ).scalar_one_or_none()
-    when = (
-        f"{starts.astimezone(ZoneInfo(zone)).strftime('%Y-%m-%d %H:%M')} ({zone})"
-        if starts
-        else "?"
-    )
+    when = await when_label(session, lang, starts, zone) if starts else "?"
     code = (
         await session.execute(
             select(SessionType.code).where(SessionType.id == int(book["session_type_id"]))
@@ -148,16 +145,116 @@ async def _carried_booking_text(
     }
 
 
-async def _bad_email(session: AsyncSession, context: dict[str, Any]) -> Response:
-    """The readable refusal for an address that is not one (REVIEW C15, F4)."""
+async def not_found_page(request: Request) -> Response:
+    """The client site's 404 for a path that is no route at all (registered in app.main)."""
+    async with unit_of_work() as session:
+        context = await _context(session, request)
+        return await _error_page(
+            context, context["t"]["not_found_title"], context["t"]["not_found"], 404, action="home"
+        )
+
+
+async def _stale_page(request: Request, *, kept: str = "") -> Response:
+    """A form posted with a CSRF token that ran out (the page sat open too long): 403, and a sentence that says so.
+
+    Not a blank response. The text the visitor typed is shown back (`kept`) where the form cannot be re-rendered.
+    """
+    async with unit_of_work() as session:
+        context = await _context(session, request)
+        return await _error_page(
+            context, context["t"]["error_title"], context["t"]["stale"], 403, action="home", kept=kept
+        )
+
+
+async def _details_page(
+    session: AsyncSession,
+    request: Request,
+    context: dict[str, Any],
+    client: Client | None,
+    reservation: dict[str, Any],
+    *,
+    values: dict[str, str] | None = None,
+    errors: dict[str, str] | None = None,
+    status: int = 200,
+) -> Response:
+    """§12.1 step 3. Also the answer to a refused submission: the same form, what was typed kept, the message beside
+    the field it is about (`errors` is keyed by field name; `form` is for a message about the whole form)."""
+    t = context["t"]
+    lang = context["lang"]
+    # `booking.slot.held` carries {minutes}: the hold window the client is racing, so it must be a number and not
+    # the placeholder (§15).
+    labels = {
+        **t,
+        "slot_held": await get_text(
+            session, lang, "booking.slot.held", minutes=context["practice"].slot_hold_minutes
+        ),
+    }
+
+    # §12.1: the notice names the instant it is holding, not merely that something is held. A reservation made before
+    # this field existed carries no time, and the banner renders exactly as it did.
+    held_raw = reservation.get("starts_at")
+    held_when = (
+        await _format(session, datetime.fromisoformat(held_raw), context, reservation.get("tz"))
+        if held_raw
+        else None
+    )
+    # What she is about to send, repeated from the picker with a way back (quick win 12).
+    code = (
+        await session.execute(
+            select(SessionType.code).where(SessionType.id == int(reservation["session_type_id"]))
+        )
+    ).scalar_one_or_none()
+    modality = str(reservation.get("modality", "online"))
+    summary = " · ".join(
+        part
+        for part in (
+            await session_type_name(session, lang, code) if code else "",
+            t["modality_onsite"] if modality == "onsite" else t["modality_online"],
+            held_when or "",
+        )
+        if part
+    )
+
     return _render(
-        "error.html",
+        "details.html",
         {
             **context,
-            "heading": context["t"]["error"],
-            "message": await get_text(session, context["lang"], "booking.contact.email_invalid"),
+            "t": labels,
+            "held_when": held_when,
+            "summary": summary,
+            "signed_in": client is not None,
+            # §12.1: both prefills need a session. At this step an unsigned visitor has not identified themselves --
+            # the address arrives at submit -- so filling either from a typed one would tell whoever guessed it that
+            # the address is known here, and whose it is.
+            "display_name": client.display_name if client else None,
+            "contact_note": await booking.last_contact_note(session, client.id) if client else None,
+            "captcha": _challenge(context["practice"]),
+            "values": values or {},
+            "errors": errors or {},
         },
-        status_code=400,
+        status_code=status,
+    )
+
+
+async def _waitlist_form(
+    context: dict[str, Any],
+    practice: Practice,
+    *,
+    by_choice: bool,
+    values: dict[str, str] | None = None,
+    errors: dict[str, str] | None = None,
+    status: int = 200,
+) -> Response:
+    return _render(
+        "waitlist.html",
+        {
+            **context,
+            "by_choice": by_choice,
+            "captcha": _challenge(practice),
+            "values": values or {},
+            "errors": errors or {},
+        },
+        status_code=status,
     )
 
 
@@ -228,9 +325,10 @@ async def _labels(session: AsyncSession, lang: str) -> dict[str, str]:
     """
     keys = {
         "consultation": "menu.consultation",
+        "welcome": "common.welcome",
         "home": "common.home",
         "back": "common.back",
-        "submit": "common.continue",
+        "submit": "common.send_request",
         "skip": "common.skip",
         "content_empty": "content.empty",
         "choose_type": "booking.choose_type",
@@ -238,9 +336,10 @@ async def _labels(session: AsyncSession, lang: str) -> dict[str, str]:
         "modality_online": "booking.modality.online",
         "modality_onsite": "booking.modality.onsite",
         "onsite_info": "booking.onsite_info",
-        "onsite_no_address": "common.error.not_found",
+        "onsite_no_address": "booking.onsite_no_address",
         "choose_timezone": "booking.choose_timezone",
-        "timezone_detected": "booking.timezone.detected",
+        "timezone_shown": "booking.timezone.shown",
+        "email_hint": "booking.email_hint",
         "choose_slot": "booking.choose_slot",
         "no_slots": "booking.slot.none_available",
         "slot_held": "booking.slot.held",
@@ -283,6 +382,23 @@ async def _labels(session: AsyncSession, lang: str) -> dict[str, str]:
         "connect_telegram": "intent.auth.login_link.client.action.telegram",
         "telegram_hint": "intent.auth.login_link.client.telegram_hint",
         "error": "common.error.generic",
+        "error_title": "common.error.title",
+        "not_found_title": "common.error.not_found_title",
+        "expired_link_title": "common.error.expired_link_title",
+        "stale": "common.error.stale",
+        "slot_taken_title": "booking.slot.taken_title",
+        "choose_another": "booking.choose_another",
+        "change": "common.change",
+        "optional": "common.optional",
+        "step": "common.step",
+        "noscript": "common.noscript",
+        "skip_to_content": "common.skip_to_content",
+        "waitlist_join": "waitlist.join",
+        "you": "request.you",
+        "reference": "request.reference",
+        "decline_ask": "request.decline_ask",
+        "decline_yes": "request.decline_yes",
+        "email_invalid": "booking.contact.email_invalid",
         "expired_link": "common.error.expired_link",
         "not_found": "common.error.not_found",
         "captcha_failed": "common.error.captcha",
@@ -322,6 +438,10 @@ async def _context(
         "topics": topics,
         "t": await _labels(session, resolved),
         "csrf_token": csrf_token_for(request),
+        "signed_in": client is not None,
+        "email_enabled": get_settings().email_enabled,
+        "errors": {},
+        "values": {},
         # §17's free-text cap, so the form can stop somebody typing three pages
         # before the server tells them no. The refusal is still the core's.
         "text_max": CLIENT_TEXT_MAX_CHARS,
@@ -433,6 +553,31 @@ def _timezone(request: Request, practice_tz: str) -> str:
     return practice_tz
 
 
+async def _error_page(
+    context: dict[str, Any], heading: str, message: str, status: int, *, action: str = "home", kept: str = ""
+) -> Response:
+    """An error page that says what happened and offers the next step that fits it, not only "Home".
+
+    `kept` is text the visitor typed into a form that could not be processed: it is shown back so it can be copied.
+    """
+    t = context["t"]
+    href, label = {
+        "home": ("/", t["home"]),
+        "book": ("/book", t["choose_another"]),
+        "link": ("/auth/email", t["send_link"]),
+    }[action]
+    return _render(
+        "error.html",
+        {**context, "heading": heading, "message": message, "action_href": href, "action_label": label, "kept": kept},
+        status_code=status,
+    )
+
+
+def _short_ref(uuid: UUID) -> str:
+    """The reference a client can read out on the phone: the first block of the uuid, upper case."""
+    return str(uuid).split("-")[0].upper()
+
+
 def _render(name: str, context: dict[str, Any], status_code: int = 200) -> HTMLResponse:
     # Starlette takes the request first; the older (name, context) form is gone.
     response = TEMPLATES.TemplateResponse(
@@ -497,15 +642,7 @@ def build_router() -> APIRouter:
             try:
                 await content.get_topic(session, topic_code)
             except NotFound:
-                return _render(
-                    "error.html",
-                    {
-                        **context,
-                        "heading": context["t"]["not_found"],
-                        "message": context["t"]["not_found"],
-                    },
-                    status_code=404,
-                )
+                return await _error_page(context, context["t"]["not_found_title"], context["t"]["not_found"], 404, action="home")
 
             blocks = await content.get_topic_blocks(session, topic_code, context["lang"])
             title = await get_text(session, context["lang"], f"content.topic.{topic_code}.title")
@@ -547,20 +684,23 @@ def build_router() -> APIRouter:
             session_types = []
             for st in await _active_session_types(session):
                 name = await session_type_name(session, context["lang"], st.code)
+                price = price_text(st)
                 session_types.append(
                     {
                         "id": st.id,
+                        # A price is shown only when she stored one (quick win 13); never invented.
                         "label": await get_text(
                             session,
                             context["lang"],
-                            "booking.type.without_price",
+                            "booking.type.with_price" if price else "booking.type.without_price",
                             name=name,
                             duration=st.duration_min,
+                            price=price,
                         ),
                     }
                 )
 
-            timezones = (
+            options = (
                 (
                     await session.execute(
                         select(TimezoneOption)
@@ -571,18 +711,19 @@ def build_router() -> APIRouter:
                 .scalars()
                 .all()
             )
+            # Localised city and GMT offset, IANA ids stay the values (item 2). A zone the browser reported that is
+            # not on her list is added, so a visitor from Almaty is not silently put in Yerevan (quick win 1).
+            now = now_utc()
+            ids = [option.iana_name for option in options]
+            if tz not in ids:
+                ids.append(tz)
+            timezones = [
+                {"iana_name": iana, "label": zone_label(iana, context["lang"], now)} for iana in ids
+            ]
 
-            # Both of these carry a {timezone} placeholder, which the generic
-            # label pass has no zone to fill (§15). Re-resolved here with the
-            # same IANA name the Telegram flow passes.
             labels = {
                 **context["t"],
-                "timezone_detected": await get_text(
-                    session, context["lang"], "booking.timezone.detected", timezone=tz
-                ),
-                "choose_slot": await get_text(
-                    session, context["lang"], "booking.choose_slot", timezone=tz
-                ),
+                "choose_slot": await get_text(session, context["lang"], "booking.choose_slot"),
             }
 
             # §12.1: the twin of the on-site rule below it. Someone choosing to
@@ -659,10 +800,13 @@ def build_router() -> APIRouter:
                 starts.setdefault(day, slot.starts_at_utc)
                 grouped[day].append({"id": slot.id, "label": local.strftime("%H:%M")})
 
-            days = [
-                (await day_label(session, lang, starts[day], zone), times)
-                for day, times in grouped.items()
-            ]
+            days = []
+            for day, times in grouped.items():
+                heading = await day_label(session, lang, starts[day], zone)
+                # A button named only "18:00" says nothing out of context (WCAG 2.4.6): the day goes in its name.
+                for time in times:
+                    time["aria"] = f"{heading}, {time['label']}"
+                days.append((heading, times))
 
             return _render(
                 "partials/slots.html",
@@ -674,6 +818,11 @@ def build_router() -> APIRouter:
                     "session_type_id": session_type_id or "",
                     "modality": modality or "online",
                     "tz": zone,
+                    # Beside the times, so it changes with them when the select does (quick win 2).
+                    "zone_line": await get_text(
+                        session, lang, "booking.timezone.shown",
+                        zone=zone_label(zone, lang, now_utc()),
+                    ),
                     "switch_to": switch_to.value if switch_to else None,
                     "switch_label": (
                         await get_text(session, lang, f"booking.switch.{switch_to.value}")
@@ -710,7 +859,7 @@ def build_router() -> APIRouter:
         two-phase submit.
         """
         if not csrf_ok(request, csrf_token):
-            return Response(status_code=403)
+            return await _stale_page(request)
         if not _valid_modality(modality):
             return Response(status_code=400)
         if tz and not _valid_zone(tz):
@@ -764,50 +913,7 @@ def build_router() -> APIRouter:
 
             if reservation is None:
                 return RedirectResponse("/book", status_code=303)
-
-            # `booking.slot.held` carries {minutes}: the hold window the client
-            # is racing, so it must be a number and not the placeholder (§15).
-            labels = {
-                **context["t"],
-                "slot_held": await get_text(
-                    session,
-                    context["lang"],
-                    "booking.slot.held",
-                    minutes=context["practice"].slot_hold_minutes,
-                ),
-            }
-
-            # §12.1: the notice names the instant it is holding, not merely
-            # that something is held. Step 3 is the most anxious page in the
-            # flow and was the one page that never said which appointment it
-            # was about. A reservation made before this field existed carries
-            # no time, and the banner renders exactly as it did.
-            held_raw = reservation.get("starts_at")
-            held_when = (
-                _format(datetime.fromisoformat(held_raw), context, reservation.get("tz"))
-                if held_raw
-                else None
-            )
-
-            return _render(
-                "details.html",
-                {
-                    **context,
-                    "t": labels,
-                    "held_when": held_when,
-                    "signed_in": client is not None,
-                    # §12.1: both prefills need a session. At this step an
-                    # unsigned visitor has not identified themselves -- the
-                    # address arrives at submit -- so filling either from a
-                    # typed one would tell whoever guessed it that the address
-                    # is known here, and whose it is.
-                    "display_name": client.display_name if client else None,
-                    "contact_note": await booking.last_contact_note(session, client.id)
-                    if client
-                    else None,
-                    "captcha": _challenge(context["practice"]),
-                },
-            )
+            return await _details_page(session, request, context, client, reservation)
 
     @router.post("/book", include_in_schema=False)
     async def submit(
@@ -821,8 +927,19 @@ def build_router() -> APIRouter:
         pow_solution: str = Form(""),
     ) -> Response:
         """§12.1: submit; returns the confirmation with the request UUID."""
+        typed = {"problem": problem, "name": name, "contact": contact, "email": email}
         if not csrf_ok(request, csrf_token):
-            return Response(status_code=403)
+            # The page sat open too long: show the same form again, with what was typed, and say so.
+            async with unit_of_work() as session:
+                context = await _context(session, request)
+                client = await _session_client(session, request)
+                reservation = await _reservation(session, request, client)
+                if reservation is None:
+                    return await _stale_page(request)
+                return await _details_page(
+                    session, request, context, client, reservation,
+                    values=typed, errors={"form": context["t"]["stale"]}, status=403,
+                )
         settings_now = get_settings()
         can_link = settings_now.email_enabled
 
@@ -836,30 +953,12 @@ def build_router() -> APIRouter:
                 ratelimit.Limit("book_ip", practice.book_per_ip_per_hour, ratelimit.BOOKING_WINDOW),
                 ratelimit.client_ip(request),
             ):
-                return _render(
-                    "error.html",
-                    {
-                        **context,
-                        "heading": context["t"]["error"],
-                        "message": await get_text(
-                            session, context["lang"], "error.rate_limited"
-                        ),
-                    },
-                    status_code=429,
-                )
+                return await _error_page(context, context["t"]["error_title"], await get_text( session, context["lang"], "error.rate_limited" ), 429, action="home")
             # §17: before anything is created. A refused submission must cost
             # the practice a row, a notification and an email less than an
             # accepted one, which is the entire point of the gate.
             if not _challenge_ok(context["practice"], pow_challenge, pow_solution):
-                return _render(
-                    "error.html",
-                    {
-                        **context,
-                        "heading": context["t"]["error"],
-                        "message": context["t"]["captcha_failed"],
-                    },
-                    status_code=400,
-                )
+                return await _error_page(context, context["t"]["error_title"], context["t"]["captcha_failed"], 400, action="home")
             client = await _session_client(session, request)
             # Whether this browser had already proved who it belongs to. A
             # session now comes only from consuming a token, so it is proof;
@@ -875,35 +974,20 @@ def build_router() -> APIRouter:
                     return RedirectResponse("/book/details", status_code=303)
                 address = normalise_email(email)
                 if address is None:
-                    return await _bad_email(session, context)
+                    return await _details_page(
+                        session, request, context, None, reservation,
+                        values=typed, errors={"email": context["t"]["email_invalid"]}, status=400,
+                    )
                 email = address
                 # One answer for "no link left", before anything says whether the
                 # address is known: a proved owner gets the refusal a new
                 # address gets, and neither loses a booking silently.
                 if can_link and await magic_link_allowance_left(session, address) <= 0:
-                    return _render(
-                        "error.html",
-                        {
-                            **context,
-                            "heading": context["t"]["error"],
-                            "message": await get_text(
-                                session, context["lang"], "error.rate_limited"
-                            ),
-                        },
-                        status_code=429,
-                    )
+                    return await _error_page(context, context["t"]["error_title"], await get_text( session, context["lang"], "error.rate_limited" ), 429, action="home")
                 owner = await verified_email_client(session, address)
                 if owner is not None:
                     if not can_link:
-                        return _render(
-                            "error.html",
-                            {
-                                **context,
-                                "heading": context["t"]["error"],
-                                "message": context["t"]["unavailable"],
-                            },
-                            status_code=409,
-                        )
+                        return await _error_page(context, context["t"]["error_title"], context["t"]["unavailable"], 409, action="home")
                     # A proved address is somebody's real record. A stranger
                     # typing it files nothing there: the owner is sent a link
                     # carrying the choice, which is filed when it is followed,
@@ -960,25 +1044,9 @@ def build_router() -> APIRouter:
                 )
             except SlotUnavailable:
                 await flow.clear(session, client.id, Channel.web)
-                return _render(
-                    "error.html",
-                    {
-                        **context,
-                        "heading": context["t"]["slot_taken"],
-                        "message": context["t"]["slot_taken"],
-                    },
-                    status_code=409,
-                )
+                return await _error_page(context, context["t"]["slot_taken_title"], context["t"]["slot_taken"], 409, action="book")
             except DomainError:
-                return _render(
-                    "error.html",
-                    {
-                        **context,
-                        "heading": context["t"]["error"],
-                        "message": context["t"]["unavailable"],
-                    },
-                    status_code=409,
-                )
+                return await _error_page(context, context["t"]["error_title"], context["t"]["unavailable"], 409, action="home")
 
             await flow.clear(session, client.id, Channel.web)
 
@@ -1031,7 +1099,7 @@ def build_router() -> APIRouter:
                         session,
                         context["lang"],
                         "booking.submitted",
-                        uuid=str(booking_request.uuid),
+                        uuid=_short_ref(booking_request.uuid),
                     ),
                     "request_uuid": str(booking_request.uuid),
                     "telegram_link": telegram_link,
@@ -1058,14 +1126,7 @@ def build_router() -> APIRouter:
         """
         async with unit_of_work() as session:
             context = await _context(session, request)
-            return _render(
-                "waitlist.html",
-                {
-                    **context,
-                    "by_choice": True,
-                    "captcha": _challenge(await get_practice(session)),
-                },
-            )
+            return await _waitlist_form(context, await get_practice(session), by_choice=True)
 
     @router.post("/waitlist", include_in_schema=False)
     async def join_waitlist(
@@ -1077,8 +1138,14 @@ def build_router() -> APIRouter:
         pow_challenge: str = Form(""),
         pow_solution: str = Form(""),
     ) -> Response:
+        typed = {"problem": problem, "contact": contact, "email": email}
         if not csrf_ok(request, csrf_token):
-            return Response(status_code=403)
+            async with unit_of_work() as session:
+                context = await _context(session, request)
+                return await _waitlist_form(
+                    context, context["practice"], by_choice=True,
+                    values=typed, errors={"form": context["t"]["stale"]}, status=403,
+                )
 
         async with unit_of_work() as session:
             context = await _context(session, request)
@@ -1086,22 +1153,17 @@ def build_router() -> APIRouter:
             # path also writes a row and notifies her, and a client costs one
             # address.
             if not _challenge_ok(context["practice"], pow_challenge, pow_solution):
-                return _render(
-                    "error.html",
-                    {
-                        **context,
-                        "heading": context["t"]["error"],
-                        "message": context["t"]["captcha_failed"],
-                    },
-                    status_code=400,
-                )
+                return await _error_page(context, context["t"]["error_title"], context["t"]["captcha_failed"], 400, action="home")
             client = await _session_client(session, request)
             if client is None:
                 if not email:
                     return RedirectResponse("/book", status_code=303)
                 address = normalise_email(email)
                 if address is None:
-                    return await _bad_email(session, context)
+                    return await _waitlist_form(
+                        context, context["practice"], by_choice=True, values=typed,
+                        errors={"email": context["t"]["email_invalid"]}, status=400,
+                    )
                 client = await resolve_client(
                     session, Channel.email, address, language=context["lang"]
                 )
@@ -1117,15 +1179,7 @@ def build_router() -> APIRouter:
                 # §17's limit reaches here. Without the catch it would leave the
                 # ASGI handler to turn a rate limit into a 500 and an
                 # `error_event` -- a refusal is not a fault.
-                return _render(
-                    "error.html",
-                    {
-                        **context,
-                        "heading": context["t"]["error"],
-                        "message": context["t"]["unavailable"],
-                    },
-                    status_code=409,
-                )
+                return await _error_page(context, context["t"]["error_title"], context["t"]["unavailable"], 409, action="home")
             await notifications.publish(session)
 
             return _render(
@@ -1186,30 +1240,13 @@ def build_router() -> APIRouter:
             try:
                 booking_request = await booking.get_by_uuid(session, UUID(uuid))
             except (NotFound, ValueError):
-                return _render(
-                    "error.html",
-                    {
-                        **context,
-                        "heading": context["t"]["not_found"],
-                        "message": context["t"]["not_found"],
-                    },
-                    status_code=404,
-                )
+                return await _error_page(context, context["t"]["not_found_title"], context["t"]["not_found"], 404, action="home")
 
             if booking_request.client_id != client.id:
                 # Someone else's request. 404 rather than 403: whether a UUID
                 # exists is itself information.
-                return _render(
-                    "error.html",
-                    {
-                        **context,
-                        "heading": context["t"]["not_found"],
-                        "message": context["t"]["not_found"],
-                    },
-                    status_code=404,
-                )
+                return await _error_page(context, context["t"]["not_found_title"], context["t"]["not_found"], 404, action="home")
 
-            thread = await _thread(session, booking_request.id, context["lang"])
             turn = await booking.whose_turn(session, booking_request.id)
 
             # §7.1: `scheduled_start` only exists once the therapist approved,
@@ -1224,6 +1261,8 @@ def build_router() -> APIRouter:
                 or (await get_practice(session)).timezone
             )
 
+            thread = await _thread(session, booking_request.id, context, zone)
+
             # A page that arrives by login token starts the session in the same
             # response, so its forms carry a CSRF token bound to the session
             # about to exist -- the cookie in this request is not it yet.
@@ -1235,6 +1274,7 @@ def build_router() -> APIRouter:
                     **context,
                     "csrf_token": csrf_token_for(request, new_client_cookie=new_session),
                     "req": booking_request,
+                    "ref": _short_ref(booking_request.uuid),
                     # The enum value is a database word, not a client-facing one
                     # (§15): the page used to read "pending" in every language.
                     "status_label": await get_text(
@@ -1242,7 +1282,7 @@ def build_router() -> APIRouter:
                         context["lang"],
                         f"request.status.{booking_request.status.value}",
                     ),
-                    "when": _format(when, context, zone) or booking_request.desired_time_text,
+                    "when": await _format(session, when, context, zone) or booking_request.desired_time_text,
                     "join_url": await notifications.join_info(session, booking_request)
                     if booking_request.status.value == "confirmed"
                     else None,
@@ -1280,7 +1320,7 @@ def build_router() -> APIRouter:
     ) -> Response:
         """The button on the confirm page: here the view token is spent."""
         if not csrf_ok(request, csrf_token):
-            return Response(status_code=403)
+            return await _stale_page(request)
         async with unit_of_work() as session:
             # Ownership before spend, as the GET checked it: a mangled link
             # must leave the token for the correct one.
@@ -1320,7 +1360,7 @@ def build_router() -> APIRouter:
     ) -> Response:
         """§12.1: accept | counter | decline | note | waitlist."""
         if not csrf_ok(request, csrf_token):
-            return Response(status_code=403)
+            return await _stale_page(request, kept=body)
         if action not in ("accept", "counter", "decline", "note", "waitlist"):
             return Response(status_code=404)
 
@@ -1385,6 +1425,13 @@ def build_router() -> APIRouter:
             context = await _context(session, request)
             return _render("auth_email.html", {**context, "sent": False})
 
+    def _auth_form(context: dict[str, Any], email: str, error: str, status: int) -> Response:
+        return _render(
+            "auth_email.html",
+            {**context, "sent": False, "values": {"email": email}, "errors": {"email": error}},
+            status_code=status,
+        )
+
     @router.post("/auth/email", include_in_schema=False)
     async def auth_email(
         request: Request,
@@ -1392,7 +1439,9 @@ def build_router() -> APIRouter:
         csrf_token: str = Form("", alias=CSRF_FIELD),
     ) -> Response:
         if not csrf_ok(request, csrf_token):
-            return Response(status_code=403)
+            async with unit_of_work() as session:
+                context = await _context(session, request)
+                return _auth_form(context, email, context["t"]["stale"], 403)
 
         settings = get_settings()
         address = normalise_email(email)
@@ -1404,7 +1453,7 @@ def build_router() -> APIRouter:
         async with unit_of_work() as session:
             context = await _context(session, request)
             if address is None:
-                return await _bad_email(session, context)
+                return _auth_form(context, email, context["t"]["email_invalid"], 400)
             email = address
 
             # §4: with SMTP unset there is no way to deliver a link, and the web
@@ -1428,15 +1477,7 @@ def build_router() -> APIRouter:
             context = await _context(session, request)
             target = await token_target(session, token, TokenPurpose.login)
             if target is None:
-                return _render(
-                    "error.html",
-                    {
-                        **context,
-                        "heading": context["t"]["expired_link"],
-                        "message": context["t"]["expired_link"],
-                    },
-                    status_code=400,
-                )
+                return await _error_page(context, context["t"]["expired_link_title"], context["t"]["expired_link"], 400, action="link")
             return _render(
                 "confirm.html",
                 {
@@ -1456,21 +1497,13 @@ def build_router() -> APIRouter:
         csrf_token: str = Form("", alias=CSRF_FIELD),
     ) -> Response:
         if not csrf_ok(request, csrf_token):
-            return Response(status_code=403)
+            return await _stale_page(request)
         async with unit_of_work() as session:
             context = await _context(session, request)
             try:
                 result = await consume_token(session, token, TokenPurpose.login)
             except TokenInvalid:
-                return _render(
-                    "error.html",
-                    {
-                        **context,
-                        "heading": context["t"]["expired_link"],
-                        "message": context["t"]["expired_link"],
-                    },
-                    status_code=400,
-                )
+                return await _error_page(context, context["t"]["expired_link_title"], context["t"]["expired_link"], 400, action="link")
 
             if result.client_id is None:
                 return RedirectResponse("/auth/email", status_code=303)
@@ -1487,15 +1520,7 @@ def build_router() -> APIRouter:
                     # since §13.1 step 7 lets a Telegram client name any
                     # address; merging two people is not ours to decide.
                     logger.info("login link refused: address belongs to another client")
-                    return _render(
-                        "error.html",
-                        {
-                            **context,
-                            "heading": context["t"]["expired_link"],
-                            "message": context["t"]["expired_link"],
-                        },
-                        status_code=400,
-                    )
+                    return await _error_page(context, context["t"]["expired_link_title"], context["t"]["expired_link"], 400, action="link")
 
             # A proved owner's booking made on another browser: filed now, with
             # the same checks as at the form (the slot may have gone since).
@@ -1727,17 +1752,22 @@ async def _counter_options(
     lang = (
         await session.execute(select(Client.language).where(Client.id == booking_request.client_id))
     ).scalar_one()
+    slot_days = []
+    for day, times in grouped.items():
+        heading = await day_label(session, lang, starts[day], tz)
+        for time in times:
+            time["aria"] = f"{heading}, {time['label']}"
+        slot_days.append((heading, times))
     return {
-        "slot_days": [
-            (await day_label(session, lang, starts[day], tz), times)
-            for day, times in grouped.items()
-        ],
+        "slot_days": slot_days,
         "free_text": practice.fallback_to_negotiation,
         "offer_waitlist": not practice.fallback_to_negotiation,
     }
 
 
-async def _thread(session: AsyncSession, request_id: int, lang: str) -> list[dict[str, Any]]:
+async def _thread(
+    session: AsyncSession, request_id: int, context: dict[str, Any], zone: str
+) -> list[dict[str, Any]]:
     messages = (
         (
             await session.execute(
@@ -1749,27 +1779,27 @@ async def _thread(session: AsyncSession, request_id: int, lang: str) -> list[dic
         .scalars()
         .all()
     )
+    # "client" / "therapist" are database words: the reader is "You", the other side has her practice's name.
     return [
         {
             "sender": message.sender.value,
-            "who": message.sender.value,
-            "when": message.proposed_start.strftime("%Y-%m-%d %H:%M")
-            if message.proposed_start
-            else None,
+            "who": context["t"]["you"] if message.sender is SenderType.client else context["practice"].name,
+            "when": await _format(session, message.proposed_start, context, zone),
             "body": message.body_text,
         }
         for message in messages
     ]
 
 
-def _format(value: datetime | None, context: dict[str, Any], tz: str | None = None) -> str | None:
-    """A stored instant in the reader's zone. Storage stays UTC (DESIGN.md §8).
+async def _format(
+    session: AsyncSession, value: datetime | None, context: dict[str, Any], tz: str | None = None
+) -> str | None:
+    """A stored instant in the reader's zone and language (`вт 17 ноя, 18:00 (Ереван, GMT+4)`).
 
-    `tz` is the zone the client chose when booking, kept on the request. The
-    practice zone is only the fallback: showing a Moscow client a Yerevan time
-    with no label is how someone misses a session by an hour.
+    `tz` is the zone the client chose when booking, kept on the request. The practice zone is only the fallback:
+    showing a Moscow client a Yerevan time with no label is how someone misses a session by an hour. Storage stays UTC
+    (DESIGN.md §8); the wording is `app.render.dates.when_label`, shared by every client-visible time.
     """
     if value is None:
         return None
-    zone = ZoneInfo(tz or context["practice"].timezone)
-    return f"{value.astimezone(zone).strftime('%Y-%m-%d %H:%M')} ({zone.key})"
+    return await when_label(session, context["lang"], value, tz or context["practice"].timezone)

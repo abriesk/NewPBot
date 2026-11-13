@@ -1,29 +1,40 @@
 {% extends "base.html" %}
+{% block title %}{{ t.consultation }} — {{ practice.name }}{% endblock %}
 {% block content %}
 {# The second of §12.1's three pages. #}
-<ol class="flow"><li class="done"></li><li aria-current="step"></li><li></li></ol>
+<ol class="flow"><li class="done"><span class="sr-only">{{ t.step.replace('{n}', '1').replace('{total}', '3') }}</span></li><li aria-current="step"><span class="sr-only">{{ t.step.replace('{n}', '2').replace('{total}', '3') }}</span></li><li></li></ol>
 <div class="page-head">
   <h1>{{ t.consultation }}</h1>
 </div>
 
-<p class="held">{{ t.slot_held }}{% if held_when %}<strong>{{ held_when }}</strong>{% endif %}</p>
+{# What is about to be sent, with a way back to change it. #}
+<div class="summary"><p>{{ summary }} <a href="/book">{{ t.change }}</a></p></div>
+<p class="held">{{ t.slot_held }}</p>
+{% if captcha %}<noscript><p class="noscript">{{ t.noscript }}</p></noscript>{% endif %}
 
 {# §12.1 step 3. Everything here is optional except the email, which is how a
-   client without Telegram is reached at all (§4, DESIGN.md §5.1). #}
+   client without Telegram is reached at all (§4, DESIGN.md §5.1). A refused
+   submission lands here again: what was typed is kept and the message sits
+   beside its field (`errors`), a stale page gets one for the whole form. #}
 <form method="post" action="/book" class="card">
+  {% if errors.form %}<p class="flash" role="alert">{{ errors.form }}</p>{% endif %}
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <label>{{ t.ask_problem }}
-    <textarea name="problem" rows="4" maxlength="{{ text_max }}" data-counter></textarea>
+  <label>{{ t.ask_problem }} <span class="optional">{{ t.optional }}</span>
+    <textarea name="problem" rows="4" maxlength="{{ text_max }}" data-counter>{{ values.problem or '' }}</textarea>
   </label>
-  <label>{{ t.ask_name }}
-    <input type="text" name="name" value="{{ display_name or '' }}">
+  <label>{{ t.ask_name }} <span class="optional">{{ t.optional }}</span>
+    <input type="text" name="name" autocomplete="name" value="{{ values.name if 'name' in values else (display_name or '') }}">
   </label>
-  <label>{{ t.ask_contact }}
-    <input type="text" name="contact" maxlength="{{ text_max }}" data-counter value="{{ contact_note or '' }}">
+  <label>{{ t.ask_contact }} <span class="optional">{{ t.optional }}</span>
+    <input type="text" name="contact" maxlength="{{ text_max }}" data-counter value="{{ values.contact if 'contact' in values else (contact_note or '') }}">
   </label>
   {% if not signed_in %}
     <label>{{ t.email_label }}
-      <input type="email" name="email" required>
+      <input type="email" name="email" required autocomplete="email" inputmode="email" value="{{ values.email or '' }}"
+             aria-describedby="email-hint{% if errors.email %} email-error{% endif %}"
+             {% if errors.email %}aria-invalid="true"{% endif %}>
+      <span class="hint" id="email-hint">{{ t.email_hint }}</span>
+      {% if errors.email %}<span class="field-error" id="email-error" role="alert">{{ errors.email }}</span>{% endif %}
     </label>
   {% endif %}
   {% if captcha %}{% include "partials/pow.html" %}{% endif %}

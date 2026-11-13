@@ -1,22 +1,29 @@
 {% extends "base.html" %}
+{% block title %}{{ t.waitlist_join }} — {{ practice.name }}{% endblock %}
 {% block content %}
 <div class="page-head">
-  <h1>{{ t.consultation }}</h1>
+  <h1>{{ t.waitlist_join }}</h1>
   {# Reached by choice from under the picker, or because there is nothing free
      at all (§12.1). Telling somebody there are no times while they are looking
      at a list of them is worse than saying nothing. #}
   <p class="muted">{{ t.waitlist_intro_by_choice if by_choice else t.waitlist_intro }}</p>
 </div>
+{% if captcha %}<noscript><p class="noscript">{{ t.noscript }}</p></noscript>{% endif %}
 <form method="post" action="/waitlist" class="card">
+  {% if errors.form %}<p class="flash" role="alert">{{ errors.form }}</p>{% endif %}
   <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <label>{{ t.waitlist_problem }}
-    <textarea name="problem" rows="4" maxlength="{{ text_max }}" data-counter></textarea>
+  <label>{{ t.waitlist_problem }} <span class="optional">{{ t.optional }}</span>
+    <textarea name="problem" rows="4" maxlength="{{ text_max }}" data-counter>{{ values.problem or '' }}</textarea>
   </label>
-  <label>{{ t.waitlist_contact }}
-    <input type="text" name="contact" maxlength="{{ text_max }}" data-counter>
+  <label>{{ t.waitlist_contact }} <span class="optional">{{ t.optional }}</span>
+    <input type="text" name="contact" maxlength="{{ text_max }}" data-counter value="{{ values.contact or '' }}">
   </label>
   <label>{{ t.email_label }}
-    <input type="email" name="email" required>
+    <input type="email" name="email" required autocomplete="email" inputmode="email" value="{{ values.email or '' }}"
+           aria-describedby="email-hint{% if errors.email %} email-error{% endif %}"
+           {% if errors.email %}aria-invalid="true"{% endif %}>
+    <span class="hint" id="email-hint">{{ t.email_hint }}</span>
+    {% if errors.email %}<span class="field-error" id="email-error" role="alert">{{ errors.email }}</span>{% endif %}
   </label>
   {% if captcha %}{% include "partials/pow.html" %}{% endif %}
   <button type="submit">{{ t.submit }}</button>

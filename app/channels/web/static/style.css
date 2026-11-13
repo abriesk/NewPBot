@@ -30,7 +30,8 @@
   --ink-soft: #4a433c;
   --muted: #6b635b;
   --line: #e4ded4;             /* hairline dividers only */
-  --line-strong: #cdc3b5;      /* every border a pointer can aim at */
+  --line-strong: #cdc3b5;      /* decorative borders (cards) */
+  --control: #8a8176;          /* border of anything a pointer can aim at: 3:1 on --surface and --bg (WCAG 1.4.11) */
   --accent: #3d6b5e;
   --accent-hover: #33594f;
   --accent-ink: #ffffff;
@@ -75,6 +76,7 @@
     --muted: #a2988d;
     --line: #322d27;
     --line-strong: #4f473e;
+    --control: #7d7468;
     --accent: #83b6a5;
     --accent-hover: #96c4b4;
     --accent-ink: #142019;
@@ -98,6 +100,7 @@
   --muted: #a2988d;
   --line: #322d27;
   --line-strong: #4f473e;
+  --control: #7d7468;
   --accent: #83b6a5;
   --accent-hover: #96c4b4;
   --accent-ink: #142019;
@@ -249,7 +252,7 @@ header nav a.cta {
 .lang {
   display: flex;
   flex: none;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--control);
   border-radius: var(--radius-pill);
   overflow: hidden;
 }
@@ -264,7 +267,7 @@ header nav a.cta {
   font-size: .8rem;
   cursor: pointer;
 }
-.lang button + button { border-left: 1px solid var(--line-strong); }
+.lang button + button { border-left: 1px solid var(--control); }
 .lang button:hover:not(:disabled) { background: var(--bg-tint); color: var(--ink); box-shadow: none; }
 .lang button:disabled { background: var(--accent-soft); color: var(--accent); font-weight: 600; cursor: default; }
 
@@ -421,14 +424,15 @@ body:not(.admin) .page-head .prose > p:first-child {
 }
 .flow li {
   flex: 1;
-  height: 3px;
+  height: 4px;
   border-radius: var(--radius-pill);
-  background: var(--line);
+  background: var(--control);
 }
 /* A notice page is a narrow column; the strip above it lines up with it. */
 .flow:has(+ .notice) { max-width: 34rem; margin-inline: auto; }
-.flow li.done { background: color-mix(in srgb, var(--accent) 45%, transparent); }
-.flow li[aria-current] { background: var(--accent); }
+.flow li.done { background: var(--accent); }
+.flow li[aria-current] { background: var(--accent); height: 6px; }
+.flow li { align-self: center; }
 
 /* --- Topic list ------------------------------------------------------- */
 
@@ -474,7 +478,7 @@ body:not(.admin) label > :where(input, textarea, select) { display: block; }
 input[type=text], input[type=email], input[type=tel], textarea, select {
   width: 100%;
   padding: .7rem .85rem;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--control);
   border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--ink);
@@ -512,7 +516,7 @@ select {
 body:not(.admin) input[type=datetime-local] {
   width: 100%;
   padding: .7rem .85rem;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--control);
   border-radius: var(--radius-sm);
   background: var(--bg);
   color: var(--ink);
@@ -572,7 +576,7 @@ label.choice {
   gap: .65rem;
   margin: 0 0 .5rem;
   padding: .8rem .95rem;
-  border: 1px solid var(--line-strong);
+  border: 1px solid var(--control);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--ink);
@@ -630,7 +634,7 @@ button:active, .cta:active { transform: translateY(1px); box-shadow: none; }
    whole message is that there is nothing here. */
 button.secondary, button.switch-modality {
   background: var(--surface);
-  border-color: var(--line-strong);
+  border-color: var(--control);
   color: var(--ink);
 }
 button.secondary:hover, button.switch-modality:hover {
@@ -652,7 +656,7 @@ button.secondary:hover, button.switch-modality:hover {
 /* --- Slot picker ------------------------------------------------------ */
 
 .day + .day { margin-top: 1.5rem; }
-.day h3 {
+.day :is(h2, h3) {
   display: flex;
   align-items: center;
   gap: .75rem;
@@ -664,22 +668,22 @@ button.secondary:hover, button.switch-modality:hover {
   letter-spacing: .05em;
   text-transform: uppercase;
 }
-.day h3::after { content: ""; flex: 1; height: 1px; background: var(--line); }
+.day :is(h2, h3)::after { content: ""; flex: 1; height: 1px; background: var(--line); }
 
 /* A grid, not a wrapped row. Times are the one thing on the site somebody
    scans rather than reads, and equal columns let the eye go down a day as
    well as across it; a flex wrap left every row a different ragged length. */
 .times {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(5.5rem, 1fr));
+  grid-template-columns: repeat(auto-fill, minmax(4.75rem, 1fr));
   gap: .5rem;
 }
 .times form { display: contents; margin: 0; }
 .times button {
   width: 100%;
   min-height: 2.75rem;
-  padding: .45rem .5rem;
-  border-color: var(--line-strong);
+  padding: .45rem .25rem;
+  border-color: var(--control);
   border-radius: var(--radius-sm);
   background: var(--surface);
   color: var(--ink);
@@ -799,8 +803,16 @@ button.secondary:hover, button.switch-modality:hover {
 .thread time { margin-left: .5rem; color: var(--muted); font-size: .85rem; }
 .thread p { margin: .35rem 0 0; color: var(--ink-soft); }
 
-.actions { display: flex; flex-wrap: wrap; gap: .75rem; align-items: center; margin-top: 1.5rem; }
+.actions { display: flex; flex-direction: column; align-items: stretch; gap: .75rem; max-width: 26rem; margin-top: 1.5rem; }
 .actions form { display: flex; gap: .5rem; margin: 0; }
+.actions form button { width: 100%; }
+/* Decline closes the request, so it asks again (a <details>, no script). */
+.decline-confirm { border: 1px solid var(--control); border-radius: var(--radius-sm); background: var(--surface); }
+.decline-confirm > summary { cursor: pointer; padding: .7rem .9rem; color: var(--ink); text-align: center; list-style: none; min-height: 2.75rem; }
+.decline-confirm > summary::-webkit-details-marker { display: none; }
+.decline-confirm[open] > summary { border-bottom: 1px solid var(--line); }
+.decline-confirm > form { padding: .9rem; flex-direction: column; }
+.decline-confirm p { margin: 0; color: var(--ink-soft); }
 
 /* The counter-proposal card. Named for what it is: it used to carry `counter`,
    which is also the character-count utility below -- so the whole card
@@ -843,6 +855,17 @@ button.secondary:hover, button.switch-modality:hover {
   background: var(--surface);
   color: var(--ink);
 }
+
+.sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0; }
+.optional, .hint { color: var(--muted); font-size: .85rem; font-weight: 400; }
+.hint { display: block; margin: .3rem 0 0; }
+/* A refused field: the message sits beside it and the field says so. */
+.field-error { display: block; margin: .35rem 0 0; color: #a3261c; font-size: .9rem; font-weight: 600; }
+input[aria-invalid=true], textarea[aria-invalid=true] { border-color: #a3261c; }
+.summary { margin: 0 0 1rem; padding: .75rem .9rem; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); }
+.summary p { margin: 0; }
+.noscript { margin: 0 0 1rem; padding: .75rem .9rem; border-left: 3px solid var(--accent); background: var(--surface); }
+.zone-line { margin: .75rem 0 0; }
 
 .muted { color: var(--muted); font-size: .92rem; }
 .steps .muted { margin: .55rem 0 0; }

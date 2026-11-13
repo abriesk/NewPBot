@@ -14,6 +14,7 @@ from __future__ import annotations
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.models import SessionType
 from app.core.services.translations import get_text
 
 
@@ -39,4 +40,18 @@ async def session_type_name(session: AsyncSession, lang: str, code: str) -> str:
     return code if name == key else name
 
 
-__all__ = ["session_type_name"]
+def price_text(session_type: SessionType) -> str:
+    """The price a client reads next to a session type, or "" when she stored none.
+
+    Her own wording (`price_display_override`) wins. Otherwise the amount is a whole unit of the currency named beside
+    it (see `admin._price_amount`), grouped by thousands with a non-breaking space: "15 000 AMD".
+    """
+    if session_type.price_display_override and session_type.price_display_override.strip():
+        return session_type.price_display_override.strip()
+    if session_type.price_amount_minor is None:
+        return ""
+    amount = f"{session_type.price_amount_minor:,}".replace(",", "\u00a0")
+    return f"{amount}\u00a0{session_type.price_currency}".strip() if session_type.price_currency else amount
+
+
+__all__ = ["price_text", "session_type_name"]

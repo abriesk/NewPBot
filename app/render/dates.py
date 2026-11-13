@@ -22,6 +22,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.services.translations import get_text
+from app.render.zones import city_name, gmt_offset
 
 
 async def day_label(session: AsyncSession, lang: str, value: datetime, tz: str) -> str:
@@ -41,4 +42,16 @@ async def day_label(session: AsyncSession, lang: str, value: datetime, tz: str) 
     )
 
 
-__all__ = ["day_label"]
+async def when_label(session: AsyncSession, lang: str, value: datetime, tz: str) -> str:
+    """Every client-visible moment: `вт 17 ноя, 18:00 (Ереван, GMT+4)`.
+
+    The weekday and month come from the catalogue (like `day_label`), the time is 24-hour, and the zone is named by its
+    city in the reader's language with the GMT offset in force at that instant -- so a Moscow client is never shown a
+    bare Yerevan time. Numeric ISO stamps are for logs and for admins, not for this.
+    """
+    local = value.astimezone(ZoneInfo(tz))
+    day = await day_label(session, lang, value, tz)
+    return f"{day}, {local:%H:%M} ({city_name(tz, lang)}, {gmt_offset(tz, value)})"
+
+
+__all__ = ["day_label", "when_label"]

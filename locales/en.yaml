@@ -25,7 +25,7 @@ common:
   skip: "Skip"
   back: "Back"
   cancel: "Cancel"
-  home: "Home"
+  home: "Back to the home page"
   yes: "Yes"
   no: "No"
   continue: "Continue"
@@ -34,7 +34,7 @@ common:
   welcome_back: "You are back at the main menu."
   error.generic: "Something went wrong. Please try again a little later."
   error.expired_link: "This link has expired. Please request a new one."
-  error.not_found: "That was not found."
+  error.not_found: "We could not find that page."
   error.rate_limited: "Too many attempts. Please try again later."
   # §17. Covers both ways this fails: a check that did not pass, and a browser
   # with JavaScript switched off, which cannot run it at all.
@@ -45,6 +45,16 @@ common:
 # "27 август"), and a format string cannot know that. Abbreviations are
 # case-neutral in all three languages. `weekday` is Monday-indexed, as
 # `datetime.weekday()` counts.
+  error.title: "Something went wrong"
+  error.not_found_title: "Page not found"
+  error.expired_link_title: "This link no longer works"
+  error.stale: "This page was open for too long, so the form was not sent. Your text is still here — please press the button again."
+  change: "Change"
+  optional: "(optional)"
+  send_request: "Send request"
+  step: "Step {n} of {total}"
+  noscript: "Choosing a time needs JavaScript. Please turn it on and reload the page."
+  skip_to_content: "Skip to the content"
 date:
   weekday.0: "Mon"
   weekday.1: "Tue"
@@ -98,7 +108,7 @@ booking:
   type.without_price: "{name} — {duration} min"
   choose_timezone: "Which timezone are you in?"
   timezone.detected: "We detected {timezone}. Is that right?"
-  choose_slot: "Choose a time that suits you. Times are shown in {timezone}."
+  choose_slot: "Choose a time that suits you."
   slot.none_available: "There are no free times at the moment."
   # Offered as a labelled switch rather than by quietly showing the other kind:
   # a client looking at in-person times after asking for online has to work out
@@ -123,7 +133,7 @@ booking:
   contact.email_taken: "That address is already connected to another profile. Please use a different one."
   contact.email_sent: "I have sent a confirmation link to {email}. Open it and confirmations and reminders will reach you by email as well."
   submitted: "Thank you. Your request has been sent, number {uuid}. I will get back to you shortly."
-  check_email: "A sign-in link is on its way to your address. Follow it to open this request and to receive reminders."
+  check_email: "Check your inbox. If this address is known here, a link is on its way — it can take a minute."
   # §17. Seen only when somebody submits faster than their browser finished the
   # check, which is rare and lasts about a second.
   captcha_wait: "One moment — finishing a quick check."
@@ -134,6 +144,11 @@ booking:
 # wording names no address on purpose -- the screen is drawn before anyone has
 # proved they can read that mailbox, so naming it would tell whoever is holding
 # the phone whose it is.
+  onsite_no_address: "The address will come with your confirmation."
+  timezone.shown: "Times are shown in {zone}."
+  email_hint: "Only for the confirmation link and reminders."
+  slot.taken_title: "That time is taken"
+  choose_another: "Choose another time"
 merge:
   confirm: "You have a booking here made by email. Shall I join it to this Telegram account, so everything is in one place?"
   confirm.yes: "Yes, that was me"
@@ -152,11 +167,12 @@ waitlist:
   submitted: "Thank you. I have your request and will be in touch."
 
 # --- Web client surface (§12.1). ---------------------------------------------
+  join: "Join the waiting list"
 auth:
   sign_in: "Sign in"
   email_label: "Your email address"
   send_link: "Send me a link"
-  link_sent: "If that address is known here, a sign-in link is on its way."
+  link_sent: "Check your inbox. If this address is known here, a link is on its way — it can take a minute."
   confirm_book: "A booking request for {when} ({session_type}) was started with your email address. Send it, or just sign in?"
   confirm_book_yes: "Send this booking request"
   confirm_book_no: "Just sign in, do not book"
@@ -164,7 +180,7 @@ auth:
   # is a whole sentence rather than a word standing in for {name}: a client who
   # booked by email and skipped the name field has none.
   greeting: "Hello, {name}."
-  greeting_unnamed: "Hello, client."
+  greeting_unnamed: "Hello."
 
 request:
   title: "Your request"
@@ -190,6 +206,10 @@ request:
   counter.back_months: "« Months"
   counter.back_days: "« Days"
   when: "When"
+  you: "You"
+  reference: "Reference: {ref}"
+  decline_ask: "Decline? This closes the request."
+  decline_yes: "Yes, decline"
 
 intent:
   request.proposal.client.body: "A time has been proposed for your request {uuid}: {time}."

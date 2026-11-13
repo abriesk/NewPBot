@@ -1,15 +1,15 @@
 {% extends "base.html" %}
+{% block title %}{{ heading }} — {{ practice.name }}{% endblock %}
 {% block content %}
 {# The end of §12.1's three pages -- but this template also answers a
    waitlist join, which is not the third step of a booking and gets no strip.
    `request_uuid` is set by the booking render and by nothing else. #}
 {% if request_uuid %}
-<ol class="flow"><li class="done"></li><li class="done"></li><li aria-current="step"></li></ol>
+<ol class="flow"><li class="done"><span class="sr-only">{{ t.step.replace('{n}', '1').replace('{total}', '3') }}</span></li><li class="done"><span class="sr-only">{{ t.step.replace('{n}', '2').replace('{total}', '3') }}</span></li><li aria-current="step"><span class="sr-only">{{ t.step.replace('{n}', '3').replace('{total}', '3') }}</span></li></ol>
 {% endif %}
-<div class="card notice">
+<div class="card notice" role="status">
   <h1>{{ heading }}</h1>
   <p>{{ message }}</p>
-  {% if request_uuid %}<p class="uuid"><code>{{ request_uuid }}</code></p>{% endif %}
   {% if verify_notice %}<p class="muted">{{ verify_notice }}</p>{% endif %}
   {% if telegram_link %}
     <div class="stack-actions"><a class="cta" href="{{ telegram_link }}">{{ t.connect_telegram }}</a></div>

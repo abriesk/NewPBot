@@ -1,14 +1,15 @@
 {% extends "base.html" %}
+{% block title %}{{ t.consultation }} — {{ practice.name }}{% endblock %}
+{% block head %}<script src="/static/htmx.min.js" defer></script>{% endblock %}
 {% block content %}
 {# §12.1 is one act spread over three pages, and each of them looked like a
-   separate errand. Three segments and no numerals: nothing here needs
-   translating, and the caption is the page's own heading, which it already
-   has. Not to be read against the numbered legends below -- those count the
-   questions on this page, this counts the pages. #}
-<ol class="flow"><li aria-current="step"></li><li></li><li></li></ol>
+   separate errand. Three segments: the caption is a hidden "Step 1 of 3" for
+   screen readers, and the strip is not read as three empty list items. #}
+<ol class="flow"><li aria-current="step"><span class="sr-only">{{ t.step.replace('{n}', '1').replace('{total}', '3') }}</span></li><li></li><li></li></ol>
 <div class="page-head">
   <h1>{{ t.consultation }}</h1>
 </div>
+<noscript><p class="noscript">{{ t.noscript }}</p></noscript>
 
 {# §12.1 step 1: session type and modality. Chosen before the slot list so the
    picker can be filtered by them. #}
@@ -34,22 +35,15 @@
     <label class="choice">
       {# §12.1: an on-site client is in the room, so the room's clock is theirs
          and the timezone selector is noise. Hidden rather than removed, so the
-         form still posts a zone and the slot list still has one to render in. #}
+         form still posts a zone and the slot list still has one to render in.
+         The show/hide lives in the script block at the bottom (no inline handlers). #}
       <input type="radio" name="modality" value="online" checked
-             hx-get="/book/slots" hx-target="#slots" hx-include="#booking"
-             onchange="document.getElementById('onsite-info').hidden = true;
-                       document.getElementById('tz-field').hidden = false;
-                       if (document.getElementById('online-info'))
-                         document.getElementById('online-info').hidden = false;">
+             hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
       {{ t.modality_online }}
     </label>
     <label class="choice">
       <input type="radio" name="modality" value="onsite"
-             hx-get="/book/slots" hx-target="#slots" hx-include="#booking"
-             onchange="document.getElementById('onsite-info').hidden = false;
-                       document.getElementById('tz-field').hidden = true;
-                       if (document.getElementById('online-info'))
-                         document.getElementById('online-info').hidden = true;">
+             hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
       {{ t.modality_onsite }}
     </label>
     {# §12.1: on-site selection MUST show clinic_onsite_url. #}
@@ -72,22 +66,57 @@
 
   <fieldset id="tz-field">
     <legend>{{ t.choose_timezone }}</legend>
-    {# Detected client-side; this selector is the visible override (§12.1). #}
-    <select name="tz" hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
+    {# The browser's zone is put here before the first slot list loads (script below); this selector is the visible
+       override (§12.1). The line that says which zone the times are in is part of the slot list. #}
+    <select name="tz" id="tz" aria-label="{{ t.choose_timezone }}" hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
       {% for option in timezones %}
-        <option value="{{ option.iana_name }}" {% if option.iana_name == tz %}selected{% endif %}>
-          {{ option.display_name }}
-        </option>
+        <option value="{{ option.iana_name }}" {% if option.iana_name == tz %}selected{% endif %}>{{ option.label }}</option>
       {% endfor %}
     </select>
-    <p class="muted">{{ t.timezone_detected }}</p>
   </fieldset>
 
   <fieldset>
     <legend>{{ t.choose_slot }}</legend>
-    <div id="slots" hx-get="/book/slots" hx-trigger="load" hx-include="#booking">
+    <div id="slots" aria-live="polite" hx-get="/book/slots" hx-trigger="load" hx-include="#booking">
       <p class="muted">…</p>
     </div>
   </fieldset>
 </form>
+<script>
+(function () {
+  var byName = function (n, v) { return document.querySelector('input[name=' + n + '][value=' + v + ']'); };
+  var show = function (id, on) { var el = document.getElementById(id); if (el) { el.hidden = !on; } };
+  var sync = function () {
+    var onsite = byName('modality', 'onsite').checked;
+    show('onsite-info', onsite);
+    show('tz-field', !onsite);
+    show('online-info', !onsite);
+  };
+  Array.prototype.forEach.call(document.querySelectorAll('input[name=modality]'), function (r) {
+    r.addEventListener('change', sync);
+  });
+  // The "switch to the other kind" button in the slot list (an htmx partial) clicks the other radio.
+  document.getElementById('booking').addEventListener('click', function (e) {
+    var b = e.target.closest ? e.target.closest('[data-switch-modality]') : null;
+    if (b) { byName('modality', b.getAttribute('data-switch-modality')).click(); }
+  });
+  // First visit: the zone cookie is written only by the end of this page, so the server rendered the practice's zone.
+  // Put the browser's zone in the select (adding it when it is not on the list) before htmx loads the slots.
+  try {
+    var detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    var sel = document.getElementById('tz');
+    if (detected && sel && document.cookie.indexOf('pb_tz=') === -1) {
+      var found = Array.prototype.some.call(sel.options, function (o) { return o.value === detected; });
+      if (!found) {
+        var o = document.createElement('option');
+        o.value = detected;
+        o.textContent = detected.split('/').pop().replace(/_/g, ' ');
+        sel.appendChild(o);
+      }
+      sel.value = detected;
+    }
+  } catch (e) { /* the practice zone stays selected */ }
+  sync();
+})();
+</script>
 {% endblock %}

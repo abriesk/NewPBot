@@ -8,15 +8,15 @@
 </div>
 {# §12.2: the refusal has to be visible. Without it a rejected action looked
    exactly like a button that did nothing at all. #}
-{% if refused %}<p class="flash">{{ t.error }}</p>{% endif %}
+{% if refused %}<p class="flash" role="alert">{{ t.error }}</p>{% endif %}
 <div class="card">
-  <p><span class="status">{{ status_label }}</span></p>
+  <p role="status"><span class="status">{{ status_label }}</span></p>
   <div class="meta">
     {# The time is the point of the page: shown for a pending request too, in
        the zone the client booked in (§7.1, DESIGN.md §8). #}
     {% if when %}<p class="when"><strong>{{ t.when }}</strong> {{ when }}</p>{% endif %}
     {% if join_url %}<p><a href="{{ join_url }}">{{ join_url }}</a></p>{% endif %}
-    <p class="uuid"><code>{{ req.uuid }}</code></p>
+    <p class="uuid">{{ t.reference.replace('{ref}', ref) }}</p>
   </div>
 </div>
 
@@ -54,10 +54,15 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <button type="submit">{{ t.accept }}</button>
   </form>
-  <form method="post" action="/r/{{ req.uuid }}/decline">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <button type="submit" class="secondary">{{ t.decline }}</button>
-  </form>
+  {# Decline closes the request on one tap, so it asks first (no script). #}
+  <details class="decline-confirm">
+    <summary>{{ t.decline }}</summary>
+    <form method="post" action="/r/{{ req.uuid }}/decline">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <p>{{ t.decline_ask }}</p>
+      <button type="submit" class="secondary">{{ t.decline_yes }}</button>
+    </form>
+  </details>
 </div>
 
 {# §12.1: the slots first. One the practice is already holding open is the
@@ -75,7 +80,7 @@
             <form method="post" action="/r/{{ req.uuid }}/counter">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
               <input type="hidden" name="slot_id" value="{{ slot.id }}">
-              <button type="submit">{{ slot.label }}</button>
+              <button type="submit" aria-label="{{ slot.aria }}">{{ slot.label }}</button>
             </form>
           {% endfor %}
         </div>

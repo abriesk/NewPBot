@@ -1,8 +1,11 @@
 {% extends "base.html" %}
+{% block title %}{{ heading }} — {{ practice.name }}{% endblock %}
 {% block content %}
-<div class="card notice">
+{# A short heading, a sentence that explains, and the next step that fits (not only "Home"). #}
+<div class="card notice" role="alert">
   <h1>{{ heading }}</h1>
   <p>{{ message }}</p>
-  <div class="stack-actions"><a class="cta" href="/">{{ t.home }}</a></div>
+  {% if kept %}<label>{{ t.counter_note_label }}<textarea rows="4" readonly>{{ kept }}</textarea></label>{% endif %}
+  <div class="stack-actions"><a class="cta" href="{{ action_href or '/' }}">{{ action_label or t.home }}</a>{% if action_href and action_href != '/' %}<a class="link-back" href="/">{{ t.home }}</a>{% endif %}</div>
 </div>
 {% endblock %}
