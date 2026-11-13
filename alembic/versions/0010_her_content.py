@@ -9,8 +9,8 @@ New content topics (`about_me`, `cancellation`, `privacy`) and the new translati
 live site through `python -m app.seed` (it adds what is missing, never rewrites), so this migration
 has no copy to carry: NP4b changes no existing text.
 
-Revision ID: 0009_her_content
-Revises: 0008_translation_copy_fixes
+Revision ID: 0010_her_content
+Revises: 0009_translation_copy_fixes_2
 Create Date: 2026-11-14 18:00:00.000000
 """
 
@@ -21,8 +21,8 @@ from collections.abc import Sequence
 import sqlalchemy as sa
 from alembic import op
 
-revision: str = "0009_her_content"
-down_revision: str | None = "0008_translation_copy_fixes"
+revision: str = "0010_her_content"
+down_revision: str | None = "0009_translation_copy_fixes_2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
