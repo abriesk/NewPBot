@@ -35,6 +35,13 @@ ignore = [
 # letters are confusable with Latin ones, which is exactly what the golden
 # test is there to catch -- the fix is not to write it in Latin.
 "tests/channels/test_dates.py" = ["RUF001"]
+# The NP4a test asserts the Armenian full stop (U+0589) in its own docstring.
+"tests/core/test_locales.py" = ["RUF002"]
+# Fixtures imported from tests/e2e/test_web_booking.py by name and then taken as
+# test parameters: the pytest idiom, which F811 reads as a redefinition.
+"tests/e2e/test_unverified_holds.py" = ["F811"]
+"tests/e2e/test_link_confirm.py" = ["F811"]
+"tests/e2e/test_np4a_client.py" = ["F811"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "datetime.datetime.utcnow".msg = "Naive UTC is banned. Use datetime.now(UTC)."

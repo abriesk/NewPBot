@@ -137,13 +137,15 @@ def test_a_rejection_carries_the_therapist_words_without_a_label(lang: str) -> N
 
 
 def test_no_armenian_value_ends_in_a_latin_colon() -> None:
-    """NP4a: the Armenian full stop is "։" (U+0589); a Latin ":" at the end of a sentence reads as a typo."""
+    """NP4a: the Armenian full stop is "։" (U+0589); a Latin ":" at the end of a sentence reads as a
+    typo."""
     bad = {k: v for k, v in CATALOGUE["hy"].items() if v.rstrip().endswith(":")}
     assert not bad, f"hy values ending in ':': {sorted(bad)}"
 
 
 def test_one_voice_in_armenian_and_the_word_for_a_request_in_russian() -> None:
-    """NP4a: she speaks in the first person ("Խնդրում եմ", not "Խնդրում ենք"); ru says "заявка", never "запрос"."""
+    """NP4a: she speaks in the first person ("Խնդրում եմ", not "Խնդրում ենք"); ru says "заявка",
+    never "запрос"."""
     assert not [k for k, v in CATALOGUE["hy"].items() if "Խնդրում ենք" in v]
     assert not [
         k for k, v in CATALOGUE["ru"].items() if "запрос" in v.lower().replace("запросите", "")
@@ -151,7 +153,8 @@ def test_one_voice_in_armenian_and_the_word_for_a_request_in_russian() -> None:
 
 
 def _literal_get_text_calls() -> list[tuple[str, str, int, frozenset[str]]]:
-    """(file, key, line, keyword names) of every `get_text(..., "literal.key", name=...)` call in app/."""
+    """(file, key, line, keyword names) of every `get_text(..., "literal.key", name=...)` call in
+    app/."""
     import ast
     from pathlib import Path
 
@@ -175,14 +178,18 @@ def _literal_get_text_calls() -> list[tuple[str, str, int, frozenset[str]]]:
     return found
 
 
-#: An argument a call passes that no language's text uses (it was there before NP4a; passing it loses nothing).
+#: An argument a call passes that no language's text uses (it was there before NP4a; passing it
+# loses nothing).
 HARMLESS_EXTRA_ARGUMENTS = {"intent.request.confirmed.client.body": frozenset({"uuid"})}
 
 
 def test_a_text_and_every_call_that_formats_it_agree_on_their_placeholders() -> None:
-    """NP4a: `get_text` returns the text unformatted when a placeholder is missing, and a deploy never overwrites a stored
-    row. So a call site and every language of the key must name the same placeholders: a call without arguments against
-    text holding `{timezone}` shows the braces to a client, and an argument the new text dropped silently loses its
+    """NP4a: `get_text` returns the text unformatted when a placeholder is missing, and a deploy
+    never overwrites a stored
+    row. So a call site and every language of the key must name the same placeholders: a call
+    without arguments against
+    text holding `{timezone}` shows the braces to a client, and an argument the new text dropped
+    silently loses its
     information (Telegram's zone line)."""
     problems = []
     for where, key, line, kwargs in _literal_get_text_calls():
@@ -193,6 +200,7 @@ def test_a_text_and_every_call_that_formats_it_agree_on_their_placeholders() -> 
             placeholders = set(PLACEHOLDER.findall(text))
             if placeholders != set(kwargs - HARMLESS_EXTRA_ARGUMENTS.get(key, frozenset())):
                 problems.append(
-                    f"{where}:{line} {key} [{lang}] text {sorted(placeholders)} vs call {sorted(kwargs)}"
+                    f"{where}:{line} {key} [{lang}] text {sorted(placeholders)} "
+                    f"vs call {sorted(kwargs)}"
                 )
     assert not problems, "\n".join(problems)

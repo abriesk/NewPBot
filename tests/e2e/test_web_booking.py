@@ -635,7 +635,8 @@ async def test_a_client_can_open_a_request_from_a_link_and_add_information(
     slot = (await committed.execute(select(Slot).where(Slot.id == web_slot))).scalar_one()
     local = slot.starts_at.astimezone(ZoneInfo("Europe/Moscow"))
     assert f"{local.day} " in page.text and f"{local:%H:%M} (" in page.text
-    # In the zone the client booked in, and saying which zone that is (the city in her language and its GMT offset).
+    # In the zone the client booked in, and saying which zone that is (the city in her language and
+    # its GMT offset).
     assert "Москва, GMT+3" in page.text
     # Consuming the token started a session, so the form on the page can post.
     assert web.cookies.get(CLIENT_COOKIE)

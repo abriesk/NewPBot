@@ -1,4 +1,5 @@
-"""NP4a: the client site's quick wins, errors in place, copy and accessibility, through the real ASGI app.
+"""NP4a: the client site's quick wins, errors in place, copy and accessibility, through the real
+ASGI app.
 
 Enforces IMPLEMENTATION.md §12.1 (the client web pages) and §15 (the catalogue, localised dates).
 """
@@ -20,7 +21,8 @@ from app.core.models import Practice, SessionType
 from app.main import create_app
 from app.render.labels import price_text
 
-# Fixtures shared with the booking tests (a committed slot, a committing session, the email channel on).
+# Fixtures shared with the booking tests (a committed slot, a committing session, the email channel
+# on).
 from tests.e2e.test_web_booking import committed, web, web_slot  # noqa: F401
 
 WEB = Path(__file__).resolve().parents[2] / "app" / "channels" / "web"
@@ -37,7 +39,7 @@ def anon() -> TestClient:
 
 
 @pytest_asyncio.fixture
-async def captcha_off(committed) -> AsyncIterator[None]:  # noqa: F811
+async def captcha_off(committed) -> AsyncIterator[None]:
     before = (await committed.execute(select(Practice.captcha_on).limit(1))).scalar_one()
     await committed.execute(update(Practice).values(captcha_on=False))
     await committed.commit()
@@ -49,7 +51,7 @@ async def captcha_off(committed) -> AsyncIterator[None]:  # noqa: F811
         await committed.commit()
 
 
-# --- form errors in place (item 3) -------------------------------------------------------------------------------
+# --- form errors in place (item 3) ----------------------------------------------------------------
 
 
 def test_auth_email_refusal_keeps_the_text_and_sits_beside_the_field(anon: TestClient) -> None:
@@ -96,7 +98,7 @@ def test_a_stale_form_is_a_message_not_a_blank_403_and_keeps_the_text(anon: Test
     )
 
 
-# --- error pages, titles, language, noscript (quick wins 5, 15, 16, 20) --------------------------------------------
+# --- error pages, titles, language, noscript (quick wins 5, 15, 16, 20) ---------------------------
 
 
 def test_error_page_has_its_own_heading_and_a_fitting_action(anon: TestClient) -> None:
@@ -118,7 +120,7 @@ def test_error_page_has_its_own_heading_and_a_fitting_action(anon: TestClient) -
 
 def test_every_page_has_its_own_title_and_htmx_only_on_book(
     anon: TestClient, web_slot: int
-) -> None:  # noqa: F811
+) -> None:
     titles = {}
     for path in ("/", "/waitlist", "/auth/email", "/book", "/t/work_terms"):
         page = anon.get(path, params={"lang": "en"})
@@ -135,7 +137,7 @@ def test_every_page_has_its_own_title_and_htmx_only_on_book(
 
 def test_time_zone_select_is_localised_and_adds_the_detected_zone(
     anon: TestClient, web_slot: int
-) -> None:  # noqa: F811
+) -> None:
     anon.cookies.set("pb_tz", "Asia/Almaty", domain="testserver.local")
     ru = anon.get("/book?lang=ru")
     assert '<option value="Asia/Almaty" selected>Алматы (GMT+5)</option>' in ru.text
@@ -146,13 +148,14 @@ def test_time_zone_select_is_localised_and_adds_the_detected_zone(
 
 def test_slot_buttons_carry_the_day_in_their_name_and_the_zone_line_moved_into_the_list(
     anon: TestClient,
-    web_slot: int,  # noqa: F811
+    web_slot: int,
 ) -> None:
     page = anon.get(
         "/book/slots", params={"lang": "en", "tz": "Asia/Yerevan", "modality": "online"}
     )
     assert re.search(
-        r'<button type="submit" aria-label="[A-Za-z]{3} \d+ [A-Za-z]{3}, \d\d:\d\d">\d\d:\d\d</button>',
+        r'<button type="submit" aria-label="[A-Za-z]{3} \d+ [A-Za-z]{3}, \d\d:\d\d">'
+        r"\d\d:\d\d</button>",
         page.text,
     )
     assert "Times are shown in Yerevan (GMT+4)." in page.text
@@ -160,13 +163,14 @@ def test_slot_buttons_carry_the_day_in_their_name_and_the_zone_line_moved_into_t
 
 
 def test_no_slots_offers_a_real_waitlist_button(anon: TestClient) -> None:
-    # No committed slots in a fresh database: the empty list shows the intro and a button, not a stray link.
+    # No committed slots in a fresh database: the empty list shows the intro and a button, not a
+    # stray link.
     page = anon.get("/book/slots", params={"lang": "ru", "tz": "Asia/Yerevan"})
     if "waitlist" in page.text and "cta" in page.text:
         assert 'class="cta" href="/waitlist"' in page.text
 
 
-# --- price, reference, copy ---------------------------------------------------------------------------------------
+# --- price, reference, copy -----------------------------------------------------------------------
 
 
 def test_price_text_is_only_what_she_stored() -> None:
@@ -188,7 +192,7 @@ def test_lang_cookie_name_unchanged() -> None:
     assert LANG_COOKIE == "pb_lang"
 
 
-# --- accessibility of the stylesheet ------------------------------------------------------------------------------
+# --- accessibility of the stylesheet --------------------------------------------------------------
 
 
 def _luminance(hex_colour: str) -> float:

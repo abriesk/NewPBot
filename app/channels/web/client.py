@@ -153,9 +153,11 @@ async def not_found_page(request: Request) -> Response:
 
 
 async def _stale_page(request: Request, *, kept: str = "") -> Response:
-    """A form posted with a CSRF token that ran out (the page sat open too long): 403, and a sentence that says so.
+    """A form posted with a CSRF token that ran out (the page sat open too long): 403, and a
+    sentence that says so.
 
-    Not a blank response. The text the visitor typed is shown back (`kept`) where the form cannot be re-rendered.
+    Not a blank response. The text the visitor typed is shown back (`kept`) where the form cannot be
+    re-rendered.
     """
     async with unit_of_work() as session:
         context = await _context(session, request)
@@ -180,11 +182,14 @@ async def _details_page(
     errors: dict[str, str] | None = None,
     status: int = 200,
 ) -> Response:
-    """§12.1 step 3. Also the answer to a refused submission: the same form, what was typed kept, the message beside
-    the field it is about (`errors` is keyed by field name; `form` is for a message about the whole form)."""
+    """§12.1 step 3. Also the answer to a refused submission: the same form, what was typed kept,
+    the message beside
+    the field it is about (`errors` is keyed by field name; `form` is for a message about the whole
+    form)."""
     t = context["t"]
     lang = context["lang"]
-    # `booking.slot.held` carries {minutes}: the hold window the client is racing, so it must be a number and not
+    # `booking.slot.held` carries {minutes}: the hold window the client is racing, so it must be a
+    # number and not
     # the placeholder (§15).
     labels = {
         **t,
@@ -193,7 +198,8 @@ async def _details_page(
         ),
     }
 
-    # §12.1: the notice names the instant it is holding, not merely that something is held. A reservation made before
+    # §12.1: the notice names the instant it is holding, not merely that something is held. A
+    # reservation made before
     # this field existed carries no time, and the banner renders exactly as it did.
     held_raw = reservation.get("starts_at")
     held_when = (
@@ -225,8 +231,10 @@ async def _details_page(
             "held_when": held_when,
             "summary": summary,
             "signed_in": client is not None,
-            # §12.1: both prefills need a session. At this step an unsigned visitor has not identified themselves --
-            # the address arrives at submit -- so filling either from a typed one would tell whoever guessed it that
+            # §12.1: both prefills need a session. At this step an unsigned visitor has not
+            # identified themselves --
+            # the address arrives at submit -- so filling either from a typed one would tell whoever
+            # guessed it that
             # the address is known here, and whose it is.
             "display_name": client.display_name if client else None,
             "contact_note": await booking.last_contact_note(session, client.id) if client else None,
@@ -564,7 +572,8 @@ async def _error_page(
 ) -> Response:
     """An error page that says what happened and offers the next step that fits it, not only "Home".
 
-    `kept` is text the visitor typed into a form that could not be processed: it is shown back so it can be copied.
+    `kept` is text the visitor typed into a form that could not be processed: it is shown back so it
+    can be copied.
     """
     t = context["t"]
     href, label = {
@@ -738,8 +747,10 @@ def build_router() -> APIRouter:
                 .scalars()
                 .all()
             )
-            # Localised city and GMT offset, IANA ids stay the values (item 2). A zone the browser reported that is
-            # not on her list is added, so a visitor from Almaty is not silently put in Yerevan (quick win 1).
+            # Localised city and GMT offset, IANA ids stay the values (item 2). A zone the browser
+            # reported that is
+            # not on her list is added, so a visitor from Almaty is not silently put in Yerevan
+            # (quick win 1).
             now = now_utc()
             ids = [option.iana_name for option in options]
             if tz not in ids:
@@ -783,7 +794,7 @@ def build_router() -> APIRouter:
         async with unit_of_work() as session:
             practice = await get_practice(session)
             lang = _language(request, practice.default_language, None)
-            zone = tz if _valid_zone(tz) else _timezone(request, practice.timezone)
+            zone = tz if tz and _valid_zone(tz) else _timezone(request, practice.timezone)
 
             slots = await list_available_slots(
                 session,
@@ -827,7 +838,8 @@ def build_router() -> APIRouter:
             days = []
             for day, times in grouped.items():
                 heading = await day_label(session, lang, starts[day], zone)
-                # A button named only "18:00" says nothing out of context (WCAG 2.4.6): the day goes in its name.
+                # A button named only "18:00" says nothing out of context (WCAG 2.4.6): the day goes
+                # in its name.
                 for time in times:
                     time["aria"] = f"{heading}, {time['label']}"
                 days.append((heading, times))
@@ -1900,7 +1912,8 @@ async def _thread(
         .scalars()
         .all()
     )
-    # "client" / "therapist" are database words: the reader is "You", the other side has her practice's name.
+    # "client" / "therapist" are database words: the reader is "You", the other side has her
+    # practice's name.
     return [
         {
             "sender": message.sender.value,
@@ -1919,9 +1932,12 @@ async def _format(
 ) -> str | None:
     """A stored instant in the reader's zone and language (`вт 17 ноя, 18:00 (Ереван, GMT+4)`).
 
-    `tz` is the zone the client chose when booking, kept on the request. The practice zone is only the fallback:
-    showing a Moscow client a Yerevan time with no label is how someone misses a session by an hour. Storage stays UTC
-    (DESIGN.md §8); the wording is `app.render.dates.when_label`, shared by every client-visible time.
+    `tz` is the zone the client chose when booking, kept on the request. The practice zone is only
+    the fallback:
+    showing a Moscow client a Yerevan time with no label is how someone misses a session by an hour.
+    Storage stays UTC
+    (DESIGN.md §8); the wording is `app.render.dates.when_label`, shared by every client-visible
+    time.
     """
     if value is None:
         return None

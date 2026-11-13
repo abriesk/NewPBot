@@ -392,7 +392,10 @@ async def test_the_confirm_page_for_a_carried_booking_names_it_and_offers_both_c
     assert 'name="mode" value="book"' in page.text
     assert 'name="mode" value="signin"' in page.text
     # Named in words and the client's zone, not as an ISO stamp: "пт 4 дек, 23:54 (Москва, GMT+3)".
-    assert re.search(r"\d+ [а-я]{3}, \d\d:\d\d \([^)]+, GMT[+-]\d", page.text)
+    assert re.search(
+        r"\d+ [а-я]{3}, \d\d:\d\d \([^)]+, GMT[+-]\d",  # noqa: RUF001 - Cyrillic is the assertion
+        page.text,
+    )
 
     row = (
         (

@@ -43,7 +43,8 @@ async def session_type_name(session: AsyncSession, lang: str, code: str) -> str:
 def price_text(session_type: SessionType) -> str:
     """The price a client reads next to a session type, or "" when she stored none.
 
-    Her own wording (`price_display_override`) wins. Otherwise the amount is a whole unit of the currency named beside
+    Her own wording (`price_display_override`) wins. Otherwise the amount is a whole unit of the
+    currency named beside
     it (see `admin._price_amount`), grouped by thousands with a non-breaking space: "15 000 AMD".
     """
     if session_type.price_display_override and session_type.price_display_override.strip():

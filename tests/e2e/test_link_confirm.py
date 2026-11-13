@@ -1,4 +1,5 @@
-"""Emailed links are confirmed, not spent, by a GET (IMPLEMENTATION.md §6.2, §12.1; NP2, REVIEW F11).
+"""Emailed links are confirmed, not spent, by a GET (IMPLEMENTATION.md §6.2, §12.1; NP2, REVIEW
+F11).
 
 Mail scanners and link previews fetch every URL in a message. A login or request
 link that a GET spends is dead before the person opens it; the GET now shows a

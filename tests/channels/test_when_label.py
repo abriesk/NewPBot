@@ -1,4 +1,5 @@
-"""NP4a: one helper for every client-visible time: localised weekday + date + 24 h time + city and GMT offset.
+"""NP4a: one helper for every client-visible time: localised weekday + date + 24 h time + city and
+GMT offset.
 
 Enforces IMPLEMENTATION.md §15 (dates in the reader's language) and DESIGN.md §8 (zones).
 """
@@ -29,7 +30,8 @@ async def test_when_label_per_language(db, lang: str, expected: str) -> None:
 
 
 async def test_when_label_follows_the_clients_zone_and_the_date_line(db) -> None:
-    # 23:30 UTC on the 17th is already the 18th in Yerevan, and 18:30 in New York (GMT-5 in November).
+    # 23:30 UTC on the 17th is already the 18th in Yerevan, and 18:30 in New York (GMT-5 in
+    # November).
     late = datetime(2026, 11, 17, 23, 30, tzinfo=UTC)
     assert await when_label(db, "en", late, "Asia/Yerevan") == "Wed 18 Nov, 03:30 (Yerevan, GMT+4)"
     assert (

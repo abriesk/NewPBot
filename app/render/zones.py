@@ -1,12 +1,17 @@
 """Time-zone names a client can read: a city in their language and the offset from GMT.
 
-The select on /book used to show raw IANA ids or the practice's English labels; "Asia/Yerevan" is not something a
-client in Gyumri recognises. The `value` of an option stays the IANA id (that is what is stored and what the server
+The select on /book used to show raw IANA ids or the practice's English labels; "Asia/Yerevan" is
+not something a
+client in Gyumri recognises. The `value` of an option stays the IANA id (that is what is stored and
+what the server
 converts with), only the label is localised: "Ереван (GMT+4)".
 
-The table lists the zones a client of this practice is likely to be in: the practice's own seeded options and the places
-its clients travel from. A zone not in the table falls back to the city part of its IANA id, in Latin letters, which is
-better than a raw id and never wrong. The ru and hy names are drafts for a native check (`# TODO: review`).
+The table lists the zones a client of this practice is likely to be in: the practice's own seeded
+options and the places
+its clients travel from. A zone not in the table falls back to the city part of its IANA id, in
+Latin letters, which is
+better than a raw id and never wrong. The ru and hy names are drafts for a native check (`# TODO:
+review`).
 """
 
 from __future__ import annotations
@@ -68,7 +73,8 @@ def city_name(iana: str, lang: str) -> str:
 
 
 def gmt_offset(iana: str, at: datetime) -> str:
-    """`GMT+4`, `GMT-5`, `GMT+5:30`, `GMT` -- the offset in force at `at` (daylight saving included)."""
+    """`GMT+4`, `GMT-5`, `GMT+5:30`, `GMT` -- the offset in force at `at` (daylight saving
+    included)."""
     delta = at.astimezone(ZoneInfo(iana)).utcoffset()
     minutes = int(delta.total_seconds() // 60) if delta is not None else 0
     if minutes == 0:

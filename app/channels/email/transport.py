@@ -86,7 +86,10 @@ class EmailTransport:
             # Delivery page shows the row waiting.
             return DeliveryResult.transient(f"SMTP authentication failed: {exc.code} {exc.message}")
         except aiosmtplib.SMTPConnectError as exc:
-            return DeliveryResult.transient(f"SMTP connect failed: {exc.code} {exc.message}")
+            # Only the response variant of a connect error carries a code; the
+            # plain one (refused, closed early) has just a message.
+            code = f"{exc.code} " if isinstance(exc, aiosmtplib.SMTPResponseException) else ""
+            return DeliveryResult.transient(f"SMTP connect failed: {code}{exc.message}")
         except aiosmtplib.SMTPResponseException as exc:
             detail = f"{exc.code} {exc.message}"
             if str(exc.code).startswith(PERMANENT_PREFIX):
