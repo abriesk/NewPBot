@@ -18,9 +18,11 @@ from app.core.enums import Channel, OutboxStatus
 from app.core.models import OutboxAttempt, OutboxMessage, Practice
 from app.worker.jobs.outbox import (
     MAX_ATTEMPTS,
+    RECLAIMED,
     backoff_minutes,
     claim_batch,
     deliver_one,
+    reclaim_stuck,
     record_outcome,
 )
 
@@ -60,11 +62,17 @@ async def _row(db: AsyncSession, practice: Practice, **overrides: object) -> Out
 
 @pytest.mark.parametrize(
     ("attempts", "expected"),
-    [(1, 2), (2, 4), (3, 8), (4, 16), (5, 32), (6, 60), (10, 60)],
+    [(1, 2), (2, 4), (3, 8), (4, 16), (5, 32), (6, 64), (7, 128), (8, 240), (12, 240)],
 )
-def test_backoff_doubles_and_caps_at_an_hour(attempts: int, expected: int) -> None:
-    """§14: min(2^attempts, 60) minutes."""
+def test_backoff_doubles_and_caps_at_four_hours(attempts: int, expected: int) -> None:
+    """§14 as amended (NP2): min(2^attempts, 240) minutes."""
     assert backoff_minutes(attempts) == expected
+
+
+def test_the_retries_span_about_a_day_before_a_row_is_dead() -> None:
+    """A mail outage over a night must not lose the day's confirmations."""
+    total = sum(backoff_minutes(n) for n in range(1, MAX_ATTEMPTS))
+    assert 22 * 60 <= total <= 26 * 60, f"retries span {total / 60:.1f} h"
 
 
 # --- Transient failures retry -----------------------------------------------
@@ -84,7 +92,7 @@ async def test_a_transient_failure_stays_pending_and_backs_off(
     assert row.next_attempt_at >= before + timedelta(minutes=backoff_minutes(1) - 1)
 
 
-async def test_a_transient_failure_dies_after_six_attempts(
+async def test_a_transient_failure_dies_after_the_last_attempt(
     db: AsyncSession, practice: Practice
 ) -> None:
     row = await _row(db, practice)
@@ -281,3 +289,76 @@ async def test_a_rendered_message_reaches_the_transport(
     assert message.parts and message.parts[0].strip()
     # Hard rule 6: HTML, never the MarkdownV2 parse mode.
     assert message.parse_mode == "HTML"
+
+
+# --- System alerts never alert about themselves (F5) -------------------------
+
+
+async def test_a_dead_admin_target_raises_one_alert_total_not_one_per_pass(
+    db: AsyncSession, practice: Practice
+) -> None:
+    row = await _row(db, practice)
+    await record_outcome(db, row, DeliveryResult.permanent("blocked"))
+    alerts = await _alerts_after(db, row)
+    assert alerts
+    first_pass = len(alerts)
+
+    # The alerts themselves fail to deliver, every way a row can fail.
+    for alert in alerts:
+        await record_outcome(db, alert, DeliveryResult.permanent("chat not found"))
+    again = await _row(db, practice, intent_key="system.delivery_failed.admin")
+    for _ in range(MAX_ATTEMPTS):
+        await record_outcome(db, again, DeliveryResult.transient("timeout"))
+
+    after = [a for a in await _alerts_after(db, row) if a.id != again.id]
+    assert len(after) == first_pass, "an alert about an alert was raised"
+
+
+# --- A row stuck in `sending` is reclaimed once (F7) --------------------------
+
+
+async def test_a_row_in_sending_for_over_fifteen_minutes_is_reclaimed(
+    db: AsyncSession, practice: Practice
+) -> None:
+    old = await _row(
+        db,
+        practice,
+        status=OutboxStatus.sending,
+        next_attempt_at=datetime.now(UTC) - timedelta(minutes=20),
+    )
+    fresh = await _row(
+        db,
+        practice,
+        status=OutboxStatus.sending,
+        next_attempt_at=datetime.now(UTC) - timedelta(minutes=2),
+    )
+
+    assert await reclaim_stuck(db) >= 1
+
+    assert old.status is OutboxStatus.pending
+    assert old.last_error == RECLAIMED
+    assert fresh.status is OutboxStatus.sending
+
+
+async def test_a_row_stuck_a_second_time_goes_dead_not_round_again(
+    db: AsyncSession, practice: Practice
+) -> None:
+    """At-most-once is kept: a reclaimed row is retried once, no more."""
+    row = await _row(
+        db,
+        practice,
+        status=OutboxStatus.sending,
+        last_error=RECLAIMED,
+        next_attempt_at=datetime.now(UTC) - timedelta(minutes=20),
+    )
+
+    await reclaim_stuck(db)
+
+    assert row.status is OutboxStatus.dead
+
+
+async def test_claiming_stamps_the_time_it_started(db: AsyncSession, practice: Practice) -> None:
+    row = await _row(db, practice, next_attempt_at=datetime.now(UTC) - timedelta(hours=3))
+    claimed = await claim_batch(db, limit=500)
+    assert row in claimed
+    assert row.next_attempt_at > datetime.now(UTC) - timedelta(minutes=1)

@@ -12,7 +12,7 @@ import logging
 from app.channels.base import Transport
 from app.channels.email.transport import EmailTransport
 from app.channels.telegram.transport import TelegramTransport
-from app.config import get_settings
+from app.config import Settings, get_settings
 from app.core.enums import Channel
 
 logger = logging.getLogger(__name__)
@@ -28,6 +28,18 @@ def _announce_once(message: str) -> None:
         logger.info("%s", message)
 
 
+#: One Telegram transport per token for the life of the process: every pass used
+#: to build a `Bot` and never close it, leaking an aiohttp session per pass.
+_telegram: dict[str, TelegramTransport] = {}
+
+
+def _telegram_transport(settings: Settings) -> TelegramTransport:
+    token = settings.telegram_bot_token
+    if token not in _telegram:
+        _telegram[token] = TelegramTransport(settings=settings)
+    return _telegram[token]
+
+
 def build_transports() -> dict[Channel, Transport]:
     """The channels this deployment can actually send on.
 
@@ -38,7 +50,7 @@ def build_transports() -> dict[Channel, Transport]:
 
     """
     settings = get_settings()
-    transports: dict[Channel, Transport] = {Channel.telegram: TelegramTransport(settings=settings)}
+    transports: dict[Channel, Transport] = {Channel.telegram: _telegram_transport(settings)}
 
     if settings.email_enabled:
         transports[Channel.email] = EmailTransport(settings)

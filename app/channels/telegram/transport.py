@@ -76,7 +76,9 @@ class TelegramTransport:
             # The client blocked the bot. Retrying six times helps nobody.
             return DeliveryResult.permanent(f"forbidden: {exc}")
         except TelegramUnauthorizedError as exc:
-            return DeliveryResult.permanent(f"unauthorized: {exc}")
+            # A rotated or mistyped token: the *bot's* credentials, not this
+            # message. It retries, and the Delivery page shows it waiting.
+            return DeliveryResult.transient(f"unauthorized: {exc}")
         except TelegramBadRequest as exc:
             # Malformed HTML or a bad chat id: the same request will fail again.
             return DeliveryResult.permanent(f"bad request: {exc}")

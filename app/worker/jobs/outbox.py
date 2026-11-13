@@ -3,9 +3,16 @@
     status='pending' AND next_attempt_at <= now(), limit 50
 
 Render, send, record the attempt. On success `sent`. On transient failure
-`attempts += 1` and back off `min(2^attempts, 60)` minutes; after 6 attempts
-`dead` plus a `system.delivery_failed.admin` alert. On permanent failure `dead`
-immediately, with no alert unless `attempts = 0`.
+`attempts += 1` and back off `min(2^attempts, 240)` minutes (about a day in
+all); after 13 attempts `dead` plus a `system.delivery_failed.admin` alert. On
+permanent failure `dead` immediately, with no alert unless `attempts = 0`. No
+alert is ever raised about a `system.*` message: an alert that cannot be
+delivered must not breed more alerts.
+
+A row left in `sending` for more than 15 minutes (the process died mid-send) is
+reclaimed once: it goes back to `pending` and is tried again, accepting a
+possible duplicate over a message lost for good. Stuck a second time, it is
+`dead`.
 
 Rows are claimed with FOR UPDATE SKIP LOCKED so a second worker -- or a restart
 mid-send -- never sends the same row twice.
@@ -34,14 +41,22 @@ logger = logging.getLogger(__name__)
 BATCH_SIZE = 50
 
 #: §14. After this many attempts a message is dead and the therapist is told.
-MAX_ATTEMPTS = 6
+MAX_ATTEMPTS = 13
 
-#: §14: min(2^attempts, 60) minutes.
-MAX_BACKOFF_MINUTES = 60
+#: min(2^attempts, 240) minutes: 2, 4 ... 128, then 240 -- the 12 waits between
+#: 13 attempts add up to about 25 hours, so an outage over a night loses nothing.
+MAX_BACKOFF_MINUTES = 240
+
+#: A row in `sending` longer than this is a process that died, not a send.
+SENDING_GRACE = timedelta(minutes=15)
+
+#: `last_error` of a row reclaimed from `sending`; seeing it on a row that is
+#: stuck again means the retry also died, and that one is not repeated.
+RECLAIMED = "reclaimed after being stuck in sending"
 
 
 def backoff_minutes(attempts: int) -> int:
-    """§14's exponential backoff, capped."""
+    """Exponential backoff, capped."""
     return int(min(2**attempts, MAX_BACKOFF_MINUTES))
 
 
@@ -67,10 +82,47 @@ async def claim_batch(session: AsyncSession, limit: int = BATCH_SIZE) -> list[Ou
         .scalars()
         .all()
     )
+    now = now_utc()
     for row in rows:
         row.status = OutboxStatus.sending
+        # No column records when a row entered `sending`; the due time is spent
+        # by now, so it carries the claim time for `reclaim_stuck`.
+        row.next_attempt_at = now
     await session.flush()
     return list(rows)
+
+
+async def reclaim_stuck(session: AsyncSession) -> int:
+    """Move rows stuck in `sending` back to `pending`, once each.
+
+    At-most-once delivery stays the rule: a row is retried a single time after
+    a stall, and one that stalls again is `dead` for a person to retry.
+    """
+    rows = (
+        (
+            await session.execute(
+                select(OutboxMessage)
+                .where(
+                    OutboxMessage.status == OutboxStatus.sending,
+                    OutboxMessage.next_attempt_at < now_utc() - SENDING_GRACE,
+                )
+                .with_for_update(skip_locked=True)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    for row in rows:
+        again = row.last_error == RECLAIMED
+        session.add(OutboxAttempt(message_id=row.id, ok=False, error=RECLAIMED))
+        row.last_error = RECLAIMED
+        if again:
+            row.status = OutboxStatus.dead
+        else:
+            row.status = OutboxStatus.pending
+            row.next_attempt_at = now_utc()
+    await session.flush()
+    return len(rows)
 
 
 async def _recipient_timezone(session: AsyncSession, message: OutboxMessage) -> str:
@@ -113,6 +165,11 @@ async def deliver_one(
     return await transport.send(message.address, rendered)
 
 
+def _is_system(message: OutboxMessage) -> bool:
+    """`system.*` intents are alerts and health notices: never alert about them."""
+    return message.intent_key.startswith("system.")
+
+
 async def record_outcome(
     session: AsyncSession, message: OutboxMessage, result: DeliveryResult
 ) -> None:
@@ -130,7 +187,7 @@ async def record_outcome(
         message.status = OutboxStatus.dead
         # §14: no alert unless this was the very first attempt. A permanent
         # failure after retries is usually a condition she already knows about.
-        if message.attempts == 1:
+        if message.attempts == 1 and not _is_system(message):
             await alert_admin_delivery_failed(
                 session,
                 intent_key=message.intent_key,
@@ -141,12 +198,13 @@ async def record_outcome(
 
     if message.attempts >= MAX_ATTEMPTS:
         message.status = OutboxStatus.dead
-        await alert_admin_delivery_failed(
-            session,
-            intent_key=message.intent_key,
-            address=message.address,
-            error=result.error or "gave up after retries",
-        )
+        if not _is_system(message):
+            await alert_admin_delivery_failed(
+                session,
+                intent_key=message.intent_key,
+                address=message.address,
+                error=result.error or "gave up after retries",
+            )
         return
 
     message.status = OutboxStatus.pending
@@ -165,26 +223,53 @@ async def dispatch_outbox(transports: dict[Channel, Transport] | None = None) ->
     # the next pass sends it a second time. `dedupe_key` cannot help there --
     # it dedupes what goes *into* the outbox, not what leaves it.
     async with unit_of_work() as session:
+        await reclaim_stuck(session)
+
+    async with unit_of_work() as session:
         claimed = [message.id for message in await claim_batch(session)]
 
     if not claimed:
         return 0
 
     # One transaction per message, so an outcome already recorded cannot be
-    # undone by a later message in the same batch failing.
+    # undone by a later message in the same batch failing -- and one message
+    # that raises is recorded as a transient failure of its own, never allowed
+    # to leave the rest of the batch in `sending`.
     for message_id in claimed:
-        async with unit_of_work() as session:
-            message = (
-                await session.execute(select(OutboxMessage).where(OutboxMessage.id == message_id))
-            ).scalar_one()
-            result = await deliver_one(session, message, active)
-            await record_outcome(session, message, result)
-            if not result.ok:
-                logger.warning(
-                    "outbox %s to %s failed (attempt %s): %s",
-                    message.intent_key,
-                    message.channel.value,
-                    message.attempts,
-                    result.error,
-                )
+        try:
+            await _attempt(message_id, active)
+        except Exception as exc:
+            logger.exception("outbox row %s raised while being delivered", message_id)
+            try:
+                async with unit_of_work() as session:
+                    message = (
+                        await session.execute(
+                            select(OutboxMessage).where(OutboxMessage.id == message_id)
+                        )
+                    ).scalar_one()
+                    await record_outcome(
+                        session,
+                        message,
+                        DeliveryResult.transient(f"unexpected {type(exc).__name__}: {exc}"[:500]),
+                    )
+            except Exception:
+                # Left in `sending`; the reclaim sweep picks it up.
+                logger.exception("outbox row %s: the failure could not be recorded", message_id)
     return len(claimed)
+
+
+async def _attempt(message_id: int, active: dict[Channel, Transport]) -> None:
+    async with unit_of_work() as session:
+        message = (
+            await session.execute(select(OutboxMessage).where(OutboxMessage.id == message_id))
+        ).scalar_one()
+        result = await deliver_one(session, message, active)
+        await record_outcome(session, message, result)
+        if not result.ok:
+            logger.warning(
+                "outbox %s to %s failed (attempt %s): %s",
+                message.intent_key,
+                message.channel.value,
+                message.attempts,
+                result.error,
+            )

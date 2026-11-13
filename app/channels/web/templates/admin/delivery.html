@@ -3,6 +3,9 @@
 {% block content %}
 <h1>{{ t.nav_delivery }}</h1>
 {# DESIGN.md §15: so "did she get my message?" is answerable. #}
+{% if credentials_waiting %}
+<p class="notice credentials-warning">{{ t.delivery_credentials.replace("{count}", credentials_waiting|string) }}</p>
+{% endif %}
 <p class="filters">
   {% for status, count in counts.items() %}
     <span class="badge {{ status }}">{{ status }}: {{ count }}</span>
@@ -13,7 +16,7 @@
 <table>
   <thead><tr>
     <th>Created</th><th>Channel</th><th>Intent</th><th>Status</th>
-    <th>Attempts</th><th>Last error</th>
+    <th>Attempts</th><th>Last error</th><th></th>
   </tr></thead>
   <tbody>
   {% for row in rows %}
@@ -24,9 +27,14 @@
       <td><span class="badge {{ row.status.value }}">{{ row.status.value }}</span></td>
       <td>{{ row.attempts }}</td>
       <td class="muted">{{ row.last_error or "" }}</td>
+      <td>{% if row.status.value == "dead" %}
+        <form method="post" action="/admin/delivery/{{ row.id }}/retry">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+          <button type="submit">{{ t.delivery_retry }}</button>
+        </form>{% endif %}</td>
     </tr>
   {% else %}
-    <tr><td colspan="6" class="muted">Nothing sent yet.</td></tr>
+    <tr><td colspan="7" class="muted">Nothing sent yet.</td></tr>
   {% endfor %}
   </tbody>
 </table>

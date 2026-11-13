@@ -286,6 +286,8 @@ admin:
   nav.maintenance: "Maintenance"
   settings.saved: "Saved."
   delivery.failed: "Delivery failed: {error}"
+  delivery.retry: "Retry"
+  delivery.credentials: "{count} message(s) are waiting because the mail or Telegram credentials were refused. Check SMTP_PASSWORD or TELEGRAM_BOT_TOKEN; they retry on their own once it is fixed."
   intent.system.delivery_failed.admin.body: "Could not deliver {intent} to {address}: {error}"
   intent.system.health.degraded.admin.body: "Something is wrong with the service: {checks}. Clients may be affected. Open the status page, or send this to whoever runs your server."
   intent.system.health.recovered.admin.body: "The service is working normally again."

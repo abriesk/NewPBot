@@ -26,7 +26,7 @@ from zoneinfo import ZoneInfo
 from fastapi import APIRouter, Form, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels.web import ratelimit
@@ -228,6 +228,8 @@ async def _labels(session: AsyncSession) -> dict[str, str]:
         "nav_session_types": "admin.nav.session_types",
         "nav_timezones": "admin.nav.timezones",
         "nav_delivery": "admin.nav.delivery",
+        "delivery_retry": "admin.delivery.retry",
+        "delivery_credentials": "admin.delivery.credentials",
         "nav_clients": "admin.nav.clients",
         "nav_privacy": "admin.nav.privacy",
         "nav_maintenance": "admin.nav.maintenance",
@@ -1185,6 +1187,23 @@ def build_router() -> APIRouter:
                 .tuples()
                 .all()
             )
+            # A rotated password or token is not a failure of any one message:
+            # the rows wait and retry, and this is where the admin learns why.
+            credentials_waiting = int(
+                (
+                    await session.execute(
+                        select(func.count()).where(
+                            OutboxMessage.status.in_(
+                                [OutboxStatus.pending, OutboxStatus.sending]
+                            ),
+                            or_(
+                                OutboxMessage.last_error.like("SMTP authentication failed%"),
+                                OutboxMessage.last_error.like("unauthorized:%"),
+                            ),
+                        )
+                    )
+                ).scalar_one()
+            )
             return _render(
                 "admin/delivery.html",
                 await _context(
@@ -1192,9 +1211,36 @@ def build_router() -> APIRouter:
                     request,
                     admin,
                     rows=rows,
+                    credentials_waiting=credentials_waiting,
                     counts={s.value: tallied.get(s, 0) for s in OutboxStatus},
                 ),
             )
+
+    @router.post("/delivery/{message_id}/retry", include_in_schema=False)
+    async def delivery_retry(
+        request: Request, message_id: int, csrf_token: str = Form("", alias=CSRF_FIELD)
+    ) -> Response:
+        """Requeue a dead message: the one recovery that used to be SQL."""
+        if not csrf_ok(request, csrf_token):
+            return Response(status_code=403)
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+            row = (
+                await session.execute(
+                    select(OutboxMessage)
+                    .where(OutboxMessage.id == message_id)
+                    .with_for_update()
+                )
+            ).scalar_one_or_none()
+            if row is None or row.status is not OutboxStatus.dead:
+                return _back("/admin/delivery")
+            row.status = OutboxStatus.pending
+            row.attempts = 0
+            row.next_attempt_at = now_utc()
+            await session.flush()
+            return _back("/admin/delivery", "requeued")
 
     # --- Client export and erasure (§12.2, DESIGN.md §16) -------------------
 

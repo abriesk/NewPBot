@@ -28,6 +28,10 @@ logger = logging.getLogger(__name__)
 #: mailbox six times with backoff annoys the receiving server and helps nobody.
 PERMANENT_PREFIX = "5"
 
+#: One call may not hang the dispatch pass: seconds, applied to connect and to
+#: every command (aiosmtplib's own default is 60 per step).
+SMTP_TIMEOUT = 15
+
 
 class EmailTransport:
     """`Transport` for the email channel."""
@@ -69,7 +73,16 @@ class EmailTransport:
                 username=settings.smtp_user or None,
                 password=settings.smtp_password or None,
                 start_tls=settings.smtp_starttls,
+                timeout=SMTP_TIMEOUT,
             )
+        except aiosmtplib.SMTPAuthenticationError as exc:
+            # 535 says the *practice's* credentials were refused, not that the
+            # recipient is bad. Every mail dies until someone fixes the
+            # password, which is what retrying with backoff is for; the
+            # Delivery page shows the row waiting.
+            return DeliveryResult.transient(f"SMTP authentication failed: {exc.code} {exc.message}")
+        except aiosmtplib.SMTPConnectError as exc:
+            return DeliveryResult.transient(f"SMTP connect failed: {exc.code} {exc.message}")
         except aiosmtplib.SMTPResponseException as exc:
             detail = f"{exc.code} {exc.message}"
             if str(exc.code).startswith(PERMANENT_PREFIX):
