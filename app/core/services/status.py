@@ -275,7 +275,7 @@ async def _outbox_stuck(session: AsyncSession) -> Check:
     cutoff = now_utc() - STUCK_GRACE
     rows = (
         await session.execute(
-            select(func.count(), func.min(OutboxMessage.created_at)).where(
+            select(func.count(), func.min(OutboxMessage.next_attempt_at)).where(
                 OutboxMessage.status == OutboxStatus.sending,
                 OutboxMessage.next_attempt_at < cutoff,
             )
@@ -292,7 +292,7 @@ async def _outbox_stuck(session: AsyncSession) -> Check:
         f"{count} message(s) were interrupted while being sent. Nobody knows "
         f"whether they arrived, so nothing has been retried. Call for help.",
         f"outbox: {count} in sending for more than "
-        f"{int(STUCK_GRACE.total_seconds() // 60)}m, oldest {oldest:%Y-%m-%dT%H:%MZ}",
+        f"{int(STUCK_GRACE.total_seconds() // 60)}m, oldest claim {oldest:%Y-%m-%dT%H:%MZ}",
     )
 
 

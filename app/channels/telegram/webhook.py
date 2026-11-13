@@ -227,8 +227,10 @@ async def register_webhook() -> bool:
 
     from aiogram import Bot
 
-    bot = Bot(token=settings.telegram_bot_token)
+    bot = None
     try:
+        # Built inside the try: a malformed token raises here, and must be logged, not end the task.
+        bot = Bot(token=settings.telegram_bot_token)
         await bot.set_webhook(
             url=f"{settings.base_url}{settings.telegram_webhook_path}",
             secret_token=settings.telegram_webhook_secret,
@@ -238,7 +240,8 @@ async def register_webhook() -> bool:
         logger.error("could not register the Telegram webhook: %s", exc)
         return False
     finally:
-        await bot.session.close()
+        if bot is not None:
+            await bot.session.close()
 
     logger.info("Telegram webhook registered")
     return True
@@ -269,6 +272,16 @@ def healthz_webhook_field(status: WebhookStatus) -> str | None:
     return None
 
 
+def _token_is_well_formed(token: str) -> bool:
+    from aiogram.utils.token import TokenValidationError, validate_token
+
+    try:
+        validate_token(token)
+    except TokenValidationError:
+        return False
+    return True
+
+
 async def keep_webhook_registered(
     status: WebhookStatus,
     sleep: Callable[[float], Awaitable[None]] | None = None,
@@ -278,11 +291,15 @@ async def keep_webhook_registered(
     Run as a background task by the app's lifespan so startup never waits for Telegram. A failure
     is logged by `register_webhook` on every attempt (never silent) and shows in `/healthz` until
     it succeeds. A registration that cannot succeed by waiting -- polling mode, or a BASE_URL that
-    is not https -- is attempted once, for its log line, and not retried.
+    is not https, or a malformed bot token -- is attempted once, for its log line, and not retried.
     """
     settings = get_settings()
     status.wanted = settings.telegram_mode == "webhook"
-    retryable = status.wanted and settings.base_url.startswith("https://")
+    retryable = (
+        status.wanted
+        and settings.base_url.startswith("https://")
+        and _token_is_well_formed(settings.telegram_bot_token)  # waiting does not mend a typo
+    )
     delays = RETRY_DELAYS
     while True:
         status.attempts += 1

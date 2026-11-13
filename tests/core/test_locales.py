@@ -272,7 +272,6 @@ LABELS_WITH_A_PLACEHOLDER = {
     "reference": "request.reference",  # templates .replace('{ref}', ...)
     # the admin console's own `_labels`
     "delivery_credentials": "admin.delivery.credentials",  # delivery.html .replace('{count}')
-    "invalid_markdown": "admin.content.invalid_markdown",  # no template reads this label today
 }
 
 

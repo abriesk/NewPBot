@@ -982,7 +982,9 @@ def build_router() -> APIRouter:
         """§12.1: submit; returns the confirmation with the request UUID."""
         typed = {"problem": problem, "name": name, "contact": contact, "email": email}
         if not csrf_ok(request, csrf_token):
-            # The page sat open too long: show the same form again, with what was typed, and say so.
+            # The page sat open too long: show the same form again and say so. Without what was
+            # posted: a request that failed the CSRF check is not one whose text this page should
+            # repeat (NP3c/11).
             async with unit_of_work() as session:
                 context = await _context(session, request)
                 client = await _session_client(session, request)
@@ -995,7 +997,7 @@ def build_router() -> APIRouter:
                     context,
                     client,
                     reservation,
-                    values=typed,
+                    values=None,
                     errors={"form": context["t"]["stale"]},
                     status=403,
                 )

@@ -43,6 +43,7 @@ ignore = [
 "tests/e2e/test_link_confirm.py" = ["F811"]
 "tests/e2e/test_np4a_client.py" = ["F811"]
 "tests/e2e/test_np3c.py" = ["F811"]
+"tests/e2e/test_np3d.py" = ["F811"]
 
 [tool.ruff.lint.flake8-tidy-imports.banned-api]
 "datetime.datetime.utcnow".msg = "Naive UTC is banned. Use datetime.now(UTC)."

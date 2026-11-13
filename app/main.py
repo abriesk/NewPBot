@@ -93,10 +93,13 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     try:
         yield
     finally:
-        app.state.webhook_task.cancel()
-        with suppress(asyncio.CancelledError):
-            await app.state.webhook_task
-        await dispose_engine()
+        try:
+            app.state.webhook_task.cancel()
+            # a task that died on its own re-raises here: shutdown must still dispose the engine
+            with suppress(asyncio.CancelledError, Exception):
+                await app.state.webhook_task
+        finally:
+            await dispose_engine()
 
 
 def create_app() -> FastAPI:

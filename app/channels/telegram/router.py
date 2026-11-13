@@ -1599,10 +1599,15 @@ async def _local(
     session: AsyncSession, value: datetime | None, client: Client, practice: Practice
 ) -> str:
     """An instant in the client's own zone and language, as the web shows it
-    (`app.render.dates.when_label`). Storage stays UTC (DESIGN.md §8)."""
+    (`app.render.dates.when_label`). Storage stays UTC (DESIGN.md §8).
+
+    For Telegram HTML: the weekday and month words are therapist-editable translations, so the
+    label is escaped here."""
     if value is None:
         return ""
-    return await when_label(session, client.language, value, client.timezone or practice.timezone)
+    return escape_telegram(
+        await when_label(session, client.language, value, client.timezone or practice.timezone)
+    )
 
 
 # --- Negotiation, admin side (§13.2) ----------------------------------------

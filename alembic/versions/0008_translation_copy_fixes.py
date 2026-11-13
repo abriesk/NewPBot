@@ -7,8 +7,9 @@ NP4a) -- a therapist's own edit holds other text and survives -- and adds the ke
 exist then. Additive and idempotent; the downgrade does nothing (the old text is the therapist's
 to bring back, and a rewrite of her words is not undone by a schema step).
 
-The data is embedded: the migration reads neither the locale files nor git. The mechanism is
-`app.core.services.translation_defaults`, which later slices reuse for their own copy fixes.
+The data AND the mechanism are embedded: the migration reads neither the locale files, nor git, nor
+any app code (a later edit of `app.core.services.translation_defaults`, which newer slices reuse
+for their own copy fixes, must not change what this revision does on a fresh database).
 
 Revision ID: 0008_translation_copy_fixes
 Revises: 0007_unverified_holds
@@ -18,11 +19,10 @@ Create Date: 2026-11-14 12:00:00.000000
 # ruff: noqa: E501, RUF001
 from __future__ import annotations
 
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 
+import sqlalchemy as sa
 from alembic import op
-
-from app.core.services.translation_defaults import Addition, Change, apply_default_changes
 
 revision: str = "0008_translation_copy_fixes"
 down_revision: str | None = "0007_unverified_holds"
@@ -30,6 +30,10 @@ branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
 #: (lang, key, previous repo defaults, new default)
+Change = tuple[str, str, Sequence[str], str]
+#: (lang, key, default)
+Addition = tuple[str, str, str]
+
 CHANGES: tuple[Change, ...] = (
     ("en", "auth.greeting_unnamed", ("Hello, client.",), "Hello."),
     ("en", "auth.link_sent", ("If that address is known here, a sign-in link is on its way.",), "Check your inbox. If this address is known here, a link is on its way — it can take a minute."),
@@ -152,6 +156,33 @@ ADDITIONS: tuple[Addition, ...] = (
     ("ru", "request.you", "Вы"),
     ("ru", "waitlist.join", "Встать в лист ожидания"),
 )
+
+
+def apply_default_changes(
+    conn: sa.Connection, changes: Iterable[Change], additions: Iterable[Addition] = ()
+) -> tuple[int, int]:
+    """Rewrite a row only where it still holds a previous default; add the keys that are missing.
+
+    Returns (rows rewritten, rows added). A frozen copy of the helper this revision was written
+    with: idempotent, and a therapist's own edit is never touched.
+    """
+    rewrite = sa.text(
+        "UPDATE translation SET value = :new, updated_at = now() "
+        "WHERE lang = :lang AND key = :key AND value IN :old AND value <> :new"
+    ).bindparams(sa.bindparam("old", expanding=True))
+    add = sa.text(
+        "INSERT INTO translation (practice_id, lang, key, value) "
+        "SELECT id, :lang, :key, :value FROM practice "
+        "ON CONFLICT (practice_id, lang, key) DO NOTHING"
+    )
+    rewritten = added = 0
+    for lang, key, old, new in changes:
+        result = conn.execute(rewrite, {"lang": lang, "key": key, "old": list(old), "new": new})
+        rewritten += result.rowcount
+    for lang, key, value in additions:
+        result = conn.execute(add, {"lang": lang, "key": key, "value": value})
+        added += result.rowcount
+    return rewritten, added
 
 
 def upgrade() -> None:

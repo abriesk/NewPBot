@@ -240,7 +240,6 @@ async def _labels(session: AsyncSession) -> dict[str, str]:
         "slots_bulk": "admin.slots.bulk",
         "content_preview": "admin.content.preview",
         "content_revisions": "admin.content.revisions",
-        "invalid_markdown": "admin.content.invalid_markdown",
         "settings_saved": "admin.settings.saved",
         "config_export": "admin.maintenance.export",
         "config_import": "admin.maintenance.import",

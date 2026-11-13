@@ -219,11 +219,17 @@ def csrf_ok(request: Request, submitted: str | None) -> bool:
     still carries the token it was rendered with. Any token still valid and bound to the same
     session (the HMAC covers the session cookies) is as good as the cookie's own -- a token for
     another session fails the binding, and a cross-site POST carries no (SameSite=Lax) cookie.
+    A visitor with no session has no binding to speak of, so for them the two must be equal.
     """
     cookie = request.cookies.get(csrf_cookie_name())
     if not cookie or not submitted:
         return False
     binding = _binding(request)
+    if binding == "|":
+        # No session at all: every anonymous token carries the same binding, so "any valid token"
+        # would let one visitor's token pass for another's. The old rule -- the cookie IS the
+        # token -- is all there is to bind it to.
+        return hmac.compare_digest(cookie, submitted) and _csrf_valid(cookie, binding)
     return _csrf_valid(cookie, binding) and _csrf_valid(submitted, binding)
 
 
