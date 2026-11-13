@@ -216,6 +216,22 @@ async def test_a_redelivered_text_update_is_not_applied_to_the_next_step(
     assert (await flow.data(db, client.id, Channel.telegram))["name"] == "Anna"
 
 
+async def test_a_stored_update_id_higher_than_the_incoming_one_does_not_drop_it(
+    db: AsyncSession, future_slot: Slot, session_type_id: int
+) -> None:
+    """NP1 review: after a week of silence Telegram numbers updates afresh, at
+    random. Only the *same* id is a redelivery; a lower one is a real message,
+    or an abandoned flow would swallow every answer from then on."""
+    client = await _walk_to_slot_pick(db, future_slot)
+    await handle(db, Update(chat_id=CHAT, text="work stress", update_id=9000))
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.entering_name
+
+    await handle(db, Update(chat_id=CHAT, text="Anna", update_id=12))
+
+    assert (await flow.data(db, client.id, Channel.telegram))["name"] == "Anna"
+    assert await flow.current_step(db, client.id, Channel.telegram) is Step.choosing_contact
+
+
 async def test_the_answers_reach_the_request(
     db: AsyncSession, future_slot: Slot, session_type_id: int
 ) -> None:

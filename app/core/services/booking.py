@@ -56,6 +56,7 @@ from app.core.errors import (
     NegotiationDisabled,
     NotFound,
     RateLimited,
+    SlotUnavailable,
 )
 from app.core import events
 from app.core.events import (
@@ -876,10 +877,7 @@ async def admin_approve(
     if request.slot_id is None:
         # The agreed time may happen to be a slot the practice offers; if it is,
         # take it off the picker rather than leave it double-bookable.
-        matching = await _matching_slot(session, start)
-        if matching is not None:
-            await slot_service.book_slot(session, matching, request.id)
-            request.slot_id = matching
+        await _book_matching(session, request, start)
 
     session_type = (
         await session.execute(select(SessionType).where(SessionType.id == request.session_type_id))
@@ -1084,10 +1082,7 @@ async def client_accept(session: AsyncSession, request_id: int) -> BookingReques
     ):
         await slot_service.book_slot(session, own.id, request.id)
     else:
-        matching = await _matching_slot(session, proposal.proposed_start)
-        if matching is not None:
-            await slot_service.book_slot(session, matching, request.id)
-            request.slot_id = matching
+        await _book_matching(session, request, proposal.proposed_start)
 
     session_type = (
         await session.execute(select(SessionType).where(SessionType.id == request.session_type_id))
@@ -1115,13 +1110,13 @@ async def client_accept(session: AsyncSession, request_id: int) -> BookingReques
 async def _matching_slot(session: AsyncSession, starts_at: datetime) -> int | None:
     """An available slot at exactly this instant, if the practice offers one.
 
-    Locked, because the caller books what this returns. Read without the lock,
-    two clients accepting proposals for the same instant could both be handed
-    the same slot id; the second `book_slot` then raised `SlotUnavailable` and
-    the client saw a generic error for a booking that was about to succeed on
-    retry. Postgres re-checks the predicate after taking the lock, so a slot
-    taken in the meantime comes back as None -- and confirming without a slot
-    is a case the negotiation path already allows (§7.1).
+    **Takes no lock.** `slot_service.book_slot` locks the slot together with the
+    slots overlapping it, in id order, and re-checks under that lock. A lock
+    taken here first would be on one slot before the rest of that set, the
+    opposite order to a booking of a lower-id overlapping slot -- two
+    transactions each holding what the other waits for, which Postgres ends with
+    a DeadlockDetected nobody catches. Use `_book_matching`, which treats a
+    slot lost between the search and the booking as "no slot".
     """
     from app.core.enums import SlotStatus
     from app.core.models import Slot
@@ -1134,10 +1129,32 @@ async def _matching_slot(session: AsyncSession, starts_at: datetime) -> int | No
                 Slot.status == SlotStatus.available,
                 ~slot_service.overlaps_a_booked_slot(),
             )
+            .order_by(Slot.id)
             .limit(1)
-            .with_for_update()
         )
     ).scalar_one_or_none()
+
+
+async def _book_matching(
+    session: AsyncSession, request: BookingRequest, starts_at: datetime
+) -> None:
+    """Book the published slot at this instant for the request, if there is one
+    still to be had; set `request.slot_id` to it.
+
+    Two clients agreeing on the same instant both find the slot; the second
+    `book_slot` is refused. Confirming without a slot is a case the negotiation
+    path already allows (§7.1), so that is the answer -- not an error for a
+    booking that is about to succeed. `book_slot` refuses before it changes
+    anything, so nothing needs undoing.
+    """
+    matching = await _matching_slot(session, starts_at)
+    if matching is None:
+        return
+    try:
+        await slot_service.book_slot(session, matching, request.id)
+    except SlotUnavailable:
+        return
+    request.slot_id = matching
 
 
 async def client_counter(
@@ -1436,10 +1453,7 @@ async def admin_reschedule(
 
     # The new time may happen to be one she publishes; if so it comes off the
     # picker, the same way `admin_approve` takes it.
-    matching = await _matching_slot(session, new_start)
-    if matching is not None:
-        await slot_service.book_slot(session, matching, request.id)
-        request.slot_id = matching
+    await _book_matching(session, request, new_start)
 
     request.scheduled_start = new_start
     request.updated_at = now_utc()

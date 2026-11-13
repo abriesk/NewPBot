@@ -452,6 +452,68 @@ async def _spare_slot(db: AsyncSession, practice: Practice) -> Slot:
     return spare
 
 
+async def test_looking_for_the_matching_slot_takes_no_row_lock(
+    db: AsyncSession, future_slot: Slot
+) -> None:
+    """NP1 review: the search locked the matching slot, then `book_slot` locked
+    its overlap set in id order -- the opposite order to a booking of a
+    lower-id overlapping slot, so the two could deadlock. `book_slot` re-checks
+    under its own ordered lock; the search takes none."""
+    from sqlalchemy import event
+
+    seen: list[str] = []
+
+    def capture(conn: object, cursor: object, statement: str, *rest: object) -> None:
+        seen.append(statement)
+
+    sync_conn = (await db.connection()).sync_connection
+    event.listen(sync_conn, "before_cursor_execute", capture)
+    try:
+        found = await booking._matching_slot(db, future_slot.starts_at)
+    finally:
+        event.remove(sync_conn, "before_cursor_execute", capture)
+
+    assert found == future_slot.id
+    assert seen and not any("FOR UPDATE" in statement.upper() for statement in seen)
+
+
+async def test_a_slot_taken_between_the_search_and_the_booking_still_confirms(
+    db: AsyncSession,
+    client: Client,
+    session_type_id: int,
+    future_slot: Slot,
+    other_request_id: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Without the search's lock, the race it guarded is lost at `book_slot`,
+    which refuses. The accept must still confirm, without a slot -- the
+    negotiation path already allows that (§7.1)."""
+    spare = Slot(
+        practice_id=future_slot.practice_id,
+        starts_at=datetime.now(UTC) + timedelta(days=45, microseconds=5),
+        duration_min=60,
+        status=SlotStatus.available,
+    )
+    db.add(spare)
+    await db.flush()
+    await slot_service.book_slot(db, spare.id, other_request_id)
+
+    async def stale_search(session: AsyncSession, starts_at: datetime) -> int | None:
+        return spare.id  # what the search saw before somebody else booked it
+
+    monkeypatch.setattr(booking, "_matching_slot", stale_search)
+    request = await _negotiating(
+        db, client, session_type_id, future_slot, proposed=datetime.now(UTC) + timedelta(days=45)
+    )
+
+    confirmed = await booking.client_accept(db, request.id)
+
+    assert confirmed.status is RequestStatus.confirmed
+    assert confirmed.slot_id is None
+    await db.refresh(spare)
+    assert spare.booked_request == other_request_id
+
+
 async def test_client_accept_uses_the_most_recent_proposal(
     db: AsyncSession, client: Client, session_type_id: int, future_slot: Slot
 ) -> None:

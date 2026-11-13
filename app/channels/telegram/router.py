@@ -167,14 +167,16 @@ async def handle(session: AsyncSession, update: Update) -> Reply | None:
 
 
 async def _already_applied(session: AsyncSession, client: Client, update: Update) -> bool:
-    """A typed update Telegram has delivered before (or one older than the last
-    applied): ignored, so a slow first attempt redelivered cannot be taken for
-    the answer to the *next* question. Updates without an id (tests, any other
-    adapter) are never skipped."""
+    """A typed update Telegram has delivered before: the *same* id, so a slow
+    first attempt redelivered cannot be taken for the answer to the next
+    question. Never "lower than the last": after a week without updates Telegram
+    numbers them afresh, at random, and an abandoned flow row (nothing sweeps
+    them) would swallow every message from then on. Updates without an id
+    (tests, any other adapter) are never skipped."""
     if update.update_id is None:
         return False
     last = await flow.last_update_id(session, client.id, Channel.telegram)
-    return last is not None and update.update_id <= last
+    return last is not None and update.update_id == last
 
 
 def _client_name(client: Client | None) -> str | None:

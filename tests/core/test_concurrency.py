@@ -58,13 +58,19 @@ async def engines() -> AsyncIterator[tuple[AsyncEngine, AsyncEngine, AsyncEngine
             await engine.dispose()
 
 
-async def _wait_until_blocked(engine: AsyncEngine, task: asyncio.Task[object]) -> None:
-    """Return once some backend waits on a lock, or the task ended.
+async def _wait_until_blocked(
+    engine: AsyncEngine, task: asyncio.Task[object], holder: AsyncSession
+) -> None:
+    """Return once a backend is waiting on a lock **held by `holder`'s
+    connection**, or the task ended.
 
-    A poll on the database's own state, bounded; not a delay standing in for
-    ordering. If B never blocks (no lock at all) it finishes and we return too,
-    and the assertions that follow say what that meant.
+    Filtered on the holder through `pg_blocking_pids`, so a lock wait by some
+    other backend in the same database cannot release A's commit early. A poll
+    on the database's own state, bounded; not a delay standing in for ordering.
+    If B never blocks (no lock at all) it finishes and we return too, and the
+    assertions that follow say what that meant.
     """
+    holder_pid = (await holder.execute(text("select pg_backend_pid()"))).scalar_one()
     deadline = asyncio.get_running_loop().time() + 15
     async with engine.connect() as watch:
         while not task.done() and asyncio.get_running_loop().time() < deadline:
@@ -72,8 +78,10 @@ async def _wait_until_blocked(engine: AsyncEngine, task: asyncio.Task[object]) -
                 await watch.execute(
                     text(
                         "select count(*) from pg_stat_activity "
-                        "where datname = current_database() and wait_event_type = 'Lock'"
-                    )
+                        "where datname = current_database() "
+                        "and :holder = any(pg_blocking_pids(pid))"
+                    ),
+                    {"holder": holder_pid},
                 )
             ).scalar_one()
             if waiting:
@@ -147,7 +155,7 @@ async def test_reject_and_accept_on_one_request_exactly_one_wins(
         async with AsyncSession(engine_a, expire_on_commit=False) as session_a:
             await booking.admin_reject(session_a, request_id)
             task_b = asyncio.create_task(accept())
-            await _wait_until_blocked(engine_watch, task_b)
+            await _wait_until_blocked(engine_watch, task_b, session_a)
             await session_a.commit()
         outcome_b = await asyncio.wait_for(task_b, 15)
 
@@ -187,7 +195,7 @@ async def test_one_token_consumed_twice_at_once_succeeds_once(
         async with AsyncSession(engine_a) as session_a:
             await consume_token(session_a, raw, TokenPurpose.link_channel)
             task_b = asyncio.create_task(consume_in_b())
-            await _wait_until_blocked(engine_watch, task_b)
+            await _wait_until_blocked(engine_watch, task_b, session_a)
             await session_a.commit()
         outcome_b = await asyncio.wait_for(task_b, 15)
 
