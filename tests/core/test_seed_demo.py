@@ -63,7 +63,9 @@ async def test_the_empty_content_seed_has_no_photo_bio_or_price(db) -> None:
 
     assert await seed_demo.seed(db, "empty") is True
     assert await photo.get_photo(db) is None
-    assert not [p for p in (await db.execute(select(SessionType.price_amount_minor))).scalars() if p]
+    assert not [
+        p for p in (await db.execute(select(SessionType.price_amount_minor))).scalars() if p
+    ]
     codes = set(
         (
             await db.execute(

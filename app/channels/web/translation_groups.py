@@ -54,7 +54,18 @@ GROUPS: tuple[Group, ...] = (
         "page, signing in, the menu buttons, the titles of your topic pages, "
         "and the question the bot asks before joining a booking made by email "
         "to someone's Telegram.",
-        prefixes=("request.", "auth.", "menu.", "content.", "merge."),
+        prefixes=(
+            "request.",
+            "auth.",
+            "menu.",
+            "content.",
+            "merge.",
+            "home.",
+            "next.",
+            "picker.",
+            "privacy.",
+            "status.",
+        ),
     ),
     Group(
         slug="waitlist",

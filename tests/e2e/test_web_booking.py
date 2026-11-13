@@ -1272,7 +1272,7 @@ async def test_the_request_page_names_the_status_in_words(
     web.cookies.delete(CLIENT_COOKIE)
     page = _open_request(web, request.uuid, raw)
 
-    expected = await get_text(committed, "ru", "request.status.pending")
+    expected = await get_text(committed, "ru", "status.head.pending")
     assert expected in page.text
     assert ">pending<" not in page.text
     web.cookies.delete(CLIENT_COOKIE)

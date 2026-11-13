@@ -93,22 +93,18 @@ async def test_the_admin_uploads_a_photo_and_the_site_serves_a_small_cached_copy
     version = page.text.split("/media/photo?v=")[1].split('"')[0]
 
     # Public: no sign-in needed, as the client site shows it.
-    with TestClient(create_app(), base_url="https://testserver") as visitor:
-        served = visitor.get(f"/media/photo?v={version}")
-        assert served.status_code == 200
-        assert served.headers["content-type"] == "image/jpeg"
-        assert "immutable" in served.headers["cache-control"]
-        assert len(served.content) < 200_000
-        assert max(Image.open(io.BytesIO(served.content)).size) == 640
-        # Without the current version the copy is kept only briefly.
-        assert "immutable" not in visitor.get("/media/photo").headers["cache-control"]
-        # A browser that already has it is told so.
-        assert (
-            visitor.get(
-                "/media/photo", headers={"If-None-Match": served.headers["etag"]}
-            ).status_code
-            == 304
-        )
+    web.cookies.clear()
+    served = web.get(f"/media/photo?v={version}")
+    assert served.status_code == 200
+    assert served.headers["content-type"] == "image/jpeg"
+    assert "immutable" in served.headers["cache-control"]
+    assert len(served.content) < 200_000
+    assert max(Image.open(io.BytesIO(served.content)).size) == 640
+    # Without the current version the copy is kept only briefly.
+    assert "immutable" not in web.get("/media/photo").headers["cache-control"]
+    # A browser that already has it is told so.
+    again = web.get("/media/photo", headers={"If-None-Match": served.headers["etag"]})
+    assert again.status_code == 304
 
 
 @pytest.mark.asyncio
@@ -451,7 +447,7 @@ def test_a_confirmed_request_is_a_status_page_with_a_calendar_file(
     web: TestClient, confirmed_request
 ) -> None:
     client, row = confirmed_request
-    web.cookies.set("pb_client", client_session_value(client.id), domain="testserver")
+    web.cookies.set("pb_client", client_session_value(client.id))
     page = web.get(f"/r/{row.uuid}?lang=en").text
     assert "Your session is booked" in page
     assert 'class="timeline"' in page and 'aria-current="step"' in page
@@ -480,7 +476,7 @@ async def test_no_calendar_file_until_it_is_confirmed(
         .values(status=RequestStatus.expired)
     )
     await committed.commit()
-    web.cookies.set("pb_client", client_session_value(client.id), domain="testserver")
+    web.cookies.set("pb_client", client_session_value(client.id))
     assert web.get(f"/r/{row.uuid}/session.ics").status_code == 404
     page = web.get(f"/r/{row.uuid}?lang=en").text
     assert "This request was not answered in time" in page

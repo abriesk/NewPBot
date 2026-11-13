@@ -33,7 +33,7 @@
   <p class="muted zone-line">{{ zone_line }}{% if modality != 'onsite' %} <a href="#tz-field" data-zone-change>{{ t.change }}</a>{% endif %}</p>
   {% for g in groups %}
     <div class="part">
-      <h3>{{ g.title }}</h3>
+      <h2>{{ g.title }}</h2>
       <div class="times">
         {% for slot in g.times %}
           <form method="post" action="/book/hold">

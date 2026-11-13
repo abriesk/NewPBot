@@ -990,7 +990,7 @@ input[aria-invalid=true], textarea[aria-invalid=true] { border-color: #a3261c; }
 #tz-field:not(:target) .zone-choice { display: none; }
 #tz-field { margin: 0 0 1rem; padding: 0; border: 0; }
 .part + .part { margin-top: 1.1rem; }
-.part h3 { margin: 0 0 .5rem; color: var(--muted); font-family: var(--sans); font-size: .82rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.part :is(h2, h3) { margin: 0 0 .5rem; color: var(--muted); font-family: var(--sans); font-size: .82rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
 
 /* "What happens next": three short answers, the same block on details, done and waitlist. */
 .what-next { margin: 1.75rem 0 0; padding: 1.25rem 1.35rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--bg-tint); }
