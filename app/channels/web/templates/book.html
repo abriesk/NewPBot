@@ -12,7 +12,8 @@
 
 {# §12.1 step 1: session type and modality. Chosen before the slot list so the
    picker can be filtered by them. #}
-<form method="get" action="/book" class="card steps" id="booking">
+<div class="card steps">
+<form method="get" action="/book" id="booking">
   {# Type and modality in one compact row; a question with one answer is not asked (the radio stays
      as a hidden input, because the slot list is filtered by whatever this form posts). #}
   <div class="picker-row">
@@ -81,10 +82,12 @@
     </div>
   </fieldset>
 
-  <div id="slots" aria-live="polite">{% include "partials/slots.html" %}</div>
   {# Without htmx the choices above are sent as a plain GET and the page comes back on them. #}
   <noscript><button type="submit" class="secondary">{{ t.picker_show_times }}</button></noscript>
 </form>
+{# Outside the form on purpose: every time is a form of its own (POST /book/hold), and forms do not nest. #}
+<div id="slots" aria-live="polite">{% include "partials/slots.html" %}</div>
+</div>
 <script>
 (function () {
   var byName = function (n, v) { return document.querySelector('input[name=' + n + '][value=' + v + ']'); };

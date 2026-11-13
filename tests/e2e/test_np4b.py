@@ -11,6 +11,7 @@ from __future__ import annotations
 import io
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
+from html.parser import HTMLParser
 
 import pytest
 import pytest_asyncio
@@ -481,3 +482,102 @@ async def test_no_calendar_file_until_it_is_confirmed(
     page = web.get(f"/r/{row.uuid}?lang=en").text
     assert "This request was not answered in time" in page
     assert 'class="timeline"' not in page and "session.ics" not in page
+
+
+# --- review round 1 ------------------------------------------------------------------------------
+
+
+class _FormWalker(HTMLParser):
+    """Walks the tags the way a parser would see them: records any <form> opened inside another, the
+    forms found (action, ids of the fields inside) and which of them sit inside #booking."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.depth = 0
+        self.nested = 0
+        self.forms: list[dict] = []
+        self._open: dict | None = None
+
+    def handle_starttag(self, tag, attrs):
+        attributes = dict(attrs)
+        if tag == "form":
+            if self.depth:
+                self.nested += 1
+            self.depth += 1
+            self._open = {
+                "action": attributes.get("action"),
+                "id": attributes.get("id"),
+                "names": [],
+            }
+            self.forms.append(self._open)
+        elif tag in ("input", "button", "select") and self._open is not None:
+            self._open["names"].append(attributes.get("name"))
+
+    def handle_endtag(self, tag):
+        if tag == "form":
+            self.depth -= 1
+            self._open = None
+
+
+def _walk(html: str) -> _FormWalker:
+    walker = _FormWalker()
+    walker.feed(html)
+    return walker
+
+
+@pytest.mark.asyncio
+async def test_forms_never_nest_on_book_or_in_the_partial_and_every_time_posts_the_hold(
+    web: TestClient, web_slot: int
+) -> None:
+    """A parser ignores a <form> opened inside another and the first </form> closes the outer one,
+    so a nested time button would submit the GET form (no hold, the CSRF token in the URL)."""
+    for html in (
+        web.get("/book?lang=en&tz=Asia/Yerevan").text,
+        web.get("/book/slots?modality=online&tz=Asia/Yerevan").text,
+    ):
+        walker = _walk(html)
+        assert walker.nested == 0 and walker.depth == 0
+        times = [f for f in walker.forms if "slot_id" in f["names"]]
+        assert times and all(f["action"] == "/book/hold" for f in times)
+    book = _walk(web.get("/book?lang=en&tz=Asia/Yerevan").text)
+    outer = [f for f in book.forms if f["id"] == "booking"]
+    assert len(outer) == 1 and "slot_id" not in outer[0]["names"]
+    assert "tz" in outer[0]["names"]  # the zone select stays in the form htmx includes
+
+
+def test_a_mangled_session_type_is_not_a_422(web: TestClient) -> None:
+    for query in ("session_type_id=abc", "session_type_id=", "session_type_id=99999"):
+        assert web.get(f"/book?lang=en&{query}").status_code == 200
+        assert web.get(f"/book/slots?{query}").status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_the_photo_is_immutable_only_for_the_whole_version(
+    web: TestClient, no_photo: None
+) -> None:
+    _sign_in(web)
+    _upload(web, _jpeg())
+    version = web.get("/admin/settings").text.split("/media/photo?v=")[1].split('"')[0]
+    web.cookies.clear()
+    assert "immutable" in web.get(f"/media/photo?v={version}").headers["cache-control"]
+    for wrong in ("a", version[:5], version + "x", ""):
+        assert "immutable" not in web.get(f"/media/photo?v={wrong}").headers["cache-control"]
+
+
+@pytest.mark.asyncio
+async def test_another_signed_in_client_gets_a_404_for_the_ics_and_the_page(
+    web: TestClient, confirmed_request, committed
+) -> None:
+    _client, row = confirmed_request
+    practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
+    other = Client(practice_id=practice.id, language="en", display_name="Other")
+    committed.add(other)
+    await committed.commit()
+    try:
+        web.cookies.set("pb_client", client_session_value(other.id))
+        assert web.get(f"/r/{row.uuid}/session.ics").status_code == 404
+        assert web.get(f"/r/{row.uuid}").status_code == 404
+    finally:
+        await committed.rollback()
+        await committed.execute(delete(Client).where(Client.id == other.id))
+        await committed.commit()

@@ -780,6 +780,11 @@ def _valid_zone(candidate: str | None) -> bool:
     return True
 
 
+def _int_or_none(value: str | None) -> int | None:
+    """A query value that is a whole number, else None (never a raw 422 for a mangled link)."""
+    return int(value) if value is not None and value.strip().isdigit() else None
+
+
 def _valid_modality(candidate: str | None) -> bool:
     return candidate in {m.value for m in Modality}
 
@@ -910,7 +915,7 @@ def build_router() -> APIRouter:
             if row is None:
                 return Response(status_code=404)
             etag = f'"{row.etag}"'
-            fresh = bool(v) and row.etag.startswith(v)
+            fresh = v == row.etag[: photo_service.VERSION_LENGTH]
             headers = {
                 "ETag": etag,
                 "Cache-Control": (
@@ -984,11 +989,12 @@ def build_router() -> APIRouter:
     @router.get("/book", response_class=HTMLResponse, include_in_schema=False)
     async def book(
         request: Request,
-        session_type_id: int | None = None,
+        session_type_id: str | None = None,
         modality: str | None = None,
         tz: str | None = None,
         day: str | None = None,
     ) -> Response:
+        wanted_type = _int_or_none(session_type_id)  # a mangled query falls back to the default
         async with unit_of_work() as session:
             context = await _context(session, request)
             practice = context["practice"]
@@ -1072,8 +1078,8 @@ def build_router() -> APIRouter:
 
             # What is selected: the query's choice when it is a real one, else the first of each.
             chosen_type = (
-                session_type_id
-                if session_type_id in {row["id"] for row in session_types}
+                wanted_type
+                if wanted_type in {row["id"] for row in session_types}
                 else (session_types[0]["id"] if session_types else None)
             )
             chosen_modality = (
@@ -1111,7 +1117,7 @@ def build_router() -> APIRouter:
     @router.get("/book/slots", response_class=HTMLResponse, include_in_schema=False)
     async def book_slots(
         request: Request,
-        session_type_id: int | None = None,
+        session_type_id: str | None = None,
         modality: str | None = None,
         tz: str | None = None,
         day: str | None = None,
@@ -1129,7 +1135,7 @@ def build_router() -> APIRouter:
                 request,
                 lang=lang,
                 practice=practice,
-                session_type_id=session_type_id,
+                session_type_id=_int_or_none(session_type_id),
                 modality=modality,
                 zone=zone,
                 day=day,

@@ -11,6 +11,7 @@ request body and the result goes to one row.
 
 from __future__ import annotations
 
+import asyncio
 import hashlib
 import io
 
@@ -32,6 +33,9 @@ MAX_SIDE = 640
 
 #: A guard against a small file that decodes to a huge canvas (a decompression bomb).
 MAX_PIXELS = 36_000_000
+
+#: How much of the etag names the stored bytes in `?v=` (the page and the route agree on it).
+VERSION_LENGTH = 12
 
 JPEG_QUALITY = 82
 SERVED_TYPE = "image/jpeg"
@@ -103,12 +107,13 @@ async def photo_version(session: AsyncSession) -> str | None:
             select(PracticePhoto.etag).where(PracticePhoto.practice_id == practice.id)
         )
     ).scalar_one_or_none()
-    return etag[:12] if etag else None
+    return etag[:VERSION_LENGTH] if etag else None
 
 
 async def set_photo(session: AsyncSession, raw: bytes) -> PracticePhoto:
     """Validate, resize and store; replaces the one photo she has."""
-    data = process(raw)
+    # Decoding a large picture takes seconds of CPU: not on the event loop.
+    data = await asyncio.to_thread(process, raw)
     practice = await get_practice(session)
     etag = hashlib.sha256(data).hexdigest()
     row = await get_photo(session)
