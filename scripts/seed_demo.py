@@ -13,6 +13,8 @@ two revisions.
 from __future__ import annotations
 
 import asyncio
+import io
+import os
 import sys
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -53,6 +55,12 @@ TZ = ZoneInfo("Asia/Yerevan")
 FREE_DAYS = {1: (10, 11, 12, 15, 17, 18), 4: (10, 12, 14, 16, 18, 19), 6: (11, 13, 15, 17, 18, 19),
              8: (10, 11, 15, 16, 17, 18), 9: (12, 13, 14, 17, 18, 19), 10: (10, 11, 12, 15, 16, 18)}
 FULL_DAYS = {2: (10, 11, 12, 15, 16), 5: (11, 12, 14, 15, 17)}
+#: `full` (default) also fills what the therapist supplies on the real site -- a photo, a short bio, the
+#: languages line, a price, her cancellation rule and a line of free text on the front page. `empty`
+#: leaves all of that out (no photo, no bio, no prices), so the pages can be shot as a new practice
+#: looks. Chosen by `--content empty` or the SEED_DEMO_CONTENT variable (np-shot.sh runs the script
+#: without arguments).
+CONTENT_MODES = ("full", "empty")
 ONSITE_EXTRA = {1: 14, 4: 11, 6: 10}  # a few in-person-only slots
 
 
@@ -67,7 +75,7 @@ def refuse_unless_test_database() -> None:
         raise SystemExit(f"seed_demo: refusing database {name!r}: its name must end in _test")
 
 
-async def seed(s: AsyncSession) -> bool:
+async def seed(s: AsyncSession, content: str = "full") -> bool:
     """Fill the practice of `s`; False when it already holds requests."""
     practice = (await s.execute(select(Practice).order_by(Practice.id).limit(1))).scalar_one()
     if (await s.execute(select(BookingRequest.id).limit(1))).first() is not None:
@@ -77,7 +85,8 @@ async def seed(s: AsyncSession) -> bool:
 
     types = {t.code: t for t in (await s.execute(select(SessionType).where(SessionType.practice_id == pid))).scalars()}
     indiv = types["individual"]
-    indiv.price_amount_minor, indiv.price_currency = 15000, "AMD"
+    if content == "full":
+        indiv.price_amount_minor, indiv.price_currency = 15000, "AMD"
     s.add(SessionType(practice_id=pid, code="intro", duration_min=30, sort_order=2))
     await s.flush()
     intro = (await s.execute(select(SessionType).where(SessionType.code == "intro"))).scalar_one()
@@ -164,13 +173,48 @@ async def seed(s: AsyncSession) -> bool:
     await s.flush()
     s.add(ContentBlockRevision(block_id=block.id, version=1, body_md="A session lasts 60 minutes."))
     await s.flush()
+    if content == "full":
+        await _her_content(s, practice)
+    else:  # the empty practice has no text of hers at all
+        await s.delete(block)
+        await s.flush()
     return True
+
+
+async def _her_content(s: AsyncSession, practice: Practice) -> None:
+    """Demo stand-ins for what she would supply (shot runs only; a plain picture, no face)."""
+    from PIL import Image, ImageDraw
+
+    from app.core.services import photo
+
+    practice.languages = "Русский, Հայերեն, English"
+    topics = {t.code: t for t in (await s.execute(select(ContentTopic))).scalars()}
+    texts = {
+        "about_me": ("Demo bio: I work with people through change and loss.",),
+        "home": ("Demo text for the front page, written by the therapist.",),
+        "cancellation": ("Demo rule: please tell me at least a day ahead.",),
+    }
+    for code, bodies in texts.items():
+        for position, body in enumerate(bodies):
+            s.add(ContentBlock(practice_id=practice.id, topic_id=topics[code].id, lang="en", position=position,
+                               kind=ContentBlockKind.text, body_md=body, version=1))
+    canvas = Image.new("RGB", (800, 800), (214, 200, 178))
+    ImageDraw.Draw(canvas).ellipse((250, 150, 550, 450), fill=(120, 104, 86))
+    ImageDraw.Draw(canvas).ellipse((120, 480, 680, 1100), fill=(120, 104, 86))
+    out = io.BytesIO()
+    canvas.save(out, "JPEG")
+    await photo.set_photo(s, out.getvalue())
 
 
 async def main() -> int:
     refuse_unless_test_database()
+    content = os.environ.get("SEED_DEMO_CONTENT", "full")
+    if "--content" in sys.argv:
+        content = sys.argv[sys.argv.index("--content") + 1]
+    if content not in CONTENT_MODES:
+        raise SystemExit(f"seed_demo: --content must be one of {CONTENT_MODES}")
     async with unit_of_work() as s:
-        done = await seed(s)
+        done = await seed(s, content)
     await dispose_engine()
     print("seed_demo: done" if done else "seed_demo: already seeded")
     return 0

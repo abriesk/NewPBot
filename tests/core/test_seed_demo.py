@@ -52,3 +52,25 @@ def test_demo_seed_refuses_a_database_not_named_test(monkeypatch) -> None:
     )
     with pytest.raises(SystemExit):
         seed_demo.refuse_unless_test_database()
+
+
+async def test_the_empty_content_seed_has_no_photo_bio_or_price(db) -> None:
+    """NP4b: the screenshots can show a new practice: nothing she supplies is present."""
+    from sqlalchemy import select
+
+    from app.core.models import ContentBlock, ContentTopic, SessionType
+    from app.core.services import photo
+
+    assert await seed_demo.seed(db, "empty") is True
+    assert await photo.get_photo(db) is None
+    assert not [p for p in (await db.execute(select(SessionType.price_amount_minor))).scalars() if p]
+    codes = set(
+        (
+            await db.execute(
+                select(ContentTopic.code)
+                .join(ContentBlock, ContentBlock.topic_id == ContentTopic.id)
+                .where(ContentTopic.code.in_(("about_me", "cancellation", "home")))
+            )
+        ).scalars()
+    )
+    assert codes == set()
