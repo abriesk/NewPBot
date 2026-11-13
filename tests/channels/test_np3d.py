@@ -125,3 +125,36 @@ async def test_the_time_label_in_telegram_html_is_escaped(
         invalidate_cache()
     assert "<script>" not in label
     assert "Sep&lt;script&gt;&amp;" in label
+
+
+# --- NP3d follow-up: the on-site info still gives the clinic link when the edited text lacks {url}
+
+
+async def test_the_telegram_onsite_info_gives_the_link_when_the_text_lacks_the_placeholder(
+    db: AsyncSession, practice: Practice, session_type_id: int
+) -> None:
+    from app.channels.telegram import keyboards as kb
+    from app.channels.telegram.router import Update, handle
+    from tests.channels.test_telegram_flow import CHAT
+
+    url = "https://clinic.example/where"
+    practice.clinic_onsite_url = url
+    await db.execute(
+        sa.update(Translation)
+        .where(
+            Translation.practice_id == practice.id,
+            Translation.lang == "ru",
+            Translation.key == "booking.onsite_info",
+        )
+        .values(value="Я принимаю в кабинете.")
+    )
+    invalidate_cache()
+    try:
+        await handle(db, Update(chat_id=CHAT, text="/start"))
+        await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.LANG}:ru"))
+        reply = await handle(db, Update(chat_id=CHAT, callback_data=f"{kb.MODE}:onsite"))
+    finally:
+        invalidate_cache()
+    assert reply is not None
+    assert "Я принимаю в кабинете." in reply.extra[0]
+    assert url in reply.extra[0]

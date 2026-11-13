@@ -41,7 +41,7 @@ common:
   error.title: "Ինչ-որ բան չստացվեց"   # TODO: review
   error.not_found_title: "Էջը չի գտնվել"   # TODO: review
   error.expired_link_title: "Հղումն այլևս չի գործում"   # TODO: review
-  error.stale: "Էջը չափազանց երկար բաց է մնացել, ուստի ձևը չուղարկվեց։ Ձեր տեքստը պահպանված է․ սեղմեք կոճակը նորից։"   # TODO: review
+  error.stale: "Էջը չափազանց երկար բաց է մնացել, ուստի ձևը չուղարկվեց։ Ձևը թարմացվել է․ ստուգեք դաշտերը և սեղմեք կոճակը նորից։"   # TODO: review
   change: "Փոխել"   # TODO: review
   optional: "(ըստ ցանկության)"   # TODO: review
   send_request: "Ուղարկել հայտը"   # TODO: review

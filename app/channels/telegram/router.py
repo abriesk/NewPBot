@@ -1133,15 +1133,16 @@ async def _callback(session: AsyncSession, client: Client, update: Update) -> Re
             if practice.clinic_onsite_url:
                 # §12.1: choosing on-site MUST show where on-site is. Said here,
                 # where the choice is made, rather than four questions later.
-                reply.extra.insert(
-                    0,
-                    await get_text(
-                        session,
-                        client.language,
-                        "booking.onsite_info",
-                        url=practice.clinic_onsite_url,
-                    ),
+                info = await get_text(
+                    session,
+                    client.language,
+                    "booking.onsite_info",
+                    url=practice.clinic_onsite_url,
                 )
+                if practice.clinic_onsite_url not in info:
+                    # Her edited text has no {url}: the address still has to be shown.
+                    info = f"{info}\n{escape_telegram(practice.clinic_onsite_url)}"
+                reply.extra.insert(0, info)
         return reply
 
     if action == kb.CONTACT:

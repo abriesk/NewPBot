@@ -48,7 +48,7 @@ common:
   error.title: "Something went wrong"
   error.not_found_title: "Page not found"
   error.expired_link_title: "This link no longer works"
-  error.stale: "This page was open for too long, so the form was not sent. Your text is still here — please press the button again."
+  error.stale: "This page was open for too long, so the form was not sent. The form has been refreshed — please check the fields and press the button again."
   change: "Change"
   optional: "(optional)"
   send_request: "Send request"

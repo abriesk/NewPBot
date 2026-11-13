@@ -35,7 +35,7 @@ common:
   error.title: "Что-то пошло не так"   # TODO: review
   error.not_found_title: "Страница не найдена"   # TODO: review
   error.expired_link_title: "Ссылка не действует"   # TODO: review
-  error.stale: "Страница была открыта слишком долго, поэтому форма не отправилась. Ваш текст сохранён — нажмите кнопку ещё раз."   # TODO: review
+  error.stale: "Страница была открыта слишком долго, поэтому форма не отправилась. Форма обновлена — проверьте поля и нажмите кнопку ещё раз."   # TODO: review
   change: "Изменить"   # TODO: review
   optional: "(необязательно)"   # TODO: review
   send_request: "Отправить заявку"   # TODO: review
