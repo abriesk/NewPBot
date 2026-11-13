@@ -744,12 +744,18 @@ async def submit_slot_request(
     contact_note: str | None = None,
     display_name: str | None = None,
     client_timezone: str | None = None,
+    awaiting_verification: bool = False,
 ) -> BookingRequest:
     """Submit against a chosen slot.
 
     The slot is held, not booked: the therapist approves every booking unless
     `auto_confirm_slots` is on, and holding is what stops a second client
     picking it meanwhile.
+
+    `awaiting_verification`: the address behind this request is not proved. The
+    hold is the short `unverified_hold_minutes` one, the request lapses with it,
+    and the therapist is not told -- `release_unverified_hold` does all of that
+    once the login link is followed.
     """
     practice = await get_practice(session)
 
@@ -780,11 +786,17 @@ async def submit_slot_request(
             # The hold lasts as long as the request can stay undecided, not
             # `slot_hold_minutes`: this request is submitted, so the window it
             # needs is the therapist's, not the client's form-filling one (§7.2).
+            if awaiting_verification:
+                request.awaiting_verification = True
+                request.expires_at = now_utc() + timedelta(minutes=practice.unverified_hold_minutes)
+                # The therapist hears when the address is proved, not now.
+                events.restore(session, queued)
+
             slot = await slot_service.hold_slot(
                 session, slot_id, request.id, until=request.expires_at
             )
 
-            if practice.auto_confirm_slots:
+            if practice.auto_confirm_slots and not awaiting_verification:
                 # One line of policy, off by default: keeping the therapist in
                 # the loop is the point of the product (DESIGN.md §6).
                 return await admin_approve(session, request.id, scheduled_start=slot.starts_at)
@@ -792,6 +804,36 @@ async def submit_slot_request(
         events.restore(session, queued)
         raise
     return request
+
+
+async def release_unverified_hold(session: AsyncSession, request_id: int) -> bool:
+    """The address was proved: the short hold becomes the normal one and the
+    therapist is told. False when there is nothing to release -- the request is
+    not waiting, or its short hold already ran out (the sweep owns that case).
+    """
+    request = await _get(session, request_id)
+    if not request.awaiting_verification:
+        return False
+    if (
+        request.status is not RequestStatus.pending
+        or request.expires_at is None
+        or request.expires_at <= now_utc()
+    ):
+        return False
+
+    practice = await get_practice(session)
+    request.awaiting_verification = False
+    request.expires_at = pending_expiry(practice)
+    if request.slot_id is not None:
+        await slot_service.extend_hold(session, request.slot_id, request.expires_at)
+    await session.flush()
+
+    collect(session, RequestSubmitted(request_id=request.id, request_uuid=request.uuid))
+    if practice.auto_confirm_slots and request.slot_id is not None:
+        slot = await _slot(session, request.slot_id)
+        if slot is not None:
+            await admin_approve(session, request.id, scheduled_start=slot.starts_at)
+    return True
 
 
 async def submit_free_time_request(

@@ -54,9 +54,42 @@ _EMAIL_SHAPE = re.compile(r"^[^@\s]+@[^@\s.]+(\.[^@\s.]+)+$")
 
 
 def looks_like_email(value: str) -> bool:
-    """A typo check, not a validator. See `_EMAIL_SHAPE`."""
+    """A typo check, not a validator. See `_EMAIL_SHAPE`.
+
+    `fullmatch`: with `$`, a trailing line break would still match.
+    """
     candidate = value.strip()
-    return len(candidate) <= 254 and _EMAIL_SHAPE.match(candidate) is not None
+    return len(candidate) <= 254 and _EMAIL_SHAPE.fullmatch(candidate) is not None
+
+
+def normalise_email(value: str) -> str | None:
+    """The address as it is stored and queued, or None if it is not one.
+
+    Every place that queues an email goes through this first, so a header
+    injection ("a@b.c\\nBcc: x") or a stray space is refused where it is typed
+    rather than failing inside the transport.
+    """
+    return value.strip().lower() if looks_like_email(value) else None
+
+
+async def verified_email_client(session: AsyncSession, address: str) -> UUID | None:
+    """The client who has proved this address, if one has.
+
+    An unproved identity is only somebody's earlier anonymous post; a proved one
+    is a real person's record, which a stranger typing the address must not be
+    able to file things on.
+    """
+    practice = await get_practice(session)
+    return (
+        await session.execute(
+            select(Identity.client_id).where(
+                Identity.practice_id == practice.id,
+                Identity.channel == Channel.email,
+                Identity.external_id == _normalise(Channel.email, address),
+                Identity.verified_at.isnot(None),
+            )
+        )
+    ).scalar_one_or_none()
 
 
 @dataclass(frozen=True, slots=True)

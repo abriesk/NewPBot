@@ -314,8 +314,11 @@ async def test_a_client_with_no_telegram_can_book_end_to_end(
     assert slot.status is SlotStatus.held
     assert slot.held_by_request == request.id
 
-    # §12.1: the confirmation carries the request UUID.
-    assert str(request.uuid) in done.text
+    # §12.1: the confirmation carries the request UUID -- for a browser that
+    # has proved who it is. This one typed an address, so (NP2) it is told to
+    # check its email and shown nothing that differs from a known address.
+    assert str(request.uuid) not in done.text
+    assert request.awaiting_verification
 
 
 async def test_two_submissions_for_one_slot_leave_one_request_row(
@@ -922,7 +925,7 @@ async def test_a_booking_passes_the_gate_by_doing_the_work(
     request = (
         await committed.execute(select(BookingRequest).order_by(BookingRequest.id.desc()).limit(1))
     ).scalar_one()
-    assert str(request.uuid) in done.text
+    assert request.awaiting_verification  # NP2: the page says "check your email"
 
 
 @pytest.mark.parametrize("solution", ["", "1"])

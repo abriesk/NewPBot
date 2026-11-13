@@ -50,6 +50,10 @@ class EmailTransport:
             # Permanent: no amount of retrying configures SMTP.
             return DeliveryResult.permanent("email channel is disabled (SMTP_HOST unset)")
 
+        if any(ch in address for ch in "\r\n") or not address.strip():
+            # A header injection, or nothing: never a retryable condition.
+            return DeliveryResult.permanent("refused: the address is not a plain email address")
+
         settings = self._settings
         mail = EmailMessage()
         mail["From"] = settings.smtp_from or ""

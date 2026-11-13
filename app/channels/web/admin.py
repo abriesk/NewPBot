@@ -1957,6 +1957,8 @@ _INT_SETTINGS = (
     "cancel_window_hours",
     "retention_months",
     "captcha_difficulty",
+    "unverified_hold_minutes",
+    "book_per_ip_per_hour",
 )
 
 

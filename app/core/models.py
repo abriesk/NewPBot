@@ -121,9 +121,20 @@ class Practice(Base):
         JSONB, nullable=False, server_default="[]"
     )
     #: §17: the proof-of-work gate in front of the two unauthenticated write
-    #: paths. Off by default -- it is what she turns on when the forms are
-    #: being abused, not a toll every client pays for a flood that never came.
-    captcha_on: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="false")
+    #: paths. On for a new practice (migration 0007: an unauthenticated form that
+    #: holds a slot and notifies the therapist is an abuse path from day one); an
+    #: existing practice keeps the value it had.
+    captcha_on: Mapped[bool] = mapped_column(Boolean, nullable=False, server_default="true")
+    #: How long a web booking from an unverified address holds its slot. The hold
+    #: becomes the normal one when the login link is followed, and the therapist
+    #: is told only then.
+    unverified_hold_minutes: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="15"
+    )
+    #: Web bookings (POST /book) allowed per hour from one IP address.
+    book_per_ip_per_hour: Mapped[int] = mapped_column(
+        Integer, nullable=False, server_default="10"
+    )
     #: Leading zero bits of SHA-256 the browser must find. Each step doubles
     #: the work; see `app/channels/web/captcha.py` for what the numbers cost.
     captcha_difficulty: Mapped[int] = mapped_column(Integer, nullable=False, server_default="16")
@@ -401,6 +412,11 @@ class BookingRequest(Base):
     contact_note: Mapped[str | None] = mapped_column(Text)  # preferred means of contact
     display_name: Mapped[str | None] = mapped_column(Text)  # as typed, unverified
     expires_at: Mapped[datetime | None] = _tstz()  # pending expiry
+    #: A web booking from an address not yet verified: the slot is held briefly
+    #: and the therapist has not been told. Following the login link clears it.
+    awaiting_verification: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, server_default="false"
+    )
     confirmed_at: Mapped[datetime | None] = _tstz()
     cancelled_at: Mapped[datetime | None] = _tstz()
     cancelled_by: Mapped[ActorType | None] = mapped_column(pg_enum(ActorType))

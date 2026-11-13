@@ -88,6 +88,17 @@
       <input type="number" name="captcha_difficulty" min="8" max="24"
              value="{{ practice.captcha_difficulty }}">
     </label>
+    <label>Hold for an unverified email (minutes)
+      <input type="number" name="unverified_hold_minutes" min="1" max="120"
+             value="{{ practice.unverified_hold_minutes }}">
+      <small>A web booking from an address nobody has proved holds its time for
+        this long. Following the link in the email makes it the normal hold and
+        only then are you told about the request.</small>
+    </label>
+    <label>Web bookings per hour from one address (IP)
+      <input type="number" name="book_per_ip_per_hour" min="1" max="1000"
+             value="{{ practice.book_per_ip_per_hour }}">
+    </label>
     <p class="muted">Every step up doubles the work, so the numbers climb
        faster than they look. Measured on a laptop: <strong>16</strong> (the
        default) takes about half a second, <strong>20</strong> about seven

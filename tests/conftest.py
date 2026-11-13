@@ -247,3 +247,24 @@ def _fresh_rate_limits() -> Iterator[None]:
     ratelimit.reset()
     yield
     ratelimit.reset()
+
+
+def pytest_sessionstart(session: pytest.Session) -> None:
+    """A practice is now created with the captcha gate on (NP2). The suite's
+    form tests post without solving a challenge and the tests that want the gate
+    switch it on themselves, so the baseline is the old one: gate off. Only the
+    `_test` database is touched (checked above)."""
+    import asyncio
+
+    from sqlalchemy import NullPool, text
+    from sqlalchemy.ext.asyncio import create_async_engine
+
+    async def _off() -> None:
+        engine = create_async_engine(os.environ["DATABASE_URL"], poolclass=NullPool)
+        try:
+            async with engine.begin() as connection:
+                await connection.execute(text("UPDATE practice SET captcha_on = false"))
+        finally:
+            await engine.dispose()
+
+    asyncio.run(_off())

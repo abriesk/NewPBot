@@ -38,8 +38,15 @@ MUTABLE_FIELDS = frozenset(
         "social_links",
         "captcha_on",
         "captcha_difficulty",
+        "unverified_hold_minutes",
+        "book_per_ip_per_hour",
     }
 )
+
+#: Bounds for the two abuse settings. A hold of zero minutes would make the
+#: booking form unusable; hours-long ones defeat the point of a short hold.
+UNVERIFIED_HOLD_MIN, UNVERIFIED_HOLD_MAX = 1, 120
+BOOK_PER_IP_MIN, BOOK_PER_IP_MAX = 1, 1000
 
 #: §17: leading zero bits of SHA-256 the browser must find before the booking
 #: and waitlist forms are accepted. Bounded here because the cost doubles with
@@ -142,6 +149,16 @@ async def update_settings(session: AsyncSession, **changes: Any) -> Practice:
                 f"{CAPTCHA_DIFFICULTY_MIN}-{CAPTCHA_DIFFICULTY_MAX}"
             )
         changes["captcha_difficulty"] = difficulty
+
+    for field, low, high in (
+        ("unverified_hold_minutes", UNVERIFIED_HOLD_MIN, UNVERIFIED_HOLD_MAX),
+        ("book_per_ip_per_hour", BOOK_PER_IP_MIN, BOOK_PER_IP_MAX),
+    ):
+        if field in changes:
+            number = int(changes[field])
+            if not low <= number <= high:
+                raise ValueError(f"{field}: {number} is outside {low}-{high}")
+            changes[field] = number
 
     practice = await get_practice(session)
     for field, value in changes.items():

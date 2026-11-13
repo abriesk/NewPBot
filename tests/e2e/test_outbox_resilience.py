@@ -1,4 +1,4 @@
-"""Outbox resilience (NP2: REVIEW A1, C1, F4, F7, F8).
+"""Outbox resilience (IMPLEMENTATION.md §14; NP2: REVIEW A1, C1, F4, F7, F8).
 
 One bad row never strands its batch; credential failures are retried, not
 buried; SMTP never waits without a timeout; the Delivery page can requeue a dead
@@ -245,3 +245,34 @@ async def test_the_delivery_page_shows_credential_trouble_and_retries_a_dead_row
         assert row.attempts == 0
     finally:
         await _drop(committed, ids)
+
+
+# --- Addresses are validated where they are typed (F4, C15) -------------------
+
+
+@pytest.mark.parametrize("path", ["/auth/email", "/waitlist"])
+@pytest.mark.parametrize(
+    "bad", ["a@b.example\nBcc: x@y.example", "a@b.example\r\nSubject: x", "not an address", "a b@c.d"]
+)
+async def test_a_bad_address_is_refused_at_the_form_with_a_readable_error(
+    committed: AsyncSession, web: TestClient, path: str, bad: str
+) -> None:
+    web.get("/auth/email")
+    response = web.post(
+        path, data={"csrf_token": _csrf(web), "email": bad}, follow_redirects=False
+    )
+    assert response.status_code == 400
+    assert "<h1>" in response.text
+    queued = (
+        await committed.execute(
+            select(OutboxMessage).where(OutboxMessage.address.like("%Bcc:%"))
+        )
+    ).scalars().all()
+    assert not queued
+
+
+async def test_the_email_transport_refuses_a_line_break_without_retrying(
+    email_enabled: None,
+) -> None:
+    result = await EmailTransport().send("a@b.example\nBcc: x@y.example", RenderedMessage(parts=["hi"]))
+    assert result.permanent_failure

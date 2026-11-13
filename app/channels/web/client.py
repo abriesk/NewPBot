@@ -58,9 +58,11 @@ from app.core.services.clients import (
     issue_token,
     link_identity,
     magic_link_allowance_left,
+    normalise_email,
     resolve_client,
     set_client_language,
     token_target,
+    verified_email_client,
 )
 from app.core.services.flow import Step
 from app.core.services.notifications import Envelope, Recipient
@@ -102,6 +104,19 @@ LANGUAGES = ("ru", "hy", "en")
 
 
 # --- Page context -----------------------------------------------------------
+
+
+async def _bad_email(session: AsyncSession, context: dict[str, Any]) -> Response:
+    """The readable refusal for an address that is not one (REVIEW C15, F4)."""
+    return _render(
+        "error.html",
+        {
+            **context,
+            "heading": context["t"]["error"],
+            "message": await get_text(session, context["lang"], "booking.contact.email_invalid"),
+        },
+        status_code=400,
+    )
 
 
 async def _queue_login_link(
@@ -734,9 +749,29 @@ def build_router() -> APIRouter:
         """§12.1: submit; returns the confirmation with the request UUID."""
         if not csrf_ok(request, csrf_token):
             return Response(status_code=403)
+        settings_now = get_settings()
 
         async with unit_of_work() as session:
             context = await _context(session, request)
+            # Per IP, from the helper every limiter uses. Before the gate and
+            # before anything is created: a flood that finds fresh addresses
+            # still runs into this.
+            practice = context["practice"]
+            if not ratelimit.check(
+                ratelimit.Limit("book_ip", practice.book_per_ip_per_hour, ratelimit.BOOKING_WINDOW),
+                ratelimit.client_ip(request),
+            ):
+                return _render(
+                    "error.html",
+                    {
+                        **context,
+                        "heading": context["t"]["error"],
+                        "message": await get_text(
+                            session, context["lang"], "error.rate_limited"
+                        ),
+                    },
+                    status_code=429,
+                )
             # §17: before anything is created. A refused submission must cost
             # the practice a row, a notification and an email less than an
             # accepted one, which is the entire point of the gate.
@@ -763,6 +798,21 @@ def build_router() -> APIRouter:
             if client is None:
                 if not email:
                     return RedirectResponse("/book/details", status_code=303)
+                address = normalise_email(email)
+                if address is None:
+                    return await _bad_email(session, context)
+                email = address
+                owner = await verified_email_client(session, address)
+                if owner is not None:
+                    # A proved address is somebody's real record. A stranger
+                    # typing it files nothing there: the owner is sent a link,
+                    # and the page says exactly what it says for a new address.
+                    if settings_now.email_enabled and (
+                        await magic_link_allowance_left(session, address) > 0
+                    ):
+                        await _queue_login_link(session, client_id=owner, email=address)
+                    await notifications.publish(session)
+                    return await _check_email_page(session, context)
                 # §12.1 (IMPLEMENTATION.md): verification is never a
                 # precondition for booking -- the request is submitted either
                 # way. What it *is* a precondition for is anything that signs
@@ -786,6 +836,9 @@ def build_router() -> APIRouter:
                     contact_note=contact or None,
                     display_name=name or None,
                     client_timezone=reservation.get("tz"),
+                    # A typed address proves nothing: short hold, and the
+                    # therapist hears when the link is followed.
+                    awaiting_verification=not proven,
                 )
             except SlotUnavailable:
                 await flow.clear(session, client.id, Channel.web)
@@ -840,6 +893,13 @@ def build_router() -> APIRouter:
                 verify_notice = await get_text(session, context["lang"], "booking.check_email")
 
             await notifications.publish(session)
+
+            if not proven:
+                # The same page as for an address that already belongs to
+                # somebody (above): nothing here says which it was.
+                response = await _check_email_page(session, context)
+                _clear_stash(response)
+                return response
 
             response = _render(
                 "done.html",
@@ -918,8 +978,11 @@ def build_router() -> APIRouter:
             if client is None:
                 if not email:
                     return RedirectResponse("/book", status_code=303)
+                address = normalise_email(email)
+                if address is None:
+                    return await _bad_email(session, context)
                 client = await resolve_client(
-                    session, Channel.email, email, language=context["lang"]
+                    session, Channel.email, address, language=context["lang"]
                 )
 
             try:
@@ -1164,6 +1227,7 @@ def build_router() -> APIRouter:
             return Response(status_code=403)
 
         settings = get_settings()
+        address = normalise_email(email)
 
         # §17: 10 per hour per IP. The per-address limit is checked below,
         # inside the transaction, because it counts auth_token rows.
@@ -1171,6 +1235,9 @@ def build_router() -> APIRouter:
 
         async with unit_of_work() as session:
             context = await _context(session, request)
+            if address is None:
+                return await _bad_email(session, context)
+            email = address
 
             # §4: with SMTP unset there is no way to deliver a link, and the web
             # UI requires Telegram login instead.
@@ -1238,7 +1305,13 @@ def build_router() -> APIRouter:
             if requested:
                 try:
                     target = f"/r/{UUID(requested)}"
-                except ValueError:
+                    # The address is proved: a booking made against it stops
+                    # being a short hold and the therapist is told (NP2).
+                    held = await booking.get_by_uuid(session, UUID(requested))
+                    if held.client_id == result.client_id:
+                        await booking.release_unverified_hold(session, held.id)
+                        await notifications.publish(session)
+                except (ValueError, NotFound):
                     logger.info("login token carried an unreadable request reference")
 
             # §12.1: the arrival is what greets, so the marker rides on this
@@ -1252,6 +1325,21 @@ def build_router() -> APIRouter:
 
 
 # --- Helpers ----------------------------------------------------------------
+
+
+async def _check_email_page(session: AsyncSession, context: dict[str, Any]) -> Response:
+    """What an unproved booking sees, whatever became of the address."""
+    return _render(
+        "done.html",
+        {
+            **context,
+            "heading": context["t"]["consultation"],
+            "message": await get_text(session, context["lang"], "booking.check_email"),
+            "request_uuid": None,
+            "telegram_link": None,
+            "verify_notice": None,
+        },
+    )
 
 
 async def _active_session_types(session: AsyncSession) -> list[SessionType]:
