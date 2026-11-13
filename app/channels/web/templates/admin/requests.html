@@ -6,44 +6,54 @@
 
 {# §12.2: two views of one query. The list answers "what needs answering";
    the schedule answers "what does my week look like". #}
-<p class="views">
-  <a href="/admin/requests" {% if view != "grid" %}class="on"{% endif %}>list</a>
-  <a href="/admin/requests?view=grid" {% if view == "grid" %}class="on"{% endif %}>schedule</a>
+<p class="views" role="group" aria-label="View">
+  <a href="/admin/requests"{% if view != "grid" %} class="on" aria-current="true"{% endif %}>list</a>
+  <a href="/admin/requests?view=grid"{% if view == "grid" %} class="on" aria-current="true"{% endif %}>schedule</a>
 </p>
 
 {% if view == "grid" %}
   {% include "admin/partials/schedule.html" %}
 {% else %}
-<p class="filters">
-  <a href="/admin/requests" {% if not active %}class="on"{% endif %}>all</a>
+{# NP5a: opens on what is waiting for her answer; the counts are on the pills. #}
+<p class="filters" role="group" aria-label="Show requests">
+  <a href="/admin/requests"{% if not active and not q %} class="on" aria-current="true"{% endif %}>Needs you <span class="n">{{ needs_you }}</span></a>
   {% for s in statuses %}
-    <a href="/admin/requests?status={{ s }}" {% if active == s %}class="on"{% endif %}>{{ s }}</a>
+    {% if s not in ("pending", "negotiating") %}
+    <a href="/admin/requests?status={{ s }}"{% if active == s %} class="on" aria-current="true"{% endif %}>{{ s | human("request") }} <span class="n">{{ counts[s] }}</span></a>
+    {% endif %}
   {% endfor %}
+  <a href="/admin/requests?status=all"{% if active == "all" %} class="on" aria-current="true"{% endif %}>All <span class="n">{{ everything }}</span></a>
 </p>
+<form method="get" action="/admin/requests" class="search" role="search">
+  <label class="sr-only" for="q">Find a request by reference or name</label>
+  <input type="search" id="q" name="q" value="{{ q }}" placeholder="Reference or name, e.g. 5A969404">
+  {% if active %}<input type="hidden" name="status" value="{{ active }}">{% endif %}
+  <button type="submit" class="secondary small">Find</button>
+  {% if q %}<a href="/admin/requests">clear</a>{% endif %}
+</form>
 <div class="scroll">
 <table>
   <thead><tr>
-    <th>UUID</th><th>Status</th><th>Type</th><th>Modality</th>
-    <th>Name</th><th>Contact</th><th>Requested</th><th>Scheduled</th>
+    <th scope="col">Name</th><th scope="col">Status</th><th scope="col">Session</th>
+    <th scope="col">When</th><th scope="col">Contact</th><th scope="col">Received</th>
   </tr></thead>
   <tbody>
   {% for r in rows %}
     <tr>
-      <td><a href="/admin/requests/{{ r.uuid }}"><code>{{ r.uuid[:8] }}</code></a></td>
-      <td><span class="badge {{ r.status }}">{{ r.status }}</span></td>
-      <td>{{ r.session_type }}</td>
-      <td>{{ r.modality }}</td>
-      <td>{{ r.name }}</td>
+      <td class="wide-link"><a href="/admin/requests/{{ r.uuid }}">{{ r.name or "Unnamed" }}</a>
+        <span class="ref">{{ r.ref }}</span></td>
+      <td><span class="badge {{ r.status }}">{{ r.status | human("request") }}</span></td>
+      <td>{{ r.session_type }} · {{ r.modality | human("modality") }}</td>
+      <td>{% if r.scheduled %}{{ r.scheduled }}{% elif r.desired %}<span class="muted">asked for</span> {{ r.desired }}{% else %}—{% endif %}</td>
       {# §12.2: this is where she decides what to open, so a row she cannot
          answer from should say so here rather than after a click. #}
-      <td class="muted">
+      <td>
         {% for c in r.contact %}{{ contact_link(c) }}<br>{% else %}—{% endfor %}
       </td>
       <td>{{ r.created }}</td>
-      <td>{{ r.scheduled or r.desired }}</td>
     </tr>
   {% else %}
-    <tr><td colspan="8" class="muted">Nothing here yet.</td></tr>
+    <tr><td colspan="6" class="muted">{% if q %}No request matches “{{ q }}”.{% elif not active %}Nothing is waiting for you.{% else %}Nothing here.{% endif %}</td></tr>
   {% endfor %}
   </tbody>
 </table>

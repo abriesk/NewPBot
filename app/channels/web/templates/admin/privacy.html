@@ -43,7 +43,7 @@
           <form method="post" action="/admin/clients/{{ row.id }}/erase">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             {# Irreversible, so it wants the word typed rather than one click. #}
-            <input type="text" name="confirm" placeholder="type erase" size="10">
+            <input type="text" name="confirm" placeholder="type erase" size="10" aria-label="Type the word erase to confirm">
             <button type="submit">Erase</button>
           </form>
         {% endif %}

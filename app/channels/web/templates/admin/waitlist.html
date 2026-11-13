@@ -3,10 +3,18 @@
 {% block title %}{{ t.nav_waitlist }}{% endblock %}
 {% block content %}
 <h1>{{ t.nav_waitlist }}</h1>
+{# NP5a: opens on the people still waiting. #}
+<p class="filters" role="group" aria-label="Show entries">
+  <a href="/admin/waitlist"{% if not active %} class="on" aria-current="true"{% endif %}>Waiting <span class="n">{{ counts["new"] }}</span></a>
+  {% for s in ("contacted", "converted", "closed") %}
+    <a href="/admin/waitlist?status={{ s }}"{% if active == s %} class="on" aria-current="true"{% endif %}>{{ s | human("waitlist") }} <span class="n">{{ counts[s] }}</span></a>
+  {% endfor %}
+  <a href="/admin/waitlist?status=all"{% if active == "all" %} class="on" aria-current="true"{% endif %}>All <span class="n">{{ everything }}</span></a>
+</p>
 {% for e in rows %}
   <div class="card">
-    <p><code>{{ e.uuid }}</code>
-       <span class="badge {{ e.status.value }}">{{ e.status.value }}</span></p>
+    <p><span class="ref">{{ e.uuid | string | upper | truncate(8, True, "") }}</span>
+       <span class="badge {{ e.status.value }}">{{ e.status.value | human("waitlist") }}</span></p>
     {% if e.problem_text %}<p class="problem">{{ e.problem_text }}</p>{% endif %}
     {% if e.contact_note %}<p>Contact: {{ e.contact_note }}</p>{% endif %}
     <p class="muted">
@@ -14,17 +22,25 @@
       {% for c in identities[e.client_id | string] %}{{ contact_link(c) }}<br>{% else %}—{% endfor %}
     </p>
     {% if e.admin_note %}<p class="muted">Note: {{ e.admin_note }}</p>{% endif %}
-    <div class="admin-actions">
-      {% for action in actions %}
-        <form method="post" action="/admin/waitlist/{{ e.id }}/{{ action }}">
-          <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-          <input type="text" name="note" placeholder="note">
-          <button type="submit">{{ action }}</button>
-        </form>
-      {% endfor %}
-    </div>
+    {# One field, labelled, and hidden once the entry is finished. Only "Contacted" sends it. #}
+    {% if e.status.value in ("new", "contacted") %}
+    <form method="post" class="msg-form">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <label class="msg-field" for="note-{{ e.id }}">Message to the client
+        <small>(sent with “Contacted”; leave empty to send nothing)</small></label>
+      <input type="text" id="note-{{ e.id }}" name="note">
+      <div class="admin-actions">
+        {% if e.status.value == "new" %}
+          <button type="submit" formaction="/admin/waitlist/{{ e.id }}/contacted">Contacted</button>
+        {% else %}
+          <button type="submit" formaction="/admin/waitlist/{{ e.id }}/converted">Booked a session</button>
+        {% endif %}
+        <button type="submit" class="secondary" formaction="/admin/waitlist/{{ e.id }}/closed">Close entry</button>
+      </div>
+    </form>
+    {% endif %}
   </div>
 {% else %}
-  <p class="muted">Nobody is waiting.</p>
+  <p class="muted">{% if not active %}Nobody is waiting.{% else %}Nothing here.{% endif %}</p>
 {% endfor %}
 {% endblock %}

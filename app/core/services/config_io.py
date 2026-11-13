@@ -83,6 +83,7 @@ _TIMEZONE_FIELDS = ("iana_name", "display_name", "sort_order", "is_active")
 _TOPIC_FIELDS = ("code", "sort_order", "show_in_menu", "is_active")
 _BLOCK_FIELDS = ("lang", "position", "kind", "body_md", "link_url", "is_published")
 
+
 async def _import_photo(session: AsyncSession, raw: Any, report: ImportReport) -> None:
     """NP5a: her photo. Re-validated and re-encoded exactly like an upload (`photo.process`), so a
     file cannot smuggle in anything the settings page would refuse."""

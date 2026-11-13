@@ -24,8 +24,8 @@
        are kept and come back when you untick this.</p>
     <label>Mode
       <select name="booking_mode">
-        <option value="slots" {% if practice.booking_mode.value == "slots" %}selected{% endif %}>slots</option>
-        <option value="negotiation" {% if practice.booking_mode.value == "negotiation" %}selected{% endif %}>negotiation</option>
+        <option value="slots" {% if practice.booking_mode.value == "slots" %}selected{% endif %}>{{ "slots" | human("mode") }}</option>
+        <option value="negotiation" {% if practice.booking_mode.value == "negotiation" %}selected{% endif %}>{{ "negotiation" | human("mode") }}</option>
       </select>
     </label>
     <label class="choice">
@@ -57,7 +57,7 @@
     <label>Default language
       <select name="default_language">
         {% for code in ["ru", "hy", "en"] %}
-          <option value="{{ code }}" {% if practice.default_language == code %}selected{% endif %}>{{ code }}</option>
+          <option value="{{ code }}" {% if practice.default_language == code %}selected{% endif %}>{{ code | human("language") }}</option>
         {% endfor %}
       </select>
     </label>

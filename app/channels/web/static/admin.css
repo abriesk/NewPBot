@@ -1,10 +1,41 @@
 /* Admin-only additions. The client stylesheet supplies the palette. */
 .admin main.wide { max-width: 72rem; }
 
-.flash {
-  background: var(--surface); border: 1px solid var(--accent);
-  border-radius: var(--radius); padding: .6rem 1rem; color: var(--ink);
+/* Status colours that pass AA as text (>= 4.5:1) on their own fill in light and dark. `--amber-line`
+   is a border only. Painted twice for the reason `.error` gives below. */
+:root {
+  --amber-ink: #6b4500; --amber-bg: #fff3d4; --amber-line: #b8860b;
+  --red-ink: #a3201a; --red-bg: #fdeceb; --red-line: #b3261e;
+  --green-bg: #e7f0eb;
 }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --amber-ink: #f3c969; --amber-bg: #3a2c08; --amber-line: #b8860b;
+    --red-ink: #f2b8b5; --red-bg: #3b1513; --red-line: #d4574f;
+    --green-bg: #1f2d27;
+  }
+}
+:root[data-theme="dark"] {
+  --amber-ink: #f3c969; --amber-bg: #3a2c08; --amber-line: #b8860b;
+  --red-ink: #f2b8b5; --red-bg: #3b1513; --red-line: #d4574f;
+  --green-bg: #1f2d27;
+}
+
+/* The console's frame (NP5a): a padded header and a padded, centred main. */
+.admin header .wrap { max-width: 72rem; }
+.admin main.wide { max-width: 72rem; padding-block: 1.5rem 3rem; }
+
+/* Feedback. A sentence, announced (`role="status"` / `role="alert"` in base.html), and an error
+   is said apart from a success by more than its colour: a heavier edge and the word "Problem". */
+.flash {
+  background: var(--green-bg); border: 1px solid var(--accent); border-left-width: 6px;
+  border-radius: var(--radius); padding: .65rem 1rem; color: var(--ink); margin: 0 0 1.25rem;
+}
+.flash.error {
+  background: var(--red-bg); border-color: var(--red-line); color: var(--red-ink);
+  border-left-width: 6px;
+}
+.flash.error::before { content: "Problem: "; font-weight: 700; }
 .error { color: #b3261e; }
 /* Painted twice, for the reason `style.css` gives where it does the same: the
    console's theme control writes `data-theme`, and a deliberate choice has to
@@ -15,11 +46,22 @@
 :root[data-theme="dark"] .error { color: #f2b8b5; }
 
 .filters { display: flex; flex-wrap: wrap; gap: .5rem; align-items: center; }
-.filters a {
-  color: var(--muted); text-decoration: none; border: 1px solid var(--line);
-  border-radius: 999px; padding: .1rem .6rem; font-size: .85rem;
+.filters a, .views a {
+  display: inline-flex; align-items: center; min-height: 2.25rem; gap: .35rem;
+  color: var(--ink-soft); text-decoration: none; border: 1px solid var(--control);
+  border-radius: 999px; padding: .15rem .85rem; font-size: .9rem;
 }
-.filters a.on { color: var(--ink); border-color: var(--accent); }
+.filters a:hover, .views a:hover { border-color: var(--accent); color: var(--ink); }
+/* The chosen one is not told by colour alone: heavier, tinted, underlined, and `aria-current`. */
+.filters a.on, .views a.on {
+  color: var(--ink); font-weight: 700; border-color: var(--accent);
+  background: var(--accent-soft); text-decoration: underline; text-underline-offset: .2em;
+}
+.filters .n { font-variant-numeric: tabular-nums; color: var(--muted); font-weight: 400; }
+.filters a.on .n { color: var(--ink-soft); }
+.filters a.alert { border-color: var(--red-line); }
+form.search { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; margin: .75rem 0; }
+form.search input[type=search] { max-width: 18rem; margin: 0; }
 
 /* Wide tables scroll inside their own box; the page never scrolls sideways. */
 .scroll { overflow-x: auto; }
@@ -27,22 +69,31 @@ table { border-collapse: collapse; width: 100%; font-size: .92rem; }
 th, td { text-align: left; padding: .5rem .6rem; border-bottom: 1px solid var(--line); }
 th { color: var(--muted); font-weight: 600; }
 
+/* By what it asks of her, not by what it is. Amber: it needs you. Green: it is settled well. Red:
+   something broke. Grey: finished. Text is always >= 4.5:1 on its own fill, in both palettes. */
 .badge {
-  display: inline-block; border-radius: 999px; padding: .05rem .55rem;
-  font-size: .8rem; border: 1px solid var(--line); color: var(--muted);
+  display: inline-block; border-radius: 999px; padding: .1rem .6rem;
+  font-size: .82rem; border: 1px solid var(--control); color: var(--ink-soft);
+  background: var(--bg-tint); white-space: nowrap;
 }
-.badge.pending, .badge.new, .badge.scheduled { border-color: #b8860b; color: #b8860b; }
-.badge.confirmed, .badge.sent, .badge.available { border-color: var(--accent); color: var(--accent); }
-.badge.rejected, .badge.cancelled, .badge.dead, .badge.failed { border-color: #b3261e; color: #b3261e; }
+.badge.pending, .badge.negotiating, .badge.new, .badge.held, .badge.sending {
+  border-color: var(--amber-line); color: var(--amber-ink); background: var(--amber-bg); font-weight: 600;
+}
+.badge.confirmed, .badge.sent, .badge.available, .badge.booked, .badge.scheduled {
+  border-color: var(--accent); color: var(--accent); background: var(--green-bg);
+}
+.badge.dead, .badge.failed {
+  border-color: var(--red-line); color: var(--red-ink); background: var(--red-bg); font-weight: 600;
+}
 
 .admin-actions { display: flex; flex-wrap: wrap; gap: .5rem; align-items: end; }
 .admin-actions form { margin: 0; }
 
 /* An action §7.1 does not allow from this status. Greyed rather than removed,
    so the page keeps one shape and the reason is read where the button was. */
-.admin-actions form.unavailable { opacity: .55; }
-.admin-actions form.unavailable h3 { color: var(--muted); }
-.why { color: var(--muted); font-size: .85rem; margin: .35rem 0 0; max-width: 22rem; }
+.admin-actions form.unavailable { background: var(--bg-tint); border-style: dashed; }
+.admin-actions form.unavailable h3 { color: var(--ink-soft); }
+.why { color: var(--ink-soft); font-size: .9rem; margin: .35rem 0 0; max-width: 22rem; }
 form.inline { display: flex; gap: .5rem; align-items: center; flex-wrap: wrap; }
 form.inline input[type=text] { width: auto; flex: 1; min-width: 12rem; margin: 0; }
 .row { display: flex; flex-wrap: wrap; gap: 1rem; }
@@ -75,7 +126,7 @@ details.group .count {
   border: 1px solid var(--line); border-radius: 999px; padding: .05rem .5rem;
   font-size: .78rem; font-weight: 400; color: var(--muted);
 }
-details.group .count.todo { border-color: #b8860b; color: #b8860b; }
+details.group .count.todo { border-color: var(--amber-line); color: var(--amber-ink); background: var(--amber-bg); }
 
 /* A key with no wording yet. Expected, not an error -- §15 falls back. */
 tr.todo td { background: color-mix(in srgb, #b8860b 8%, transparent); }
@@ -126,11 +177,6 @@ table.health p { margin: .15rem 0; }
    and dresses it as a full-width heading with a rule through it, which is the
    opposite of a column. */
 .views { display: flex; gap: .5rem; align-items: center; margin-bottom: .75rem; }
-.views a {
-  color: var(--muted); text-decoration: none; border: 1px solid var(--line);
-  border-radius: 999px; padding: .1rem .7rem; font-size: .85rem;
-}
-.views a.on { color: var(--ink); border-color: var(--accent); background: var(--accent-soft); }
 
 .weeknav { display: flex; gap: .75rem; align-items: baseline; flex-wrap: wrap; }
 .weeknav a { color: var(--muted); text-decoration: none; font-size: .9rem; }
@@ -166,7 +212,7 @@ table.health p { margin: .15rem 0; }
 
 /* A finished session is on the grid so a past week is not empty, but it is
    not work: it recedes (DESIGN.md §15). */
-.week .entry.completed { opacity: .62; }
+.week .entry.completed .who, .week .entry.completed .at { color: var(--ink-soft); font-weight: 400; }
 .week .entry.confirmed { border-left-color: var(--accent); }
 .week .entry.pending, .week .entry.negotiating { border-left-color: #b8860b; }
 
@@ -190,3 +236,108 @@ h2 .count {
    to, and it changed shape under zoom on an ordinary desktop. The `.scroll`
    wrapper carries the overflow sideways instead, so the page itself never
    scrolls horizontally and a day is always a column. */
+
+
+/* --- NP5a --------------------------------------------------------------- */
+
+/* The header: the health dot sits with Sign out, so it is never scrolled out of sight; the row of
+   links scrolls on a phone, shows a thin scrollbar and fades at its edge to say so. */
+.admin header nav { scrollbar-width: thin; scrollbar-color: var(--control) transparent; }
+.admin header nav::-webkit-scrollbar { display: block; height: 6px; }
+.admin header nav::-webkit-scrollbar-thumb { background: var(--control); border-radius: 3px; }
+@media (max-width: 57.99rem) {
+  .admin header nav {
+    -webkit-mask-image: linear-gradient(to right, #000 90%, transparent);
+            mask-image: linear-gradient(to right, #000 90%, transparent);
+    padding-bottom: .35rem;
+  }
+}
+.admin header nav a { min-height: 2rem; display: inline-flex; align-items: center; }
+.admin header .health-dot { display: inline-flex; align-items: center; min-height: 2rem; padding: 0 .5rem; }
+.admin header .lang button { min-height: 2rem; padding: .3rem .8rem; }
+
+/* Fields, styled like the client's text fields: date, time, number, password, search, file. */
+.admin label > :where(input:not([type=checkbox]):not([type=radio]), textarea, select) { display: block; }
+.admin :where(input[type=date], input[type=datetime-local], input[type=time], input[type=number],
+              input[type=password], input[type=search], input[type=url]) {
+  width: 100%; padding: .7rem .85rem; border: 1px solid var(--control);
+  border-radius: var(--radius-sm); background: var(--bg); color: var(--ink); font: inherit;
+}
+.admin :where(input[type=date], input[type=datetime-local], input[type=time], input[type=number],
+              input[type=password], input[type=search], input[type=url]):focus {
+  border-color: var(--accent); outline: none;
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 18%, transparent);
+}
+.admin label > :where(input[type=date], input[type=datetime-local], input[type=time],
+                      input[type=number], input[type=password], input[type=search]) { max-width: 16rem; }
+.admin input[type=file] {
+  width: 100%; max-width: 26rem; padding: .45rem; border: 1px dashed var(--control);
+  border-radius: var(--radius-sm); background: var(--bg); color: var(--ink); font: inherit;
+}
+.admin input[type=file]::file-selector-button {
+  margin-right: .75rem; padding: .45rem .9rem; border: 1px solid var(--control);
+  border-radius: var(--radius-sm); background: var(--surface); color: var(--ink);
+  font: inherit; cursor: pointer;
+}
+.admin label small, .hint { color: var(--ink-soft); font-size: .88rem; }
+
+/* Buttons: the primary is the accent; `secondary` is quiet; `danger` is for what cannot be taken
+   back. Two things of the same weight side by side are a mistake the page should not make. */
+button.danger, summary.danger {
+  background: var(--red-bg); border: 1px solid var(--red-line); color: var(--red-ink); font-weight: 600;
+}
+button.danger:hover { background: var(--red-ink); color: var(--red-bg); box-shadow: none; }
+button.small, summary.small { min-height: 2.25rem; padding: .3rem .8rem; font-size: .9rem; }
+
+/* The confirm step: a `<details>`, so it needs no script. The question and its button appear
+   only once she has opened it, and the summary reads like the button it replaces. */
+details.confirm { margin: 0; }
+details.confirm > summary {
+  display: inline-flex; align-items: center; min-height: 2.25rem; padding: .3rem .9rem;
+  border-radius: var(--radius-sm); cursor: pointer; list-style: none; font-size: .95rem;
+}
+details.confirm > summary::-webkit-details-marker { display: none; }
+details.confirm > summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+details.confirm[open] > summary { margin-bottom: .6rem; }
+details.confirm .really {
+  border: 1px solid var(--red-line); border-radius: var(--radius-sm); padding: .75rem .9rem;
+  background: var(--red-bg); color: var(--ink);
+}
+details.confirm .really label { color: var(--ink); }
+details.confirm .really p { margin: 0 0 .6rem; }
+details.confirm .buttons { display: flex; gap: .5rem; flex-wrap: wrap; }
+
+/* Request page. */
+.admin-actions .card.primary { border-color: var(--accent); box-shadow: inset 0 0 0 1px var(--accent); }
+.admin-actions form.card { flex: 1 1 18rem; max-width: 26rem; }
+details.unavail { margin-top: 1rem; }
+details.unavail > summary { cursor: pointer; color: var(--ink-soft); min-height: 2rem; }
+.req-head { display: flex; flex-wrap: wrap; gap: .25rem .75rem; align-items: baseline; }
+.ref { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; color: var(--ink-soft); font-size: .9rem; }
+td .ref { display: block; }
+
+/* Slots: grouped by day. */
+.slot-days { margin-top: 1rem; }
+.slot-day { margin-bottom: 1.25rem; }
+.slot-day h3 { margin: 0 0 .4rem; font-size: 1rem; }
+.slot-day h3 .today { color: var(--accent); font-weight: 600; font-size: .85rem; }
+ul.slots { list-style: none; padding: 0; margin: 0; border-top: 1px solid var(--line); }
+ul.slots li {
+  display: flex; flex-wrap: wrap; gap: .4rem .9rem; align-items: center;
+  padding: .45rem 0; border-bottom: 1px solid var(--line); scroll-margin-top: 1rem;
+}
+ul.slots li:target { background: var(--accent-soft); outline: 2px solid var(--accent); outline-offset: -2px; }
+ul.slots .at { font-weight: 600; font-variant-numeric: tabular-nums; min-width: 3.2rem; }
+ul.slots .meta { color: var(--ink-soft); font-size: .9rem; }
+ul.slots .admin-actions { margin-left: auto; align-items: center; }
+details.create { margin: 1rem 0; }
+details.create > summary { cursor: pointer; font-weight: 600; min-height: 2.25rem; }
+fieldset.days { border: 0; padding: 0; margin: 0 0 1rem; display: flex; flex-wrap: wrap; gap: .5rem; }
+fieldset.days legend { padding: 0; margin-bottom: .4rem; color: var(--ink-soft); }
+fieldset.days label.choice { margin: 0; }
+
+/* Waitlist and translations. */
+.msg-field { margin: .5rem 0; }
+table.wording textarea, table.wording input[type=text] { width: 100%; max-width: none; margin: 0; }
+.savebar { display: flex; gap: .75rem; align-items: center; margin-top: .75rem; }
+td.wide-link a { font-weight: 600; }

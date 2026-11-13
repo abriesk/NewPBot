@@ -22,7 +22,14 @@
     <form method="post" action="/admin/content/revisions/{{ block.id }}/restore">
       <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
       <input type="hidden" name="version" value="{{ rev.version }}">
-      <button type="submit">Restore this version</button>
+      <details class="confirm">
+        <summary class="danger">Restore this version…</summary>
+        <div class="really">
+          <p><strong>Really restore v{{ rev.version }}?</strong> The page changes at once; the
+             current text stays in the history.</p>
+          <button type="submit" class="danger">Yes, restore</button>
+        </div>
+      </details>
     </form>
   </div>
 {% else %}

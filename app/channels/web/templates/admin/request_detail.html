@@ -1,13 +1,14 @@
 {% extends "admin/base.html" %}
 {% from "admin/partials/contact.html" import contact_link %}
-{% block title %}Request {{ summary.uuid[:8] }}{% endblock %}
+{% block title %}{{ summary.name or "Request" }} · {{ summary.ref }}{% endblock %}
 {% block content %}
-<h1>Request <code>{{ summary.uuid }}</code></h1>
+<h1>{{ summary.name or "Unnamed" }} — {{ summary.session_type }} — {{ summary.scheduled or summary.desired or summary.created }}</h1>
+<p class="ref">Reference {{ summary.ref }}</p>
 
 <div class="card">
-  <p><span class="badge {{ summary.status }}">{{ summary.status }}</span>
-     {{ summary.session_type }} · {{ summary.modality }}</p>
-  <p>From <strong>{{ summary.name or 'unnamed' }}</strong>, {{ summary.created }}</p>
+  <p><span class="badge {{ summary.status }}">{{ summary.status | human("request") }}</span>
+     {{ summary.session_type }} · {{ summary.modality | human("modality") }}</p>
+  <p>From <strong>{{ summary.name or 'unnamed' }}</strong>, received {{ summary.created }}</p>
   {% if summary.scheduled %}<p>Scheduled: {{ summary.scheduled }}</p>{% endif %}
   {% if summary.desired %}<p>Asked for: {{ summary.desired }}</p>{% endif %}
   {% if req.client_timezone %}<p class="muted">Client timezone: {{ req.client_timezone }}</p>{% endif %}
@@ -35,109 +36,115 @@
   {% for m in thread %}
     <li class="{{ m.sender.value }}">
       <span class="who">{{ m.sender.value }}</span> · <span class="muted">{{ m.kind.value }}</span>
-      {% if m.proposed_start %}<time>{{ m.proposed_start.strftime('%Y-%m-%d %H:%M') }} UTC</time>{% endif %}
+      {% if m.proposed_start %}<time>{{ m.proposed_start | local(practice.timezone) }}</time>{% endif %}
       {% if m.body_text %}<p>{{ m.body_text }}</p>{% endif %}
     </li>
   {% endfor %}
 </ol>
-{% if turn %}<p class="muted">Waiting on: {{ turn.value }}</p>{% endif %}
+{% if turn %}<p class="muted">Waiting on: {{ turn.value }}. Times are in {{ practice.timezone }}.</p>{% endif %}
 {% endif %}
 
 <h2>Actions</h2>
-{# §7.1 decides what may be offered, so this page cannot offer what the core
-   would refuse -- §13.2 has required exactly that of the Telegram panel all
-   along. A form the status disallows is greyed with its reason rather than
-   removed, so the page keeps one shape and a therapist looking for cancel
-   finds out why it is not for this request instead of hunting for it. #}
-<div class="admin-actions">
-  <form method="post" action="/admin/requests/{{ req.uuid }}/approve"
-        class="card{% if 'admin_approve' in unavailable %} unavailable{% endif %}">
+{# §7.1 decides what may be offered, so this page cannot offer what the core would refuse (§13.2).
+   NP5a: what is available comes first, Approve as the primary; Reject and Cancel are the danger
+   buttons and ask "Really?" first (a `<details>`, no script); what the status does not allow is
+   folded away under its reasons rather than greying half the page. #}
+{% macro form_head(event, action, cls="") -%}
+  <form method="post" action="/admin/requests/{{ req.uuid }}/{{ action }}" class="card {{ cls }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+{%- endmacro %}
+
+{% macro card_approve() %}
+  {{ form_head("admin_approve", "approve", "primary") }}
     <h3>{{ t.approve }}</h3>
-    {% if 'admin_approve' in unavailable %}
-      <p class="why">{{ unavailable['admin_approve'] }}</p>
-    {% else %}
-      <label>Time (practice timezone; blank uses the held slot)
-        <input type="datetime-local" name="scheduled_start">
-      </label>
-      <label>{{ t.meeting_url }}<input type="text" name="meeting_url"></label>
-      <button type="submit">{{ t.approve }}</button>
-    {% endif %}
+    <label>Time <small>(practice timezone; blank uses the held slot)</small>
+      <input type="datetime-local" name="scheduled_start">
+    </label>
+    <label>{{ t.meeting_url }}<input type="text" name="meeting_url"></label>
+    <button type="submit">{{ t.approve }}</button>
   </form>
+{% endmacro %}
 
-  <form method="post" action="/admin/requests/{{ req.uuid }}/propose"
-        class="card{% if 'admin_propose' in unavailable %} unavailable{% endif %}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+{% macro card_propose() %}
+  {{ form_head("admin_propose", "propose") }}
     <h3>{{ t.propose }}</h3>
-    {% if 'admin_propose' in unavailable %}
-      <p class="why">{{ unavailable['admin_propose'] }}</p>
-    {% else %}
-      <label>Time <input type="datetime-local" name="scheduled_start"></label>
-      <label>Note <input type="text" name="body"></label>
-      <button type="submit">{{ t.propose }}</button>
-    {% endif %}
+    <label>Time <small>(practice timezone)</small> <input type="datetime-local" name="scheduled_start"></label>
+    <label>Note <input type="text" name="body"></label>
+    <button type="submit" class="secondary">{{ t.propose }}</button>
   </form>
+{% endmacro %}
 
-  <form method="post" action="/admin/requests/{{ req.uuid }}/reject"
-        class="card{% if 'admin_reject' in unavailable %} unavailable{% endif %}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <h3>{{ t.reject }}</h3>
-    {% if 'admin_reject' in unavailable %}
-      <p class="why">{{ unavailable['admin_reject'] }}</p>
-    {% else %}
-      {# Not "Reason": the answer to a request she cannot take is as often a
-         referral as a refusal, and the client reads this verbatim. #}
-      <label>Note to the client
-        <input type="text" name="reason"
-               placeholder="Another practice, another time to ask, or why not">
-      </label>
-      <button type="submit">{{ t.reject }}</button>
-    {% endif %}
-  </form>
-
-  {# §7.1's other exit from `confirmed`, and the one that keeps the booking.
-     Cancelling and rebooking loses the request, its thread and its history, and
-     asks the client to start again for something that happened to her diary. #}
-  <form method="post" action="/admin/requests/{{ req.uuid }}/reschedule"
-        class="card{% if 'admin_reschedule' in unavailable %} unavailable{% endif %}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+{# §7.1's other exit from `confirmed`, and the one that keeps the booking. #}
+{% macro card_reschedule() %}
+  {{ form_head("admin_reschedule", "reschedule") }}
     <h3>Move this session</h3>
-    {% if 'admin_reschedule' in unavailable %}
-      <p class="why">{{ unavailable['admin_reschedule'] }}</p>
-    {% else %}
-      <label>New time (practice timezone)
-        <input type="datetime-local" name="scheduled_start" required>
-      </label>
-      <label>Note to the client
-        <input type="text" name="reason"
-               placeholder="Leave empty to send your standing message">
-      </label>
-      <p class="muted">The session stays booked and the client is told both
-         times. The hour you are leaving is <strong>blocked</strong>, not put
-         back on the picker — unblock it on Slots when the day is yours again.</p>
-      <button type="submit">Move</button>
-    {% endif %}
+    <label>New time <small>(practice timezone)</small>
+      <input type="datetime-local" name="scheduled_start" required>
+    </label>
+    <label>Note to the client
+      <input type="text" name="reason" placeholder="Leave empty to send your standing message">
+    </label>
+    <p class="muted">The session stays booked and the client is told both
+       times. The hour you are leaving is <strong>blocked</strong>, not put
+       back on the picker — unblock it on Slots when the day is yours again.</p>
+    <button type="submit" class="secondary">Move</button>
   </form>
+{% endmacro %}
 
-  <form method="post" action="/admin/requests/{{ req.uuid }}/cancel"
-        class="card{% if 'admin_cancel' in unavailable %} unavailable{% endif %}">
-    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-    <h3>{{ t.cancel }}</h3>
-    {% if 'admin_cancel' in unavailable %}
-      <p class="why">{{ unavailable['admin_cancel'] }}</p>
-    {% else %}
-      <label>Reason <input type="text" name="reason"></label>
-      {# Releasing was the only behaviour and is the wrong one when the reason
-         is her own day: the hour went straight back on the picker. #}
-      <label class="choice">
-        <input type="checkbox" name="keep_slot" value="1">
-        Keep the hour off the picker
-      </label>
-      <p class="muted">Tick this when the reason is your own day. The time is
-         blocked instead of offered to somebody else.</p>
-      <button type="submit">{{ t.cancel }}</button>
-    {% endif %}
+{% macro card_reject() %}
+  {{ form_head("admin_reject", "reject") }}
+    <h3>{{ t.reject }}</h3>
+    <details class="confirm">
+      <summary class="danger">{{ t.reject }}…</summary>
+      <div class="really">
+        <p><strong>Really {{ t.reject | lower }} this request?</strong> The client is told.</p>
+        {# Not "Reason": the answer to a request she cannot take is as often a referral as a
+           refusal, and the client reads this verbatim. #}
+        <label>Anything to tell them? <small>(optional)</small>
+          <input type="text" name="reason"
+                 placeholder="Another practice, another time to ask, or why not">
+        </label>
+        <button type="submit" class="danger">Yes, {{ t.reject | lower }}</button>
+      </div>
+    </details>
   </form>
+{% endmacro %}
+
+{% macro card_cancel() %}
+  {{ form_head("admin_cancel", "cancel") }}
+    <h3>{{ t.cancel }}</h3>
+    <details class="confirm">
+      <summary class="danger">{{ t.cancel }}…</summary>
+      <div class="really">
+        <p><strong>Really cancel this session?</strong> The client is told the reason.</p>
+        <label>Reason <small>(optional)</small> <input type="text" name="reason"></label>
+        <p class="muted">Cancel puts the hour back on the picker. Cancel &amp; block keeps it off,
+           for when the reason is your own day.</p>
+        <div class="buttons">
+          <button type="submit" name="keep_slot" value="0" class="danger">Cancel</button>
+          <button type="submit" name="keep_slot" value="1" class="danger">Cancel &amp; block the hour</button>
+        </div>
+      </div>
+    </details>
+  </form>
+{% endmacro %}
+
+{% set cards = [("admin_approve", card_approve), ("admin_propose", card_propose),
+                ("admin_reschedule", card_reschedule), ("admin_reject", card_reject),
+                ("admin_cancel", card_cancel)] %}
+<div class="admin-actions">
+  {% for event, card in cards %}{% if event not in unavailable %}{{ card() }}{% endif %}{% endfor %}
 </div>
+{% if unavailable %}
+<details class="unavail">
+  <summary>Not available for this request ({{ unavailable | length }})</summary>
+  <ul>
+    {% for event, card in cards %}{% if event in unavailable %}
+      <li><strong>{{ {"admin_approve": t.approve, "admin_propose": t.propose, "admin_reject": t.reject, "admin_cancel": t.cancel, "admin_reschedule": "Move"}[event] }}.</strong>
+          <span class="why">{{ unavailable[event] }}</span></li>
+    {% endif %}{% endfor %}
+  </ul>
+</details>
+{% endif %}
 <p><a href="/admin/requests">Back to requests</a></p>
 {% endblock %}

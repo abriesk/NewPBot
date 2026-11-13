@@ -38,7 +38,7 @@
   <tbody>
   {% for r in rows %}
     <tr>
-      <td><a href="/admin/requests/{{ r.uuid }}"><code>{{ r.uuid[:8] }}</code></a></td>
+      <td><a href="/admin/requests/{{ r.uuid }}"><code>{{ r.ref }}</code></a></td>
       <td><span class="badge {{ r.status }}">{{ r.status }}</span></td>
       <td>{{ r.session_type }}</td>
       <td>{{ r.modality }}</td>

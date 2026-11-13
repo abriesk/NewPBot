@@ -3,10 +3,10 @@
 {% block content %}
 <h1>{{ t.nav_translations }}</h1>
 
-<p class="filters">
+<p class="filters" role="group" aria-label="Language">
   {% for code in languages %}
     <a href="/admin/translations?lang={{ code }}"
-       {% if lang == code %}class="on"{% endif %}>{{ code }}</a>
+       {% if lang == code %}class="on" aria-current="true"{% endif %}>{{ code | human("language") }}</a>
   {% endfor %}
 </p>
 
@@ -21,20 +21,25 @@
 {# Grouped by where the therapist sees the text (translation_groups.py). The
    grouping is presentation: the keys themselves are untouched (§15). #}
 {% for section in groups %}
-  <details class="group" {% if section.group.start_open %}open{% endif %}>
+  <details class="group" id="group-{{ section.group.slug }}" {% if section.group.start_open or open_group == section.group.slug %}open{% endif %}>
     <summary>
       {{ section.group.title }}
       <span class="count">{{ section.entries | length }}</span>
       {% if section.missing %}<span class="count todo">{{ section.missing }} to write</span>{% endif %}
     </summary>
     <p class="muted">{{ section.group.blurb }}</p>
-    <div class="scroll">
-      <table>
+    {# NP5a: one form, one Save, per group. Only the wordings that changed are written. #}
+    <form method="post" action="/admin/translations">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="lang" value="{{ lang }}">
+      <input type="hidden" name="group" value="{{ section.group.slug }}">
+      <div class="scroll">
+      <table class="wording">
         <thead>
           <tr>
-            <th>Key</th>
-            {% if lang != 'en' %}<th>English</th>{% endif %}
-            <th>{{ lang }}</th>
+            <th scope="col">Key</th>
+            {% if lang != 'en' %}<th scope="col">English</th>{% endif %}
+            <th scope="col">{{ lang | human("language") }}</th>
           </tr>
         </thead>
         <tbody>
@@ -43,20 +48,20 @@
             <td><code>{{ entry.key }}</code></td>
             {% if lang != 'en' %}<td class="reference">{{ entry.english }}</td>{% endif %}
             <td>
-              <form method="post" action="/admin/translations" class="inline">
-                <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <input type="hidden" name="lang" value="{{ lang }}">
-                <input type="hidden" name="key" value="{{ entry.key }}">
-                <input type="text" name="value" value="{{ entry.value }}"
-                       placeholder="{{ entry.english }}">
-                <button type="submit">Save</button>
-              </form>
+              <input type="text" name="value__{{ entry.key }}" value="{{ entry.value }}"
+                     aria-label="Wording of {{ entry.key }} in {{ lang | human('language') }}"
+                     placeholder="{{ entry.english }}">
             </td>
           </tr>
         {% endfor %}
         </tbody>
       </table>
-    </div>
+      </div>
+      <div class="savebar">
+        <button type="submit">Save {{ section.group.title }}</button>
+        <span class="hint">Saves every change in this group at once.</span>
+      </div>
+    </form>
   </details>
 {% endfor %}
 {% endblock %}

@@ -25,13 +25,20 @@
       Importing adds and updates what the file names. It never deletes anything the file
       leaves out, and a changed page keeps its old text in the revision history.
     </p>
-    <button type="submit" name="apply" value="0">{{ t.config_preview }}</button>
-    <button type="submit" name="apply" value="1">{{ t.config_import }}</button>
+    <button type="submit" name="apply" value="0" class="secondary">{{ t.config_preview }}</button>
+    <details class="confirm">
+      <summary class="danger">{{ t.config_import }}…</summary>
+      <div class="really">
+        <p><strong>Really import this file?</strong> It changes settings, texts and pages now.
+           Use “{{ t.config_preview }}” first to see what it would do.</p>
+        <button type="submit" name="apply" value="1" class="danger">Yes, {{ t.config_import | lower }}</button>
+      </div>
+    </details>
   </form>
 </section>
 
 {% if error %}
-  <p class="flash error">{{ error }}</p>
+  <p class="flash error" role="alert">{{ error }}</p>
 {% endif %}
 
 {% if report %}

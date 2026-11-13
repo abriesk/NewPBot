@@ -6,9 +6,13 @@
 {% if credentials_waiting %}
 <p class="notice credentials-warning">{{ t.delivery_credentials.replace("{count}", credentials_waiting|string) }}</p>
 {% endif %}
-<p class="filters">
-  {% for status, count in counts.items() %}
-    <span class="badge {{ status }}">{{ status }}: {{ count }}</span>
+{# NP5a: the counts are filters; what broke comes first. #}
+<p class="filters" role="group" aria-label="Show messages">
+  <a href="/admin/delivery"{% if not active %} class="on" aria-current="true"{% endif %}>All</a>
+  {% for status in ("dead", "failed", "pending", "sending", "sent") %}
+    <a href="/admin/delivery?status={{ status }}"
+       class="{% if active == status %}on{% endif %}{% if status in ("dead", "failed") and counts[status] %} alert{% endif %}"
+       {% if active == status %}aria-current="true"{% endif %}>{{ status | human("outbox") }} <span class="n">{{ counts[status] }}</span></a>
   {% endfor %}
 </p>
 
@@ -22,11 +26,11 @@
   {% for row in rows %}
     <tr>
       <td>{{ row.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
-      <td>{{ row.channel.value }}</td>
-      <td><code>{{ row.intent_key }}</code></td>
-      <td><span class="badge {{ row.status.value }}">{{ row.status.value }}</span></td>
+      <td>{{ row.channel.value | capitalize }}</td>
+      <td>{% if links.get(row.id) %}<a href="{{ links[row.id] }}">{{ row.intent_key | intent_label }}</a>{% else %}{{ row.intent_key | intent_label }}{% endif %}</td>
+      <td><span class="badge {{ row.status.value }}">{{ row.status.value | human("outbox") }}</span></td>
       <td>{{ row.attempts }}</td>
-      <td class="muted">{{ row.last_error or "" }}</td>
+      <td>{{ row.last_error or "" }}</td>
       <td>{% if row.status.value == "dead" and row.last_error != "client erased" %}
         <form method="post" action="/admin/delivery/{{ row.id }}/retry">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">

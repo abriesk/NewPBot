@@ -11,7 +11,7 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
     <input type="hidden" name="iana_name" value="{{ row.iana_name }}">
     <code>{{ row.iana_name }}</code>
-    <input type="text" name="display_name" value="{{ row.display_name }}">
+    <input type="text" name="display_name" value="{{ row.display_name }}" aria-label="Label for {{ row.iana_name }}">
     <label class="choice">
       <input type="checkbox" name="is_active" value="1" {% if row.is_active %}checked{% endif %}>
       active

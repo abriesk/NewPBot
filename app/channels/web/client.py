@@ -46,7 +46,6 @@ from app.core.models import (
     Slot,
     TimezoneOption,
 )
-from app.core.ref import short_ref
 from app.core.policies import (
     CLIENT_TEXT_MAX_CHARS,
     BookingPath,
@@ -55,6 +54,7 @@ from app.core.policies import (
     parse_client_time,
     resolve_booking_mode,
 )
+from app.core.ref import short_ref
 from app.core.services import booking, content, flow, notifications, waitlist
 from app.core.services import photo as photo_service
 from app.core.services.clients import (

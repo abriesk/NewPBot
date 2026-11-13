@@ -3,87 +3,94 @@
 {% block content %}
 <h1>{{ t.nav_slots }}</h1>
 
-<form method="post" action="/admin/slots/bulk" class="card">
-  <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-  <h2>{{ t.slots_bulk }}</h2>
-  {# DESIGN.md §8: the therapist enters times in her own clock. #}
-  <p class="muted">Times are in the practice timezone ({{ practice.timezone }}).</p>
-  <div class="row">
-    <label>From <input type="date" name="date_from" required></label>
-    <label>To <input type="date" name="date_to" required></label>
-  </div>
-  <fieldset>
-    <legend>Weekdays</legend>
-    {% for n, day in weekdays %}
-      <label class="choice">
-        <input type="checkbox" name="weekdays" value="{{ n }}"> {{ day }}
+{# NP5a: the list first, grouped by day; the form to open more is folded under it. #}
+<details class="create card"{% if not days %} open{% endif %}>
+  <summary>{{ t.slots_bulk }}</summary>
+  <form method="post" action="/admin/slots/bulk">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    {# DESIGN.md §8: the therapist enters times in her own clock. #}
+    <p class="muted">Times are in the practice timezone ({{ practice.timezone }}). It opens on next
+      Monday to Sunday, Monday to Friday ticked; change what you need.</p>
+    <div class="row">
+      <label>From <input type="date" name="date_from" value="{{ default_from }}" required></label>
+      <label>To <input type="date" name="date_to" value="{{ default_to }}" required></label>
+    </div>
+    <fieldset class="days">
+      <legend>Weekdays (at least one)</legend>
+      {% for n, day in weekdays %}
+        <label class="choice">
+          <input type="checkbox" name="weekdays" value="{{ n }}"{% if n < 5 %} checked{% endif %}> {{ day }}
+        </label>
+      {% endfor %}
+    </fieldset>
+    <label>Times, comma separated
+      <input type="text" name="times" placeholder="10:00, 11:00, 15:30" required>
+    </label>
+    <div class="row">
+      <label>Duration (min)
+        <input type="number" name="duration_min" value="60" min="15" step="5">
       </label>
-    {% endfor %}
-  </fieldset>
-  <label>Times, comma separated
-    <input type="text" name="times" placeholder="10:00, 11:00, 15:30" required>
-  </label>
-  <div class="row">
-    <label>Duration (min)
-      <input type="number" name="duration_min" value="60" min="15" step="5">
-    </label>
-    <label>Modality
-      <select name="modality">
-        <option value="">either</option>
-        {% for m in modalities %}<option value="{{ m }}">{{ m }}</option>{% endfor %}
-      </select>
-    </label>
-  </div>
-  <button type="submit">Create</button>
-</form>
+      <label>Modality
+        <select name="modality">
+          <option value="">Either</option>
+          {% for m in modalities %}<option value="{{ m }}">{{ m | human("modality") }}</option>{% endfor %}
+        </select>
+      </label>
+    </div>
+    <button type="submit">Create</button>
+  </form>
+</details>
 
-<h2>Upcoming</h2>
-<div class="scroll">
-<table>
-  <thead>
-    <tr><th>When</th><th>Status</th><th>Modality</th><th>Duration</th><th></th></tr>
-  </thead>
-  <tbody>
-  {% for s in rows %}
-    <tr>
-      <td>{{ s.when }}</td>
-      <td><span class="badge {{ s.status }}">{{ s.status }}</span></td>
-      <td>{{ s.modality }}</td>
-      <td>{{ s.duration }}</td>
-      <td class="admin-actions">
+<h2>Upcoming <span class="count">{{ count }}</span></h2>
+<div class="slot-days">
+{% for day in days %}
+  <section class="slot-day" aria-labelledby="day-{{ day.date.isoformat() }}">
+    <h3 id="day-{{ day.date.isoformat() }}">{{ day.label }}{% if day.today %} <span class="today">today</span>{% endif %}</h3>
+    <ul class="slots">
+    {% for s in day.slots %}
+      <li id="slot-{{ s.id }}">
+        <span class="at">{{ s.time }}</span>
+        <span class="badge {{ s.status }}">{{ s.status | human("slot") }}</span>
+        <span class="meta">{{ s.modality | human("modality") }} · {{ s.duration }} min</span>
+        <div class="admin-actions">
         {% if s.status == "available" %}
           <form method="post" action="/admin/slots/{{ s.id }}/block">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit">block</button>
+            <button type="submit" class="secondary small">Block</button>
           </form>
-          {# A request that ended still points at the time it asked for, and the
-             foreign key will not let that slot go (DESIGN.md §8). Offering
-             delete anyway is what produced a 500 on a button. #}
+          {# A request that ended still points at the time it asked for, and the foreign key will
+             not let that slot go (DESIGN.md §8). Offering delete anyway is what produced a 500 on
+             a button. #}
           {% if s.deletable %}
             <form method="post" action="/admin/slots/{{ s.id }}/delete">
               <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-              <button type="submit">delete</button>
+              <details class="confirm">
+                <summary class="danger">Delete…</summary>
+                <div class="really">
+                  <p><strong>Really delete this slot?</strong></p>
+                  <button type="submit" class="danger small">Yes, delete</button>
+                </div>
+              </details>
             </form>
           {% else %}
-            <span class="muted" title="A request asked for this time. Block it instead.">
-              asked for
-            </span>
+            <span class="meta">Cannot be deleted: a request asked for this time. Block it instead.</span>
           {% endif %}
         {% elif s.status == "blocked" %}
           <form method="post" action="/admin/slots/{{ s.id }}/unblock">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <button type="submit">unblock</button>
+            <button type="submit" class="secondary small">Unblock</button>
           </form>
         {% else %}
           {# Held or booked: blocked rather than deleted (DESIGN.md §8). #}
-          <span class="muted">in use</span>
+          <span class="meta">In use</span>
         {% endif %}
-      </td>
-    </tr>
-  {% else %}
-    <tr><td colspan="5" class="muted">No upcoming slots.</td></tr>
-  {% endfor %}
-  </tbody>
-</table>
+        </div>
+      </li>
+    {% endfor %}
+    </ul>
+  </section>
+{% else %}
+  <p class="muted">No upcoming slots. Open the form above to create some.</p>
+{% endfor %}
 </div>
 {% endblock %}

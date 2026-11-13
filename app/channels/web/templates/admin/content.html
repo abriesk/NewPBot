@@ -3,15 +3,16 @@
 {% block content %}
 <h1>{{ t.nav_content }}</h1>
 
-<p class="filters">
+<p class="filters" role="group" aria-label="Page">
   {% for topic in topics %}
     <a href="/admin/content?topic={{ topic.code }}&lang={{ lang }}"
-       {% if selected == topic.code %}class="on"{% endif %}>{{ topic.code }}</a>
+       {% if selected == topic.code %}class="on" aria-current="true"{% endif %}>{{ topic.title }}</a>
   {% endfor %}
-  &middot;
+</p>
+<p class="filters" role="group" aria-label="Language">
   {% for code in languages %}
     <a href="/admin/content?topic={{ selected }}&lang={{ code }}"
-       {% if lang == code %}class="on"{% endif %}>{{ code }}</a>
+       {% if lang == code %}class="on" aria-current="true"{% endif %}>{{ code | human("language") }}</a>
   {% endfor %}
 </p>
 
@@ -22,11 +23,11 @@
     <input type="hidden" name="lang" value="{{ lang }}">
     <input type="hidden" name="position" value="{{ block.position }}">
     <h3>Position {{ block.position }} &middot; v{{ block.version }}</h3>
-    <textarea name="body_md" rows="8" id="md-{{ block.id }}">{{ block.body_md }}</textarea>
+    <textarea name="body_md" rows="8" id="md-{{ block.id }}" aria-label="Text of block {{ block.position }}">{{ block.body_md }}</textarea>
     <label class="choice">
       <input type="checkbox" name="is_published" value="1"
              {% if block.is_published %}checked{% endif %}>
-      published
+      Published
     </label>
     <div class="admin-actions">
       <button type="submit">Save</button>
@@ -49,9 +50,9 @@
   <label>Position
     <input type="number" name="position" value="{{ blocks | length }}" min="0">
   </label>
-  <textarea name="body_md" rows="6" id="md-new"></textarea>
+  <textarea name="body_md" rows="6" id="md-new" aria-label="Text of the new block"></textarea>
   <label class="choice">
-    <input type="checkbox" name="is_published" value="1" checked> published
+    <input type="checkbox" name="is_published" value="1" checked> Published
   </label>
   <div class="admin-actions">
     <button type="submit">Add</button>

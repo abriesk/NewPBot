@@ -20,9 +20,11 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
 from typing import Any
+from urllib.parse import quote
 from uuid import UUID
 from zoneinfo import ZoneInfo
 
+import sqlalchemy as sa
 from fastapi import APIRouter, Form, Request, Response, UploadFile
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
@@ -52,6 +54,7 @@ from app.core.enums import (
     Modality,
     OutboxStatus,
     RequestStatus,
+    WaitlistStatus,
 )
 from app.core.errors import DomainError, NotFound, SlotReferenced
 from app.core.models import (
@@ -71,6 +74,7 @@ from app.core.models import (
     WaitlistEntry,
 )
 from app.core.policies import now_utc
+from app.core.ref import short_ref
 from app.core.services import booking, content, notifications, waitlist
 from app.core.services import photo as photo_service
 from app.core.services import slots as slot_service
@@ -157,6 +161,136 @@ BAD_PRICE = (
     "A price is a whole number, like 15000 for 15,000 dram. No decimal point, "
     "and no currency sign. Leave it empty for no price."
 )
+
+#: What a flash code means, in a sentence (NP5a). The redirect carries a short code in `?flash=`;
+#: this page turns it into words, and into a kind that decides how it is drawn and announced
+#: (`role="status"` for a success, `role="alert"` for an error). A text that is not a code is shown
+#: as it is: the older flashes were already sentences.
+FLASH_OK = {
+    "approve-done": "Request approved. The client has been told.",
+    "propose-done": "Time proposed. The client has been told.",
+    "reject-done": "Request rejected. The client has been told.",
+    "cancel-done": "Session cancelled. The client has been told.",
+    "reschedule-done": "Session moved. The client has been told both times.",
+    "waitlist-contacted": "Marked as contacted. Your message, if you wrote one, was sent to them.",
+    "waitlist-converted": "Marked as booked.",
+    "waitlist-closed": "Entry closed.",
+    "slot-blocked": "Slot blocked. It is no longer offered.",
+    "slot-unblocked": "Slot unblocked. It is offered again.",
+    "slot-deleted": "Slot deleted.",
+    "saved": "Saved.",
+    "restored": "Earlier version restored.",
+    "requeued": "Message queued again. It will be sent shortly.",
+    "erased": "Client erased.",
+}
+FLASH_ERROR = {
+    "refused": (
+        "That was not done: the status no longer allows it. Reload the page to see where it stands."
+    ),
+    "bad-time": (
+        "That time could not be read, so nothing was changed. Use the date and time picker, "
+        "in the practice timezone."
+    ),
+    "bad-pattern": (
+        "The pattern could not be read, so no slots were created. Check the dates, and write "
+        "the times like 10:00, 15:30."
+    ),
+    "no-weekday": "Tick at least one weekday, otherwise nothing is created. No slots were created.",
+    "empty-value-not-saved": "An empty wording was not saved. Nothing was changed.",
+    "not-an-iana-name": (
+        "That is not a timezone name. Use one like Europe/Lisbon (Region/City). Nothing was saved."
+    ),
+    "type erase to confirm": "Nothing was erased. Type the word erase in the box to confirm.",
+}
+
+
+def _flash(code: str | None) -> tuple[str, str] | None:
+    """`?flash=` -> (sentence, "ok" | "error"), or None when there is nothing to say."""
+    if not code:
+        return None
+    if code in FLASH_OK:
+        return FLASH_OK[code], "ok"
+    if code in FLASH_ERROR:
+        return FLASH_ERROR[code], "error"
+    if code.startswith("created-") and code[8:].isdecimal():
+        count = int(code[8:])
+        if count == 0:
+            return "No new slots: those times already exist, or none of the days fit.", "ok"
+        return f"Created {count} slot{'' if count == 1 else 's'}.", "ok"
+    if code.startswith("translations-"):
+        _, _, tail = code.partition("-")
+        saved, _, skipped = tail.partition("-")
+        if saved.isdecimal():
+            text = f"Saved {saved} wording{'' if saved == '1' else 's'}."
+            if skipped.isdecimal() and int(skipped):
+                text += f" {skipped} left empty and not saved."
+            return (text if int(saved) else "Nothing had changed."), "ok"
+    if code.startswith("rejected:"):
+        return "Not saved: " + code[9:].strip(), "error"
+    if code in (NO_NEW_TIME, SLOT_REFERENCED, BAD_PRICE):
+        return code, "error"
+    return code, "ok"
+
+
+#: Words for the codes the console used to print (NP5a). Kept apart per kind of thing: `pending` is
+#: a request waiting for her, but a message waiting to be sent.
+HUMAN = {
+    "request": {
+        "pending": "Pending",
+        "negotiating": "Choosing a time",
+        "confirmed": "Confirmed",
+        "rejected": "Rejected",
+        "expired": "Expired",
+        "cancelled": "Cancelled",
+        "completed": "Completed",
+    },
+    "waitlist": {
+        "new": "Waiting",
+        "contacted": "Contacted",
+        "converted": "Booked",
+        "closed": "Closed",
+    },
+    "outbox": {
+        "pending": "Queued",
+        "sending": "Sending",
+        "sent": "Sent",
+        "failed": "Failed, will retry",
+        "dead": "Gave up",
+    },
+    "slot": {"available": "Free", "held": "Held", "booked": "Booked", "blocked": "Blocked"},
+    "modality": {"online": "Online", "onsite": "On site", "either": "Either"},
+    "language": {"ru": "Русский", "hy": "Հայերեն", "en": "English"},
+    "mode": {"slots": "Clients pick a free slot", "negotiation": "Clients ask, you propose"},
+}
+
+
+def _human(value: object, kind: str) -> str:
+    text = str(getattr(value, "value", value))
+    return HUMAN.get(kind, {}).get(text, text.replace("_", " ").capitalize())
+
+
+def _intent_label(key: str) -> str:
+    """`request.proposal.client` -> `Request proposal, to the client`."""
+    parts = key.split(".")
+    audience = {"client": "to the client", "admin": "to you"}.get(parts[-1], "")
+    if audience:
+        parts.pop()
+    text = " ".join(parts).capitalize()
+    return f"{text}, {audience}" if audience else text
+
+
+def _local(value: datetime | None, zone: str) -> str:
+    if value is None:
+        return ""
+    return value.astimezone(ZoneInfo(zone)).strftime("%Y-%m-%d %H:%M")
+
+
+TEMPLATES.env.filters["human"] = _human
+TEMPLATES.env.filters["intent_label"] = _intent_label
+TEMPLATES.env.filters["local"] = _local
+
+#: The statuses that are waiting for her. The list's default view and the amber badges (NP5a).
+NEEDS_YOU = (RequestStatus.pending, RequestStatus.negotiating)
 
 #: Written as a code point rather than as itself: it is a space on screen, and a
 #: literal one here is invisible to the next person reading this line.
@@ -254,13 +388,15 @@ async def _labels(session: AsyncSession) -> dict[str, str]:
 async def _context(
     session: AsyncSession, request: Request, admin: AdminUser, **extra: Any
 ) -> dict[str, Any]:
+    flash = _flash(request.query_params.get("flash"))
     return {
         "request": request,
         "admin": admin,
         "practice": await get_practice(session),
         "t": await _labels(session),
         "csrf_token": csrf_token_for(request),
-        "flash": request.query_params.get("flash"),
+        "flash": flash[0] if flash else None,
+        "flash_kind": flash[1] if flash else "ok",
         # The dot lives in base.html, so every admin page carries it (§12.2).
         # One small file read, no queries.
         "health": read_status(),
@@ -276,9 +412,12 @@ def _render(name: str, context: dict[str, Any], status_code: int = 200) -> HTMLR
     return response
 
 
-def _back(path: str, flash: str = "") -> RedirectResponse:
-    target = f"{path}?flash={flash}" if flash else path
-    return RedirectResponse(target, status_code=303)
+def _back(path: str, flash: str = "", fragment: str = "") -> RedirectResponse:
+    """303 to `path`, carrying a flash code and optionally a `#fragment` to land on."""
+    target = path
+    if flash:
+        target += ("&" if "?" in path else "?") + "flash=" + quote(flash, safe="")
+    return RedirectResponse(target + fragment, status_code=303)
 
 
 def build_router() -> APIRouter:
@@ -360,7 +499,7 @@ def build_router() -> APIRouter:
 
     @router.get("/requests", response_class=HTMLResponse, include_in_schema=False)
     async def requests_list(
-        request: Request, status: str = "", view: str = "", start: str = ""
+        request: Request, status: str = "", view: str = "", start: str = "", q: str = ""
     ) -> Response:
         """§12.2: two views of one query, chosen by `?view=`.
 
@@ -381,12 +520,37 @@ def build_router() -> APIRouter:
                     ),
                 )
 
+            # NP5a: the list answers "what needs me", so it opens on the requests waiting for her
+            # answer (pending + negotiating); `status=all` is the whole history. A search looks
+            # through everything, because the one asked for is rarely still open.
+            q = q.strip()[:60]
             stmt = select(BookingRequest).order_by(BookingRequest.created_at.desc())
-            if status:
-                try:
-                    stmt = stmt.where(BookingRequest.status == RequestStatus(status))
-                except ValueError:
-                    pass
+            active = status
+            if q:
+                like = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+                stmt = stmt.where(
+                    or_(
+                        sa.cast(BookingRequest.uuid, sa.Text).ilike(f"{like}%", escape="\\"),
+                        BookingRequest.display_name.ilike(f"%{like}%", escape="\\"),
+                    )
+                )
+            if status == "all":
+                pass
+            elif status in {s.value for s in RequestStatus}:
+                stmt = stmt.where(BookingRequest.status == RequestStatus(status))
+            else:
+                active = ""
+                if not q:
+                    stmt = stmt.where(BookingRequest.status.in_(NEEDS_YOU))
+            tallied = dict(
+                (
+                    await session.execute(
+                        select(BookingRequest.status, func.count()).group_by(BookingRequest.status)
+                    )
+                )
+                .tuples()
+                .all()
+            )
 
             rows = (await session.execute(stmt.limit(200))).scalars().all()
             return _render(
@@ -398,7 +562,11 @@ def build_router() -> APIRouter:
                     view="list",
                     rows=await _summaries(session, rows),
                     statuses=[s.value for s in RequestStatus],
-                    active=status,
+                    counts={s.value: tallied.get(s, 0) for s in RequestStatus},
+                    needs_you=sum(tallied.get(s, 0) for s in NEEDS_YOU),
+                    everything=sum(tallied.values()),
+                    active=active,
+                    q=q,
                 ),
             )
 
@@ -509,7 +677,7 @@ def build_router() -> APIRouter:
                         session,
                         booking_request.id,
                         reason=reason or None,
-                        keep_slot=bool(keep_slot),
+                        keep_slot=keep_slot.strip().lower() in ("1", "on", "true", "yes"),
                     )
                 elif action == "reschedule":
                     if when is None:
@@ -537,26 +705,37 @@ def build_router() -> APIRouter:
                 return _back(f"/admin/requests/{uuid}", "refused")
 
             await notifications.publish(session)
-            return _back(f"/admin/requests/{uuid}", "done")
+            return _back(f"/admin/requests/{uuid}", f"{action}-done")
 
     # --- Waitlist -----------------------------------------------------------
 
     @router.get("/waitlist", response_class=HTMLResponse, include_in_schema=False)
-    async def waitlist_list(request: Request) -> Response:
+    async def waitlist_list(request: Request, status: str = "") -> Response:
         async with unit_of_work() as session:
             admin = await current_admin(session, request)
             if admin is None:
                 return _back("/admin/login")
 
-            rows = (
+            # NP5a: the people still waiting, unless she asks for another view.
+            stmt = select(WaitlistEntry).order_by(WaitlistEntry.created_at.desc())
+            if status == "all":
+                active = "all"
+            elif status in {s.value for s in WaitlistStatus} and status != "new":
+                active = status
+                stmt = stmt.where(WaitlistEntry.status == WaitlistStatus(status))
+            else:
+                active = ""
+                stmt = stmt.where(WaitlistEntry.status == WaitlistStatus.new)
+            tallied = dict(
                 (
                     await session.execute(
-                        select(WaitlistEntry).order_by(WaitlistEntry.created_at.desc()).limit(200)
+                        select(WaitlistEntry.status, func.count()).group_by(WaitlistEntry.status)
                     )
                 )
-                .scalars()
+                .tuples()
                 .all()
             )
+            rows = (await session.execute(stmt.limit(200))).scalars().all()
             found = await identities_for_many(session, [row.client_id for row in rows])
             identities = {
                 str(row.client_id): _identity_contacts(found.get(row.client_id, [])) for row in rows
@@ -568,7 +747,9 @@ def build_router() -> APIRouter:
                     request,
                     admin,
                     rows=rows,
-                    actions=("contacted", "converted", "closed"),
+                    active=active,
+                    counts={s.value: tallied.get(s, 0) for s in WaitlistStatus},
+                    everything=sum(tallied.values()),
                     identities=identities,
                 ),
             )
@@ -601,7 +782,7 @@ def build_router() -> APIRouter:
             except DomainError:
                 return _back("/admin/waitlist", "refused")
             await notifications.publish(session)
-            return _back("/admin/waitlist", "done")
+            return _back("/admin/waitlist", f"waitlist-{action}")
 
     # --- Slots --------------------------------------------------------------
 
@@ -644,25 +825,45 @@ def build_router() -> APIRouter:
                 .all()
             )
 
+            # NP5a: the list comes first and is grouped by day; the form below it opens on next
+            # Monday to Sunday with the working week ticked.
+            today = datetime.now(zone).date()
+            next_monday = today + timedelta(days=7 - today.weekday())
+            days: list[dict[str, Any]] = []
+            for s in rows:
+                local = s.starts_at.astimezone(zone)
+                if not days or days[-1]["date"] != local.date():
+                    days.append(
+                        {
+                            "date": local.date(),
+                            "label": f"{local:%a} {local.day} {local:%b}",
+                            "today": local.date() == today,
+                            "slots": [],
+                        }
+                    )
+                days[-1]["slots"].append(
+                    {
+                        "id": s.id,
+                        "time": local.strftime("%H:%M"),
+                        "status": s.status.value,
+                        "modality": s.modality.value if s.modality else "either",
+                        "duration": s.duration_min,
+                        "deletable": s.id not in referenced,
+                    }
+                )
+
             return _render(
                 "admin/slots.html",
                 await _context(
                     session,
                     request,
                     admin,
-                    rows=[
-                        {
-                            "id": s.id,
-                            "when": s.starts_at.astimezone(zone).strftime("%Y-%m-%d %H:%M"),
-                            "status": s.status.value,
-                            "modality": s.modality.value if s.modality else "either",
-                            "duration": s.duration_min,
-                            "deletable": s.id not in referenced,
-                        }
-                        for s in rows
-                    ],
+                    days=days,
+                    count=len(rows),
                     modalities=[m.value for m in Modality],
                     weekdays=list(enumerate(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))),
+                    default_from=next_monday.isoformat(),
+                    default_to=(next_monday + timedelta(days=6)).isoformat(),
                 ),
             )
 
@@ -685,6 +886,9 @@ def build_router() -> APIRouter:
             admin = await current_admin(session, request)
             if admin is None:
                 return _back("/admin/login")
+
+            if not weekdays:
+                return _back("/admin/slots", "no-weekday")
 
             try:
                 pattern = SlotPattern(
@@ -730,11 +934,16 @@ def build_router() -> APIRouter:
                 else:
                     return Response(status_code=404)
             except SlotReferenced:
-                return _back("/admin/slots", SLOT_REFERENCED)
+                return _back("/admin/slots", SLOT_REFERENCED, f"#slot-{slot_id}")
             except DomainError:
                 # A held or booked slot is blocked, not deleted (DESIGN.md §8).
-                return _back("/admin/slots", "refused")
-            return _back("/admin/slots", "done")
+                return _back("/admin/slots", "refused", f"#slot-{slot_id}")
+            # Land on the row she touched; a deleted one is gone, so the top of the list.
+            return _back(
+                "/admin/slots",
+                f"slot-{action}ed" if action != "block" else "slot-blocked",
+                "" if action == "delete" else f"#slot-{slot_id}",
+            )
 
     # --- Content ------------------------------------------------------------
 
@@ -763,7 +972,16 @@ def build_router() -> APIRouter:
                     session,
                     request,
                     admin,
-                    topics=topics,
+                    topics=[
+                        {
+                            "code": t.code,
+                            "title": await _stored_text(
+                                session, LOCALE, f"content.topic.{t.code}.title"
+                            )
+                            or t.code.replace("_", " ").capitalize(),
+                        }
+                        for t in topics
+                    ],
                     selected=selected,
                     lang=lang if lang in LANGUAGES else "ru",
                     languages=LANGUAGES,
@@ -903,7 +1121,7 @@ def build_router() -> APIRouter:
     # --- Translations -------------------------------------------------------
 
     @router.get("/translations", response_class=HTMLResponse, include_in_schema=False)
-    async def translations_page(request: Request, lang: str = "ru") -> Response:
+    async def translations_page(request: Request, lang: str = "ru", open: str = "") -> Response:
         async with unit_of_work() as session:
             admin = await current_admin(session, request)
             if admin is None:
@@ -944,6 +1162,7 @@ def build_router() -> APIRouter:
                     request,
                     admin,
                     groups=arrange(entries),
+                    open_group=open,
                     lang=chosen,
                     languages=LANGUAGES,
                     missing=missing,
@@ -954,10 +1173,13 @@ def build_router() -> APIRouter:
     async def translations_save(
         request: Request,
         lang: str = Form(...),
-        key: str = Form(...),
+        key: str = Form(""),
         value: str = Form(""),
+        group: str = Form(""),
         csrf_token: str = Form("", alias=CSRF_FIELD),
     ) -> Response:
+        """One wording (`key` + `value`) or, from the page, one whole group (`value__<key>` fields,
+        NP5a): only the ones that changed are written."""
         if not csrf_ok(request, csrf_token):
             return Response(status_code=403)
 
@@ -968,6 +1190,40 @@ def build_router() -> APIRouter:
 
             if lang not in LANGUAGES:
                 return Response(status_code=400)
+            if not key:
+                fields = {
+                    name[7:]: str(text)
+                    for name, text in (await request.form()).multi_items()
+                    if name.startswith("value__")
+                }
+                stored = dict(
+                    (
+                        await session.execute(
+                            select(Translation.key, Translation.value).where(
+                                Translation.lang == lang, Translation.key.in_(list(fields))
+                            )
+                        )
+                    )
+                    .tuples()
+                    .all()
+                )
+                saved = skipped = 0
+                for name, text in fields.items():
+                    if text == stored.get(name, ""):
+                        continue
+                    try:
+                        await set_text(session, lang, name, text)
+                    except ValueError:
+                        skipped += 1
+                        continue
+                    saved += 1
+                invalidate_cache()
+                return _back(
+                    f"/admin/translations?lang={lang}"
+                    + (f"&open={quote(group, safe='')}" if group else ""),
+                    f"translations-{saved}-{skipped}",
+                    f"#group-{quote(group, safe='')}" if group else "",
+                )
             try:
                 await set_text(session, lang, key, value)
             except ValueError:
@@ -1205,7 +1461,7 @@ def build_router() -> APIRouter:
     # --- Delivery -----------------------------------------------------------
 
     @router.get("/delivery", response_class=HTMLResponse, include_in_schema=False)
-    async def delivery_page(request: Request) -> Response:
+    async def delivery_page(request: Request, status: str = "") -> Response:
         """§12.2: recent outbox messages and failures, so "did she get my
         message?" is answerable (DESIGN.md §15)."""
         async with unit_of_work() as session:
@@ -1213,15 +1469,31 @@ def build_router() -> APIRouter:
             if admin is None:
                 return _back("/admin/login")
 
+            # NP5a: the counts are filters, and what failed comes first.
+            stmt = select(OutboxMessage)
+            active = ""
+            if status in {s.value for s in OutboxStatus}:
+                active = status
+                stmt = stmt.where(OutboxMessage.status == OutboxStatus(status))
+            broken = OutboxMessage.status.in_([OutboxStatus.dead, OutboxStatus.failed])
             rows = (
                 (
                     await session.execute(
-                        select(OutboxMessage).order_by(OutboxMessage.created_at.desc()).limit(100)
+                        stmt.order_by(
+                            sa.case((broken, 0), else_=1), OutboxMessage.created_at.desc()
+                        ).limit(100)
                     )
                 )
                 .scalars()
                 .all()
             )
+            links: dict[int, str] = {}
+            for row in rows:
+                ref = (row.payload or {}).get("uuid")
+                if ref and row.intent_key.startswith("request."):
+                    links[row.id] = f"/admin/requests/{ref}"
+                elif ref and row.intent_key.startswith("waitlist."):
+                    links[row.id] = "/admin/waitlist?status=all"
             # .tuples() so this is a sequence of real tuples rather than Rows,
             # which dict() accepts and the type checker understands.
             tallied: dict[OutboxStatus, int] = dict(
@@ -1256,6 +1528,8 @@ def build_router() -> APIRouter:
                     admin,
                     rows=rows,
                     credentials_waiting=credentials_waiting,
+                    active=active,
+                    links=links,
                     counts={s.value: tallied.get(s, 0) for s in OutboxStatus},
                 ),
             )
@@ -1954,6 +2228,7 @@ def _summary_row(
 
     return {
         "uuid": str(request.uuid),
+        "ref": short_ref(request.uuid),
         "status": request.status.value,
         "session_type": session_type,
         "modality": request.modality.value,
