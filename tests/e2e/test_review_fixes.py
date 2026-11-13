@@ -5,27 +5,29 @@ Each is one sentence of docs/REVIEW.md with the test it asked for.
 
 from __future__ import annotations
 
-from collections.abc import AsyncIterator, Iterator
+from collections.abc import Iterator
 from typing import Any
 
 import pytest
-import pytest_asyncio
 from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.channels.base import Action
-from app.channels.telegram import keyboards as kb
 from app.channels.telegram.router import Update, handle
 from app.channels.telegram.router import _admin_request as router_admin_request
-from app.core.enums import Channel, OutboxStatus, TokenPurpose
-from app.core.models import AuthToken, OutboxMessage
-from app.core.services.clients import erase_client, resolve_client
+from app.core.enums import Channel, OutboxStatus
+from app.core.models import OutboxMessage
+from app.core.services.clients import erase_client
 from app.core.services.notifications import purge_payload
 from app.main import create_app
 from app.render.messages import render
 from app.worker.transports import build_transports
-from tests.channels.test_telegram_flow import CHAT, _admin_request, _book_and_return_to_menu  # noqa: F401
+from tests.channels.test_telegram_flow import (
+    CHAT,
+    _admin_request,
+    _book_and_return_to_menu,
+)
 from tests.e2e.test_admin_web import _csrf, _sign_in
 
 
@@ -125,7 +127,9 @@ async def test_client_text_is_escaped_in_my_appointments(
     request.desired_time_text = "<3 next week"
     await db.flush()
 
-    reply = await handle(db, Update(chat_id=CHAT, text=await get_text(db, "ru", "menu.appointments")))
+    reply = await handle(
+        db, Update(chat_id=CHAT, text=await get_text(db, "ru", "menu.appointments"))
+    )
     assert reply is not None
     assert "&lt;3 next week" in reply.text
     assert "<3 next" not in reply.text
@@ -153,7 +157,10 @@ async def test_the_admin_request_screen_is_split_under_4096(
 
 def test_a_bad_tz_or_modality_is_a_400_not_a_500(web: TestClient) -> None:
     web.get("/book")
-    assert web.get("/book/slots", params={"tz": "Nowhere/Land", "session_type_id": 1}).status_code == 200
+    assert (
+        web.get("/book/slots", params={"tz": "Nowhere/Land", "session_type_id": 1}).status_code
+        == 200
+    )
     assert web.get("/book/slots", params={"modality": "bogus"}).status_code == 400
     for data in ({"tz": "Nowhere/Land"}, {"modality": "bogus"}):
         response = web.post(

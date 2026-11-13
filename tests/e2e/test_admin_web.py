@@ -940,9 +940,7 @@ def _day_sections(html: str) -> list[str]:
 
 def _columns(html: str) -> list[str]:
     """The day headings the grid rendered, in order."""
-    return [
-        section.split("</h3>")[0].split("<h3>")[-1].strip() for section in _day_sections(html)
-    ]
+    return [section.split("</h3>")[0].split("<h3>")[-1].strip() for section in _day_sections(html)]
 
 
 def _column_holding(html: str, uuid: object) -> str | None:
@@ -1831,9 +1829,7 @@ async def test_a_client_row_counts_their_bookings_and_finds_both_ends_of_them(
                 scheduled_start=when,
                 # §6.5: a confirmed row must carry both, and the check
                 # constraint is right to insist.
-                confirmed_at=datetime.now(UTC)
-                if status is RequestStatus.confirmed
-                else None,
+                confirmed_at=datetime.now(UTC) if status is RequestStatus.confirmed else None,
             )
         )
     await db.flush()
@@ -1992,7 +1988,7 @@ async def test_the_request_count_is_a_way_into_the_requests(
 
     listing = web.get("/admin/clients")
     assert listing.status_code == 200
-    assert f'/admin/clients/{scratch["client_id"]}#requests' in listing.text
+    assert f"/admin/clients/{scratch['client_id']}#requests" in listing.text
 
     detail = web.get(f"/admin/clients/{scratch['client_id']}")
     assert 'id="requests"' in detail.text, "the anchor the count lands on"
@@ -2070,7 +2066,7 @@ async def test_deleting_a_slot_a_finished_request_asked_for_is_refused_not_a_500
 
     page = web.get("/admin/slots")
     assert page.status_code == 200
-    assert f'/admin/slots/{slot_id}/delete' not in page.text, "the button must not be offered"
+    assert f"/admin/slots/{slot_id}/delete" not in page.text, "the button must not be offered"
 
     response = web.post(
         f"/admin/slots/{slot_id}/delete",
@@ -2329,9 +2325,7 @@ async def test_a_language_left_empty_writes_no_row(
         keys = (
             (
                 await committed.execute(
-                    select(Translation.lang).where(
-                        Translation.key == "booking.type.halfnamed"
-                    )
+                    select(Translation.lang).where(Translation.key == "booking.type.halfnamed")
                 )
             )
             .scalars()

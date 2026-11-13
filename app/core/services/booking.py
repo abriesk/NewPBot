@@ -40,6 +40,7 @@ from zoneinfo import ZoneInfo
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core import events
 from app.core.enums import (
     ActorType,
     Channel,
@@ -58,7 +59,6 @@ from app.core.errors import (
     RateLimited,
     SlotUnavailable,
 )
-from app.core import events
 from app.core.events import (
     RequestAccepted,
     RequestCancelled,
@@ -312,9 +312,7 @@ async def queue_for_admin(
     rows = (
         await session.execute(
             select(BookingRequest)
-            .where(
-                BookingRequest.status.in_((RequestStatus.pending, RequestStatus.negotiating))
-            )
+            .where(BookingRequest.status.in_((RequestStatus.pending, RequestStatus.negotiating)))
             .order_by(BookingRequest.created_at.desc(), BookingRequest.id.desc())
             .offset(offset)
             .limit(limit)
@@ -441,9 +439,7 @@ async def unscheduled_for_admin(session: AsyncSession, *, limit: int = 20) -> li
     ]
 
 
-async def taken_hours_on(
-    session: AsyncSession, *, day: date, tz: str
-) -> frozenset[int]:
+async def taken_hours_on(session: AsyncSession, *, day: date, tz: str) -> frozenset[int]:
     """§13.2: the local hours of `day` the therapist cannot be offered.
 
     A confirmed or completed session starting in the hour, or a slot in it she
@@ -1245,9 +1241,7 @@ async def client_counter(
     return request
 
 
-async def client_note(
-    session: AsyncSession, request_id: int, *, body_text: str
-) -> BookingRequest:
+async def client_note(session: AsyncSession, request_id: int, *, body_text: str) -> BookingRequest:
     """§7.1: the client adds information. The status does not move.
 
     Allowed while the therapist can still act on what it says, and refused once
@@ -1439,9 +1433,7 @@ async def _move_reminders(session: AsyncSession, request: BookingRequest) -> Non
         state = ReminderState.skipped if already_past else ReminderState.scheduled
         if reminder is None:
             session.add(
-                Reminder(
-                    request_id=request.id, offset_min=offset, due_at=due_at, state=state
-                )
+                Reminder(request_id=request.id, offset_min=offset, due_at=due_at, state=state)
             )
             continue
         reminder.due_at = due_at

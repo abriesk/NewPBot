@@ -104,9 +104,7 @@ async def test_a_submission_names_the_time_it_is_asking_about(
     for key in ("request.submitted.admin", "request.submitted.client"):
         rows = await _rows(db, key)
         assert rows
-        assert all(
-            row.payload["time"] == future_slot.starts_at.isoformat() for row in rows
-        ), key
+        assert all(row.payload["time"] == future_slot.starts_at.isoformat() for row in rows), key
 
 
 async def test_a_note_reaches_telegram_with_what_it_says(

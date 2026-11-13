@@ -96,7 +96,7 @@ def test_a_guide_fetches_nothing_from_the_network(lang: str) -> None:
     """Self-contained, like every other admin page: no CDN, no web font."""
     text = help_guide(lang)
 
-    for forbidden in ("<script src", "<link rel=\"stylesheet\"", "@import", "<iframe"):
+    for forbidden in ("<script src", '<link rel="stylesheet"', "@import", "<iframe"):
         assert forbidden not in text, f"{lang} guide pulls in {forbidden}"
 
 

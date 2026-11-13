@@ -80,9 +80,7 @@ async def render(
         # written, because only here is the client's own language known -- the
         # whole reason it is a translation key and not a settings field. A
         # session that moves with no word at all is the thing it prevents.
-        lines.append(
-            await get_text(session, locale, "intent.request.rescheduled.client.default")
-        )
+        lines.append(await get_text(session, locale, "intent.request.rescheduled.client.default"))
 
     lines.extend(await _join_lines(session, intent_key, payload, locale, channel, fmt))
 
@@ -286,9 +284,7 @@ async def _actions(
             # an intent with actions and no request is not worth a keyboard.
             if request_id is None:
                 continue
-            actions.append(
-                Action(key=key, label=label, callback_data=f"{key}:{request_id}")
-            )
+            actions.append(Action(key=key, label=label, callback_data=f"{key}:{request_id}"))
         else:
             url = payload.get(_ACTION_URL_FIELDS.get(key, ""))
             if key in _ACTION_URL_REQUIRED and not url:

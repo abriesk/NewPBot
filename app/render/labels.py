@@ -51,7 +51,11 @@ def price_text(session_type: SessionType) -> str:
     if session_type.price_amount_minor is None:
         return ""
     amount = f"{session_type.price_amount_minor:,}".replace(",", "\u00a0")
-    return f"{amount}\u00a0{session_type.price_currency}".strip() if session_type.price_currency else amount
+    return (
+        f"{amount}\u00a0{session_type.price_currency}".strip()
+        if session_type.price_currency
+        else amount
+    )
 
 
 __all__ = ["price_text", "session_type_name"]

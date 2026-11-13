@@ -13,9 +13,7 @@ from app.seed import load_locale_catalogue
 def test_every_key_in_the_catalogue_has_a_group() -> None:
     """A key no group claims would vanish off the page rather than appear
     ungrouped, which is a worse failure than an ugly heading."""
-    homeless = sorted(
-        key for key in load_locale_catalogue()["en"] if group_for(key) is OTHER
-    )
+    homeless = sorted(key for key in load_locale_catalogue()["en"] if group_for(key) is OTHER)
     assert not homeless, f"no group claims: {homeless}"
 
 

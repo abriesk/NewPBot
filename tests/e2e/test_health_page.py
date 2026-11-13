@@ -193,9 +193,7 @@ def test_the_status_page_says_what_to_do(web: TestClient, state: Path) -> None:
     assert "Call whoever runs your server" in page.text
 
 
-def test_a_healthy_status_page_says_there_is_nothing_to_do(
-    web: TestClient, state: Path
-) -> None:
+def test_a_healthy_status_page_says_there_is_nothing_to_do(web: TestClient, state: Path) -> None:
     _write(state)
     _sign_in(web)
 

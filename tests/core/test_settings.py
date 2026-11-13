@@ -109,9 +109,7 @@ async def test_the_captcha_difficulty_is_bounded(db: AsyncSession) -> None:
 
 
 async def test_update_settings_stores_the_cleaned_links(db: AsyncSession) -> None:
-    await update_settings(
-        db, social_links=[{"label": " Telegram ", "url": "https://t.me/example"}]
-    )
+    await update_settings(db, social_links=[{"label": " Telegram ", "url": "https://t.me/example"}])
     practice = await get_practice(db)
     assert practice.social_links == [{"label": "Telegram", "url": "https://t.me/example"}]
 

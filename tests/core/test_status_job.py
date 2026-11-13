@@ -117,9 +117,7 @@ async def test_no_partial_file_is_left_behind(state_dir: Path) -> None:
     assert leftovers == []
 
 
-async def test_the_job_never_raises(
-    state_dir: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+async def test_the_job_never_raises(state_dir: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """§16.8: a status job that stopped writing would be indistinguishable from
     a dead worker, and would raise a false alarm about itself."""
 

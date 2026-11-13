@@ -478,9 +478,7 @@ async def test_no_other_intent_attaches_anything(db: AsyncSession) -> None:
 
 async def test_an_online_session_names_no_meeting_room(db: AsyncSession) -> None:
     """§13.5: the join link must not ride out inside the file either."""
-    message = await _confirmed(
-        db, Channel.email, join_url="https://meet.example.test/private-room"
-    )
+    message = await _confirmed(db, Channel.email, join_url="https://meet.example.test/private-room")
 
     ics = message.attachments[0].content
     assert "meet.example.test" not in ics

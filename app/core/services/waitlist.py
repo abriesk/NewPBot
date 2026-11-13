@@ -171,9 +171,7 @@ async def close_entry(
     )
 
 
-async def recent(
-    session: AsyncSession, *, limit: int = 5, offset: int = 0
-) -> list[WaitlistEntry]:
+async def recent(session: AsyncSession, *, limit: int = 5, offset: int = 0) -> list[WaitlistEntry]:
     """§13.2: the waitlist as the phone panel reads it -- newest first."""
     rows = (
         await session.execute(
@@ -195,9 +193,7 @@ async def count_open(session: AsyncSession) -> int:
             await session.execute(
                 select(func.count())
                 .select_from(WaitlistEntry)
-                .where(
-                    WaitlistEntry.status.in_((WaitlistStatus.new, WaitlistStatus.contacted))
-                )
+                .where(WaitlistEntry.status.in_((WaitlistStatus.new, WaitlistStatus.contacted)))
             )
         ).scalar_one()
     )

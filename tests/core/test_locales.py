@@ -145,7 +145,9 @@ def test_no_armenian_value_ends_in_a_latin_colon() -> None:
 def test_one_voice_in_armenian_and_the_word_for_a_request_in_russian() -> None:
     """NP4a: she speaks in the first person ("Խնդրում եմ", not "Խնդրում ենք"); ru says "заявка", never "запрос"."""
     assert not [k for k, v in CATALOGUE["hy"].items() if "Խնդրում ենք" in v]
-    assert not [k for k, v in CATALOGUE["ru"].items() if "запрос" in v.lower().replace("запросите", "")]
+    assert not [
+        k for k, v in CATALOGUE["ru"].items() if "запрос" in v.lower().replace("запросите", "")
+    ]
 
 
 def _literal_get_text_calls() -> list[tuple[str, str, int, frozenset[str]]]:
@@ -167,7 +169,9 @@ def _literal_get_text_calls() -> list[tuple[str, str, int, frozenset[str]]]:
                 continue
             if any(k.arg is None for k in node.keywords):  # **fmt: not checkable statically
                 continue
-            found.append((path.name, key.value, node.lineno, frozenset(k.arg for k in node.keywords)))
+            found.append(
+                (path.name, key.value, node.lineno, frozenset(k.arg for k in node.keywords))
+            )
     return found
 
 
@@ -188,5 +192,7 @@ def test_a_text_and_every_call_that_formats_it_agree_on_their_placeholders() -> 
                 continue
             placeholders = set(PLACEHOLDER.findall(text))
             if placeholders != set(kwargs - HARMLESS_EXTRA_ARGUMENTS.get(key, frozenset())):
-                problems.append(f"{where}:{line} {key} [{lang}] text {sorted(placeholders)} vs call {sorted(kwargs)}")
+                problems.append(
+                    f"{where}:{line} {key} [{lang}] text {sorted(placeholders)} vs call {sorted(kwargs)}"
+                )
     assert not problems, "\n".join(problems)

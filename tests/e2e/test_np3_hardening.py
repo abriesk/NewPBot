@@ -17,8 +17,8 @@ from datetime import UTC, datetime, timedelta
 import pytest
 import time_machine
 from fastapi.testclient import TestClient
-from starlette.requests import Request
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.requests import Request
 
 from app.channels.web import ratelimit
 from app.channels.web.security import ADMIN_COOKIE, CSRF_COOKIE
@@ -145,7 +145,7 @@ async def test_argon2_verify_runs_off_the_event_loop(
     seen: list[int] = []
     original = PasswordHasher.verify
 
-    def spy(self: PasswordHasher, hash: str | bytes, password: str | bytes) -> bool:  # noqa: A002
+    def spy(self: PasswordHasher, hash: str | bytes, password: str | bytes) -> bool:
         seen.append(threading.get_ident())
         return original(self, hash, password)
 
@@ -256,9 +256,7 @@ def test_security_headers_are_on_every_response(web: TestClient, path: str) -> N
 # --- F18: /readyz -------------------------------------------------------------
 
 
-def test_readyz_names_no_exception_class(
-    web: TestClient, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_readyz_names_no_exception_class(web: TestClient, monkeypatch: pytest.MonkeyPatch) -> None:
     class DatabaseExploded(Exception):
         pass
 
@@ -333,8 +331,13 @@ def test_healthz_is_not_in_the_access_log() -> None:
 
     def record(path: str) -> logging.LogRecord:
         return logging.LogRecord(
-            "uvicorn.access", logging.INFO, __file__, 1, '%s - "%s %s HTTP/%s" %d',
-            ("192.0.2.1:1", "GET", path, "1.1", 200), None,
+            "uvicorn.access",
+            logging.INFO,
+            __file__,
+            1,
+            '%s - "%s %s HTTP/%s" %d',
+            ("192.0.2.1:1", "GET", path, "1.1", 200),
+            None,
         )
 
     assert access.filter(record("/healthz")) is False
@@ -356,7 +359,7 @@ async def test_no_more_than_two_argon2_verifies_run_at_once() -> None:
     peak = 0
     finished = 0
 
-    def fake_verify(self: PasswordHasher, hash: str | bytes, password: str | bytes) -> bool:  # noqa: A002
+    def fake_verify(self: PasswordHasher, hash: str | bytes, password: str | bytes) -> bool:
         nonlocal running, peak, finished
         with lock:
             running += 1
@@ -381,9 +384,7 @@ async def test_no_more_than_two_argon2_verifies_run_at_once() -> None:
     assert peak <= 2
 
 
-def test_a_csrf_token_is_refreshed_before_it_runs_out(
-    web: TestClient, admin_password: str
-) -> None:
+def test_a_csrf_token_is_refreshed_before_it_runs_out(web: TestClient, admin_password: str) -> None:
     web.get("/admin/login")
     first = web.cookies.get(CSRF_COOKIE, "")
     assert first
@@ -419,7 +420,7 @@ def test_a_send_ends_before_postgres_ends_the_idle_transaction() -> None:
 
     assert SEND_TIMEOUT_SECONDS == 45
     transport = TelegramTransport(settings=settings())
-    assert transport._bot.session.timeout == 45  # noqa: SLF001
+    assert transport._bot.session.timeout == 45
 
 
 def test_migrations_lift_the_timeouts() -> None:
@@ -477,7 +478,7 @@ async def test_unknown_user_logins_hash_the_dummy_once_and_never_more_than_two_a
             state["hashes"] += 1
         return "$argon2id$fake"
 
-    def fake_verify(self: PasswordHasher, hash: str | bytes, password: str | bytes) -> bool:  # noqa: A002
+    def fake_verify(self: PasswordHasher, hash: str | bytes, password: str | bytes) -> bool:
         work()
         return True
 

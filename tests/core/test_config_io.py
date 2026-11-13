@@ -143,10 +143,14 @@ async def test_an_unchanged_block_writes_no_revision(db: AsyncSession) -> None:
     await db.refresh(block)
     assert block.version == version_before
     revisions = (
-        await db.execute(
-            select(ContentBlockRevision).where(ContentBlockRevision.block_id == block.id)
+        (
+            await db.execute(
+                select(ContentBlockRevision).where(ContentBlockRevision.block_id == block.id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     assert [r.version for r in revisions] == []
 
 
@@ -157,8 +161,14 @@ async def test_a_changed_block_keeps_its_previous_body_as_a_revision(db: AsyncSe
 
     payload = await export_config(db)
     _find_topic(payload, TOPIC)["blocks"] = [
-        {"lang": "ru", "position": 0, "kind": "text", "body_md": "Вторая версия.",
-         "link_url": None, "is_published": True}
+        {
+            "lang": "ru",
+            "position": 0,
+            "kind": "text",
+            "body_md": "Вторая версия.",
+            "link_url": None,
+            "is_published": True,
+        }
     ]
 
     report = await import_config(db, payload, apply=True)
@@ -188,9 +198,15 @@ async def test_import_applies_what_the_file_names(db: AsyncSession) -> None:
     payload["practice"]["slot_hold_minutes"] = 42
     payload["practice"]["booking_mode"] = BookingMode.negotiation.value
     payload["session_types"].append(
-        {"code": "supervision", "duration_min": 90, "price_amount_minor": None,
-         "price_currency": None, "price_display_override": None,
-         "is_active": True, "sort_order": 7}
+        {
+            "code": "supervision",
+            "duration_min": 90,
+            "price_amount_minor": None,
+            "price_currency": None,
+            "price_display_override": None,
+            "is_active": True,
+            "sort_order": 7,
+        }
     )
 
     report = await import_config(db, payload, apply=True)
@@ -216,9 +232,7 @@ async def test_import_never_deletes_what_the_file_leaves_out(db: AsyncSession) -
 
     await import_config(db, payload, apply=True)
 
-    surviving = set(
-        (await db.execute(select(SessionType.code))).scalars().all()
-    )
+    surviving = set((await db.execute(select(SessionType.code))).scalars().all())
     assert codes <= surviving
     assert (await db.execute(select(ContentTopic.code))).scalars().all()
 
@@ -232,10 +246,22 @@ async def test_a_new_topic_arrives_with_its_blocks(db: AsyncSession) -> None:
             "show_in_menu": True,
             "is_active": True,
             "blocks": [
-                {"lang": "ru", "position": 0, "kind": "text", "body_md": "Текст.",
-                 "link_url": None, "is_published": True},
-                {"lang": "hy", "position": 0, "kind": "text", "body_md": "Տեքստ։",
-                 "link_url": None, "is_published": True},
+                {
+                    "lang": "ru",
+                    "position": 0,
+                    "kind": "text",
+                    "body_md": "Текст.",
+                    "link_url": None,
+                    "is_published": True,
+                },
+                {
+                    "lang": "hy",
+                    "position": 0,
+                    "kind": "text",
+                    "body_md": "Տեքստ։",
+                    "link_url": None,
+                    "is_published": True,
+                },
             ],
         }
     )
@@ -354,8 +380,14 @@ async def test_amharic_cannot_enter_through_an_import(db: AsyncSession) -> None:
 async def test_a_block_in_an_unknown_language_is_refused(db: AsyncSession) -> None:
     payload = await export_config(db)
     _find_topic(payload, TOPIC)["blocks"] = [
-        {"lang": "am", "position": 0, "kind": "text", "body_md": "x",
-         "link_url": None, "is_published": True}
+        {
+            "lang": "am",
+            "position": 0,
+            "kind": "text",
+            "body_md": "x",
+            "link_url": None,
+            "is_published": True,
+        }
     ]
 
     with pytest.raises(ConfigInvalid, match="unknown language"):
@@ -382,9 +414,14 @@ async def test_markdown_outside_the_subset_is_refused(db: AsyncSession) -> None:
     """The same validation the editor applies at save time (§11.1)."""
     payload = await export_config(db)
     _find_topic(payload, TOPIC)["blocks"] = [
-        {"lang": "ru", "position": 0, "kind": "text",
-         "body_md": "| a | b |\n|---|---|\n| 1 | 2 |",
-         "link_url": None, "is_published": True}
+        {
+            "lang": "ru",
+            "position": 0,
+            "kind": "text",
+            "body_md": "| a | b |\n|---|---|\n| 1 | 2 |",
+            "link_url": None,
+            "is_published": True,
+        }
     ]
 
     with pytest.raises(ConfigInvalid, match="table"):
@@ -394,10 +431,22 @@ async def test_markdown_outside_the_subset_is_refused(db: AsyncSession) -> None:
 async def test_two_blocks_claiming_one_position_are_refused(db: AsyncSession) -> None:
     payload = await export_config(db)
     _find_topic(payload, TOPIC)["blocks"] = [
-        {"lang": "ru", "position": 0, "kind": "text", "body_md": "Один.",
-         "link_url": None, "is_published": True},
-        {"lang": "ru", "position": 0, "kind": "text", "body_md": "Два.",
-         "link_url": None, "is_published": True},
+        {
+            "lang": "ru",
+            "position": 0,
+            "kind": "text",
+            "body_md": "Один.",
+            "link_url": None,
+            "is_published": True,
+        },
+        {
+            "lang": "ru",
+            "position": 0,
+            "kind": "text",
+            "body_md": "Два.",
+            "link_url": None,
+            "is_published": True,
+        },
     ]
 
     with pytest.raises(ConfigInvalid, match="two blocks"):

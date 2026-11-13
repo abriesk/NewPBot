@@ -836,9 +836,7 @@ async def _ask_modality(session: AsyncSession, client: Client) -> Reply:
     """
     practice = await get_practice(session)
     if practice.online_only:
-        await flow.remember(
-            session, client.id, Channel.telegram, modality=Modality.online.value
-        )
+        await flow.remember(session, client.id, Channel.telegram, modality=Modality.online.value)
         reply = await _ask_session_type(session, client)
         # The question is gone but the answer is still online, and this is the
         # client who was never given the chance to ask about it (§13.1).
@@ -987,7 +985,10 @@ async def _contact_email(session: AsyncSession, client: Client, address: str) ->
     await flow.remember(session, client.id, Channel.telegram, contact=address)
     reply = await _submit_booking(session, client)
     reply.extra.insert(
-        0, await get_text(session, client.language, "booking.contact.email_sent", email=escape_telegram(address))
+        0,
+        await get_text(
+            session, client.language, "booking.contact.email_sent", email=escape_telegram(address)
+        ),
     )
     return reply
 
@@ -1085,9 +1086,7 @@ async def _callback(session: AsyncSession, client: Client, update: Update) -> Re
         # The picker's way out. `replace={}` drops whatever was chosen on the
         # way here: a waitlist entry has no slot and no session type, so
         # carrying them forward would only leave them to be cleared later.
-        await flow.set_step(
-            session, client.id, Channel.telegram, Step.waitlist_problem, replace={}
-        )
+        await flow.set_step(session, client.id, Channel.telegram, Step.waitlist_problem, replace={})
         return Reply(
             await get_text(session, client.language, "waitlist.intro_by_choice"),
             extra=[await get_text(session, client.language, "waitlist.ask_problem")],
@@ -1100,9 +1099,7 @@ async def _callback(session: AsyncSession, client: Client, update: Update) -> Re
         if scratch.get("path") == BookingPath.negotiation.value:
             # No picker to filter and no timezone to ask for: the client is
             # about to describe a time in their own words (§9).
-            await flow.set_step(
-                session, client.id, Channel.telegram, Step.entering_desired_time
-            )
+            await flow.set_step(session, client.id, Channel.telegram, Step.entering_desired_time)
             return Reply(await get_text(session, client.language, "booking.ask_desired_time"))
 
         # An on-site client is in the room, so the room's clock is theirs.
@@ -1316,9 +1313,7 @@ def _parse_time(text: str, tz: str) -> datetime | None:
 # --- Negotiation, client side (§7.1) ----------------------------------------
 
 
-async def _counter_options(
-    session: AsyncSession, client: Client, request: BookingRequest
-) -> Reply:
+async def _counter_options(session: AsyncSession, client: Client, request: BookingRequest) -> Reply:
     """§12.1's counter form, as a keyboard.
 
     The same question the web asks and the same gate on it, because a client
@@ -1419,12 +1414,9 @@ async def _client_picker(session: AsyncSession, client: Client) -> kb.Picker:
         cancel=kb.COUNTER,
         months_ahead=2,
         month_names={
-            number: await get_text(session, lang, f"date.month.{number}")
-            for number in range(1, 13)
+            number: await get_text(session, lang, f"date.month.{number}") for number in range(1, 13)
         },
-        weekdays=[
-            await get_text(session, lang, f"date.weekday.{number}") for number in range(7)
-        ],
+        weekdays=[await get_text(session, lang, f"date.weekday.{number}") for number in range(7)],
         back_to_months=await get_text(session, lang, "request.counter.back_months"),
         back_to_days=await get_text(session, lang, "request.counter.back_days"),
         cancel_label=await get_text(session, lang, "common.cancel"),
@@ -1932,9 +1924,7 @@ async def _admin_action(
                 # away" -- the difference is the reason she pressed it.
                 keep_slot = await _parked_admin_flag(session, chat_id, "keep_slot")
                 await _clear_admin_input(session, chat_id)
-                await booking.admin_cancel(
-                    session, request.id, reason=None, keep_slot=keep_slot
-                )
+                await booking.admin_cancel(session, request.id, reason=None, keep_slot=keep_slot)
                 toast = "Cancelled, hour blocked." if keep_slot else "Cancelled."
         else:
             return None
@@ -1942,9 +1932,7 @@ async def _admin_action(
         # The status moved under her -- another channel answered first. Show
         # what it is now rather than an error she cannot act on.
         await session.refresh(request)
-        return await _admin_request(
-            session, request, toast=f"Not possible: {type(exc).__name__}."
-        )
+        return await _admin_request(session, request, toast=f"Not possible: {type(exc).__name__}.")
 
     await notifications.publish(session)
     await session.refresh(request)
@@ -2057,9 +2045,7 @@ ADMIN_GLYPHS = {
 }
 
 
-async def _panel(
-    session: AsyncSession, *, edit: bool = False, toast: str | None = None
-) -> Reply:
+async def _panel(session: AsyncSession, *, edit: bool = False, toast: str | None = None) -> Reply:
     """§13.2's root screen: what needs answering, and the way to each of them."""
     settings = get_settings()
     practice = await get_practice(session)
@@ -2103,9 +2089,7 @@ async def _panel(
     )
 
 
-async def _admin_line(
-    session: AsyncSession, request: BookingRequest, practice: Practice
-) -> str:
+async def _admin_line(session: AsyncSession, request: BookingRequest, practice: Practice) -> str:
     """One request, as a line to scan: when, and who."""
     when = await booking.requested_start(session, request)
     zone = ZoneInfo(practice.timezone)
@@ -2118,9 +2102,7 @@ async def _admin_line(
     return f"{stamp} · {escape_telegram(name or 'no name')}"
 
 
-async def _admin_requests(
-    session: AsyncSession, page: int, *, toast: str | None = None
-) -> Reply:
+async def _admin_requests(session: AsyncSession, page: int, *, toast: str | None = None) -> Reply:
     """§13.2: the queue, five a page, every row a way into the request."""
     practice = await get_practice(session)
     total = await booking.count_with_status(
@@ -2243,9 +2225,7 @@ async def _admin_request(
     # §17 lets problem text, contact note and the thread each run to 4096, and
     # escaping expands them: one message cannot hold it (C9).
     first, *rest = _split_message(lines)
-    return Reply(
-        first, keyboard=kb.panel_keyboard(buttons), extra=rest, edit=True, toast=toast
-    )
+    return Reply(first, keyboard=kb.panel_keyboard(buttons), extra=rest, edit=True, toast=toast)
 
 
 def _split_message(lines: list[str], limit: int = 4000) -> list[str]:
@@ -2345,9 +2325,7 @@ async def _admin_waitlist(session: AsyncSession, page: int) -> Reply:
     for entry in rows:
         # The entry itself carries no name; the person it belongs to does.
         name = (
-            await session.execute(
-                select(Client.display_name).where(Client.id == entry.client_id)
-            )
+            await session.execute(select(Client.display_name).where(Client.id == entry.client_id))
         ).scalar_one_or_none()
         joined = entry.created_at.astimezone(ZoneInfo(practice.timezone))
         parts = [escape_telegram(name or "no name"), entry.status.value]

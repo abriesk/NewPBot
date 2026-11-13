@@ -57,7 +57,5 @@ async def test_every_month_and_weekday_has_a_word(db: AsyncSession, lang: str) -
     """A missing key renders as the key itself, in front of a client."""
     for month in range(1, 13):
         for day in range(1, 8):  # 1..7 Sep 2026 covers every weekday
-            label = await day_label(
-                db, lang, datetime(2026, month, day, 12, 0, tzinfo=UTC), "UTC"
-            )
+            label = await day_label(db, lang, datetime(2026, month, day, 12, 0, tzinfo=UTC), "UTC")
             assert "date." not in label, label

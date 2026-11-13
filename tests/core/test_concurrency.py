@@ -15,7 +15,6 @@ import asyncio
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime, timedelta
 
-
 import pytest_asyncio
 from sqlalchemy import NullPool, delete, select, text
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, create_async_engine
@@ -204,5 +203,3 @@ async def test_one_token_consumed_twice_at_once_succeeds_once(
         if raw is not None:
             async with engine_watch.begin() as conn:
                 await conn.execute(delete(AuthToken).where(AuthToken.token_hash == _hash(raw)))
-
-

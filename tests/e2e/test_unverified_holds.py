@@ -9,12 +9,10 @@ on that person's record.
 from __future__ import annotations
 
 import re
-
 from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 
 import pytest
-
 from fastapi.testclient import TestClient
 from sqlalchemy import select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,8 +29,8 @@ from app.core.models import (
 from app.core.services import booking
 from app.core.services import slots as slot_service
 from tests.e2e.test_web_booking import (  # noqa: F401  (fixtures)
-    EMAIL,
     CLIENT_COOKIE,
+    EMAIL,
     _csrf,
     _hold_a_slot,
     committed,
@@ -156,9 +154,7 @@ async def test_an_unfollowed_booking_lapses_and_frees_the_slot(
     assert request is not None
     request_id = request.id
     past = datetime.now(UTC) - timedelta(minutes=1)
-    await committed.execute(
-        update(Slot).where(Slot.id == web_slot).values(hold_expires_at=past)
-    )
+    await committed.execute(update(Slot).where(Slot.id == web_slot).values(hold_expires_at=past))
     await committed.execute(
         update(BookingRequest).where(BookingRequest.id == request_id).values(expires_at=past)
     )
@@ -211,9 +207,7 @@ async def test_a_proved_address_gets_nothing_filed_by_a_stranger(
     assert 'class="uuid"' not in before.text
 
 
-async def test_post_book_is_limited_per_ip(
-    web: TestClient, committed: AsyncSession
-) -> None:
+async def test_post_book_is_limited_per_ip(web: TestClient, committed: AsyncSession) -> None:
     await committed.execute(update(Practice).values(book_per_ip_per_hour=2))
     await committed.commit()
     try:
@@ -362,7 +356,9 @@ async def test_a_proved_owner_out_of_links_gets_the_same_refusal_as_a_new_addres
 
     new_address = await _book(web, committed, web_slot)
     await committed.execute(
-        update(Identity).where(Identity.client_id == client_id).values(verified_at=datetime.now(UTC))
+        update(Identity)
+        .where(Identity.client_id == client_id)
+        .values(verified_at=datetime.now(UTC))
     )
     await committed.commit()
     owner = await _book(web, committed, web_slot)
@@ -399,12 +395,16 @@ async def test_the_confirm_page_for_a_carried_booking_names_it_and_offers_both_c
     assert re.search(r"\d+ [а-я]{3}, \d\d:\d\d \([^)]+, GMT[+-]\d", page.text)
 
     row = (
-        await committed.execute(
-            select(OutboxMessage)
-            .where(OutboxMessage.address == EMAIL, OutboxMessage.intent_key.like("auth.login%"))
-            .order_by(OutboxMessage.id.desc())
+        (
+            await committed.execute(
+                select(OutboxMessage)
+                .where(OutboxMessage.address == EMAIL, OutboxMessage.intent_key.like("auth.login%"))
+                .order_by(OutboxMessage.id.desc())
+            )
         )
-    ).scalars().first()
+        .scalars()
+        .first()
+    )
     assert row is not None and row.intent_key == "auth.login_link.client"
     assert row.payload.get("when")
 
@@ -412,7 +412,6 @@ async def test_the_confirm_page_for_a_carried_booking_names_it_and_offers_both_c
 async def test_signing_in_without_booking_files_nothing_and_a_replay_files_nothing_more(
     web: TestClient, web_slot: int, committed: AsyncSession
 ) -> None:
-    from tests.e2e.test_web_booking import CLIENT_COOKIE
 
     _owner, token = await _owner_with_a_carried_booking(web, web_slot, committed)
     web.get("/auth/callback", params={"token": token})
@@ -449,11 +448,9 @@ async def test_following_a_carried_booking_twice_files_it_once(
     assert second.status_code in (400, 403)
     await committed.rollback()
     count = len(
-        (
-            await committed.execute(
-                select(BookingRequest).where(BookingRequest.slot_id == web_slot)
-            )
-        ).scalars().all()
+        (await committed.execute(select(BookingRequest).where(BookingRequest.slot_id == web_slot)))
+        .scalars()
+        .all()
     )
     assert count == 1
 
@@ -461,10 +458,11 @@ async def test_following_a_carried_booking_twice_files_it_once(
 async def test_a_carried_booking_whose_slot_has_gone_signs_in_and_files_nothing(
     web: TestClient, web_slot: int, committed: AsyncSession
 ) -> None:
-    from tests.e2e.test_web_booking import CLIENT_COOKIE
 
     _owner, token = await _owner_with_a_carried_booking(web, web_slot, committed)
-    await committed.execute(update(Slot).where(Slot.id == web_slot).values(status=SlotStatus.blocked))
+    await committed.execute(
+        update(Slot).where(Slot.id == web_slot).values(status=SlotStatus.blocked)
+    )
     await committed.commit()
 
     gone = web.post(
@@ -487,6 +485,8 @@ async def test_erasing_the_owner_removes_a_carried_booking_token(
     await erase_client(committed, owner_id)  # type: ignore[arg-type]
     await committed.commit()
     left = (
-        await committed.execute(select(AuthToken).where(AuthToken.client_id == owner_id))
-    ).scalars().all()
+        (await committed.execute(select(AuthToken).where(AuthToken.client_id == owner_id)))
+        .scalars()
+        .all()
+    )
     assert not left

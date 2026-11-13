@@ -130,7 +130,9 @@ async def test_one_raising_row_never_strands_the_rest_of_the_batch(
         }
         assert rows["101"].status is OutboxStatus.sent
         assert rows["303"].status is OutboxStatus.sent
-        assert rows["BAD"].status is OutboxStatus.pending, "the bad row must retry, not sit in sending"
+        assert rows["BAD"].status is OutboxStatus.pending, (
+            "the bad row must retry, not sit in sending"
+        )
         assert rows["BAD"].attempts == 1
         assert "RuntimeError" in (rows["BAD"].last_error or "")
     finally:
@@ -252,29 +254,30 @@ async def test_the_delivery_page_shows_credential_trouble_and_retries_a_dead_row
 
 @pytest.mark.parametrize("path", ["/auth/email", "/waitlist"])
 @pytest.mark.parametrize(
-    "bad", ["a@b.example\nBcc: x@y.example", "a@b.example\r\nSubject: x", "not an address", "a b@c.d"]
+    "bad",
+    ["a@b.example\nBcc: x@y.example", "a@b.example\r\nSubject: x", "not an address", "a b@c.d"],
 )
 async def test_a_bad_address_is_refused_at_the_form_with_a_readable_error(
     committed: AsyncSession, web: TestClient, path: str, bad: str
 ) -> None:
     web.get("/auth/email")
-    response = web.post(
-        path, data={"csrf_token": _csrf(web), "email": bad}, follow_redirects=False
-    )
+    response = web.post(path, data={"csrf_token": _csrf(web), "email": bad}, follow_redirects=False)
     assert response.status_code == 400
     assert "<h1>" in response.text
     queued = (
-        await committed.execute(
-            select(OutboxMessage).where(OutboxMessage.address.like("%Bcc:%"))
-        )
-    ).scalars().all()
+        (await committed.execute(select(OutboxMessage).where(OutboxMessage.address.like("%Bcc:%"))))
+        .scalars()
+        .all()
+    )
     assert not queued
 
 
 async def test_the_email_transport_refuses_a_line_break_without_retrying(
     email_enabled: None,
 ) -> None:
-    result = await EmailTransport().send("a@b.example\nBcc: x@y.example", RenderedMessage(parts=["hi"]))
+    result = await EmailTransport().send(
+        "a@b.example\nBcc: x@y.example", RenderedMessage(parts=["hi"])
+    )
     assert result.permanent_failure
 
 

@@ -15,7 +15,6 @@ import logging
 from datetime import timedelta
 
 from sqlalchemy import delete, func, select, update
-
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import ReminderState, RequestStatus, SlotStatus, WaitlistStatus

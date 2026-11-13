@@ -322,11 +322,7 @@ async def _person_with_history(
             source_channel=Channel.web,
         )
     )
-    db.add(
-        WaitlistEntry(
-            practice_id=practice.id, client_id=client.id, problem_text="something"
-        )
-    )
+    db.add(WaitlistEntry(practice_id=practice.id, client_id=client.id, problem_text="something"))
     db.add(
         OutboxMessage(
             practice_id=practice.id,
@@ -361,8 +357,8 @@ async def test_a_merge_moves_every_table_and_deletes_the_absorbed_row(
 
     for model in (Identity, AuthToken, BookingRequest, WaitlistEntry, OutboxMessage):
         left = (
-            await db.execute(select(model).where(model.client_id == absorbed.id))
-        ).scalars().all()
+            (await db.execute(select(model).where(model.client_id == absorbed.id))).scalars().all()
+        )
         assert not left, f"{model.__tablename__} still points at the absorbed row"
 
     # The Telegram identity now reaches the survivor, which is what makes the
@@ -437,8 +433,10 @@ async def test_a_flow_nobody_came_back_to_does_not_block_forever(
     await clients.merge_clients(db, into=survivor.id, absorbing=absorbed.id)
 
     left = (
-        await db.execute(select(FlowState).where(FlowState.client_id == absorbed.id))
-    ).scalars().all()
+        (await db.execute(select(FlowState).where(FlowState.client_id == absorbed.id)))
+        .scalars()
+        .all()
+    )
     assert not left
 
 

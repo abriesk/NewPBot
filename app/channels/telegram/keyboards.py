@@ -450,8 +450,7 @@ def slot_keyboard(
                 [
                     InlineKeyboardButton(
                         text=(
-                            f"{heading} · "
-                            f"{only.starts_at_utc.astimezone(zone).strftime('%H:%M')}"
+                            f"{heading} · {only.starts_at_utc.astimezone(zone).strftime('%H:%M')}"
                         ),
                         callback_data=f"{action}:{prefix}{only.id}",
                     )

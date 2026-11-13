@@ -39,12 +39,12 @@ SPECS = {
 EXEMPT = {
     1: "how to read the document; addressed to a person, not the code",
     2: "the dependency list. Its one behavioural claim -- hard rule 3, no "
-       "APScheduler or Celery or Redis -- is asserted in test_worker_jobs.py",
+    "APScheduler or Celery or Redis -- is asserted in test_worker_jobs.py",
     5: "enum declarations. Their values are asserted where they are used: "
-       "the state machines in test_booking.py and test_slots.py, the column "
-       "types in test_schema.py",
+    "the state machines in test_booking.py and test_slots.py, the column "
+    "types in test_schema.py",
     21: "features deliberately absent. There is no behaviour to assert, and "
-        "a test that one does not exist would pass forever by accident",
+    "a test that one does not exist would pass forever by accident",
 }
 
 # "DESIGN.md §22.4" and "IMPLEMENTATION.md §7.1" bind explicitly; a bare
@@ -111,8 +111,7 @@ def test_every_referenced_section_exists(module: Path) -> None:
     assert docstring is not None
     for document, section in sorted(_references(docstring)):
         assert section in _headings(SPECS[document]), (
-            f"{module.name} cites {document} §{section}, which has no heading "
-            f"in {document}."
+            f"{module.name} cites {document} §{section}, which has no heading in {document}."
         )
 
 

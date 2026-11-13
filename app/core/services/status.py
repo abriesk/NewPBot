@@ -159,9 +159,7 @@ def _named(
     return check
 
 
-async def _guard(
-    session: AsyncSession, check: Callable[[AsyncSession], Awaitable[Check]]
-) -> Check:
+async def _guard(session: AsyncSession, check: Callable[[AsyncSession], Awaitable[Check]]) -> Check:
     """§16.9: a check that cannot run reports `warn`, never `ok`, and never
     raises. Reporting `ok` because the query failed is the one outcome worse
     than not checking at all."""

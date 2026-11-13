@@ -308,8 +308,7 @@ async def envelopes_for(session: AsyncSession, event: DomainEvent) -> list[Envel
                     "uuid": str(request.uuid),
                     # §12.2's fallback: the request carries a name only if the
                     # client typed one this time.
-                    "name": request.display_name
-                    or await _client_name(session, request.client_id),
+                    "name": request.display_name or await _client_name(session, request.client_id),
                     # §10: the note itself, not an announcement that one exists.
                     # §13.4 keeps it out of email, and it does so through
                     # `EMAIL_FORBIDDEN_FIELDS` rather than through this call --

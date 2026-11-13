@@ -990,11 +990,7 @@ async def test_an_hour_already_taken_cannot_be_picked(
     assert f"{kb.PROPOSE_AT}:{request.id}:{day.isoformat()}T09" not in offered
     assert f"{kb.PROPOSE_AT}:{request.id}:{day.isoformat()}T15" in offered, "the rest still are"
 
-    labels = [
-        button.text
-        for row in reply.keyboard.inline_keyboard
-        for button in row
-    ]
+    labels = [button.text for row in reply.keyboard.inline_keyboard for button in row]
     assert f"{kb.TAKEN_MARK}14" in labels, "marked, not removed"
     assert f"{kb.TAKEN_MARK}09" in labels
 
@@ -1121,9 +1117,9 @@ async def test_the_client_picker_never_shows_the_therapists_diary(
         )
     )
     await db.flush()
-    assert await booking.taken_hours_on(
-        db, day=day, tz=practice.timezone
-    ), "the therapist really does have something that day"
+    assert await booking.taken_hours_on(db, day=day, tz=practice.timezone), (
+        "the therapist really does have something that day"
+    )
 
     reply = await handle(
         db,

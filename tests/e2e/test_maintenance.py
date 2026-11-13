@@ -148,9 +148,7 @@ async def test_the_export_is_audited(web: TestClient, committed: AsyncSession) -
 
     await committed.rollback()
     action = (
-        await committed.execute(
-            select(AuditLog.action).order_by(AuditLog.id.desc()).limit(1)
-        )
+        await committed.execute(select(AuditLog.action).order_by(AuditLog.id.desc()).limit(1))
     ).scalar_one()
     assert action == "config.export"
 
@@ -249,9 +247,7 @@ def test_a_dump_is_listed_and_downloadable(web: TestClient, backups: Path) -> No
     assert "attachment" in download.headers["content-disposition"]
 
 
-def test_an_in_progress_dump_is_neither_listed_nor_served(
-    web: TestClient, backups: Path
-) -> None:
+def test_an_in_progress_dump_is_neither_listed_nor_served(web: TestClient, backups: Path) -> None:
     """§16.6: the sidecar writes under a temporary name and moves it into
     place, so a half-written dump must not match."""
     (backups / ".in-progress-42.dump").write_bytes(b"half")

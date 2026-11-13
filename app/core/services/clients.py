@@ -385,9 +385,7 @@ class ClientSummary:
     identities: tuple[Identity, ...] = ()
 
 
-async def list_clients_for_admin(
-    session: AsyncSession, *, limit: int = 200
-) -> list[ClientSummary]:
+async def list_clients_for_admin(session: AsyncSession, *, limit: int = 200) -> list[ClientSummary]:
     """§12.2's clients list: the practice's people, busiest first.
 
     Not every `client` row. A person who asked for a magic link and never booked
@@ -685,11 +683,7 @@ async def erase_client(session: AsyncSession, client_id: UUID) -> Client:
     # A delivery-failed alert names the address it could not reach and carries no
     # client or request id, so it is found by the address itself.
     addresses = set(
-        (
-            await session.execute(
-                select(Identity.external_id).where(Identity.client_id == client_id)
-            )
-        )
+        (await session.execute(select(Identity.external_id).where(Identity.client_id == client_id)))
         .scalars()
         .all()
     )
@@ -848,9 +842,7 @@ async def merge_clients(session: AsyncSession, *, into: UUID, absorbing: UUID) -
     # Refused rather than resolved: `flow_state` is UNIQUE per (client, channel),
     # so a merge has to drop one of two live flows, and the one it would drop
     # holds half of something somebody is typing right now.
-    busy = await _live_flow_channels(session, into) + await _live_flow_channels(
-        session, absorbing
-    )
+    busy = await _live_flow_channels(session, into) + await _live_flow_channels(session, absorbing)
     if busy:
         raise MergeRefused("busy")
 

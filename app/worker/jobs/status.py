@@ -205,8 +205,7 @@ def _backup_verified(directory: Path) -> Check:
     return Check(
         "backup_verified",
         CheckState.fail,
-        "The last backup could not be read back. Backups exist but may be unusable. "
-        "Call for help.",
+        "The last backup could not be read back. Backups exist but may be unusable. Call for help.",
         f"backups: verification {line!r}",
     )
 

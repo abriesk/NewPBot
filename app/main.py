@@ -23,8 +23,8 @@ from starlette.exceptions import HTTPException as StarletteHTTPException
 
 from app.channels.telegram.webhook import build_router as telegram_router
 from app.channels.telegram.webhook import register_webhook
-from app.channels.web.admin import build_router as admin_router
 from app.channels.web.admin import MAX_CONFIG_UPLOAD
+from app.channels.web.admin import build_router as admin_router
 from app.channels.web.client import build_router as web_router
 from app.channels.web.client import not_found_page
 from app.channels.web.middleware import (

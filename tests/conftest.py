@@ -37,7 +37,6 @@ FORCED_ENV = {
 }
 
 
-
 def refuse_a_database_that_is_not_a_test_one(url: str) -> None:
     """B1: end the session unless `url` names a database ending in `_test`.
 

@@ -137,8 +137,7 @@ UNAVAILABLE_BECAUSE = {
 #: than refused -- she may be stacking two deliberately, and this is the clash
 #: she would otherwise discover on the day.
 ALREADY_BOOKED = (
-    "Moved. Note that you already had a confirmed session at that time — "
-    "check the week schedule."
+    "Moved. Note that you already had a confirmed session at that time — check the week schedule."
 )
 
 NO_NEW_TIME = "Moving a session needs a new time. Nothing was changed."
@@ -206,9 +205,7 @@ async def _stored_text(session: AsyncSession, lang: str, key: str) -> str:
     """
     value = (
         await session.execute(
-            select(Translation.value).where(
-                Translation.lang == lang, Translation.key == key
-            )
+            select(Translation.value).where(Translation.lang == lang, Translation.key == key)
         )
     ).scalar_one_or_none()
     return str(value) if value else ""
@@ -519,9 +516,7 @@ def build_router() -> APIRouter:
                         # can take the held slot's time and propose may be words,
                         # but a move with no time to move to is not a move.
                         return _back(f"/admin/requests/{uuid}", NO_NEW_TIME)
-                    clash = await booking.clashes_at(
-                        session, when, ignoring=booking_request.id
-                    )
+                    clash = await booking.clashes_at(session, when, ignoring=booking_request.id)
                     await booking.admin_reschedule(
                         session,
                         booking_request.id,
@@ -563,8 +558,7 @@ def build_router() -> APIRouter:
             )
             found = await identities_for_many(session, [row.client_id for row in rows])
             identities = {
-                str(row.client_id): _identity_contacts(found.get(row.client_id, []))
-                for row in rows
+                str(row.client_id): _identity_contacts(found.get(row.client_id, [])) for row in rows
             }
             return _render(
                 "admin/waitlist.html",
@@ -1205,9 +1199,7 @@ def build_router() -> APIRouter:
                 (
                     await session.execute(
                         select(func.count()).where(
-                            OutboxMessage.status.in_(
-                                [OutboxStatus.pending, OutboxStatus.sending]
-                            ),
+                            OutboxMessage.status.in_([OutboxStatus.pending, OutboxStatus.sending]),
                             or_(
                                 OutboxMessage.last_error.like("SMTP authentication failed%"),
                                 OutboxMessage.last_error.like("unauthorized:%"),
@@ -1241,9 +1233,7 @@ def build_router() -> APIRouter:
                 return _back("/admin/login")
             row = (
                 await session.execute(
-                    select(OutboxMessage)
-                    .where(OutboxMessage.id == message_id)
-                    .with_for_update()
+                    select(OutboxMessage).where(OutboxMessage.id == message_id).with_for_update()
                 )
             ).scalar_one_or_none()
             if (
@@ -1349,9 +1339,7 @@ def build_router() -> APIRouter:
                 .all()
             )
             found = await identities_for_many(session, [row.id for row in rows])
-            identities = {
-                str(row.id): _identity_contacts(found.get(row.id, [])) for row in rows
-            }
+            identities = {str(row.id): _identity_contacts(found.get(row.id, [])) for row in rows}
 
             return _render(
                 "admin/privacy.html",
@@ -1656,9 +1644,8 @@ def build_router() -> APIRouter:
             )
 
             # FileResponse streams: a dump is not read into memory (§12.2).
-            return FileResponse(
-                path, media_type="application/octet-stream", filename=filename
-            )
+            return FileResponse(path, media_type="application/octet-stream", filename=filename)
+
     return router
 
 
@@ -2012,8 +1999,7 @@ def _settings_changes(form: Any) -> dict[str, Any]:
         labels = form.getlist("social_label")
         urls = form.getlist("social_url")
         changes["social_links"] = [
-            {"label": str(label), "url": str(url)}
-            for label, url in zip(labels, urls, strict=False)
+            {"label": str(label), "url": str(url)} for label, url in zip(labels, urls, strict=False)
         ]
 
     offsets = form.get("reminder_offsets_min")

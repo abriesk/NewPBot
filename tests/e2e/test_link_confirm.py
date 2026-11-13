@@ -13,11 +13,11 @@ from fastapi.testclient import TestClient
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.enums import TokenPurpose
+from app.core.enums import Channel, TokenPurpose
 from app.core.models import AuthToken, BookingRequest, Identity
 from app.core.services.clients import issue_token, resolve_client
-from app.core.enums import Channel
 from app.main import StripQueryFromAccessLog
+from tests.e2e.test_unverified_holds import _book
 from tests.e2e.test_web_booking import (  # noqa: F401  (fixtures)
     EMAIL,
     _csrf,
@@ -25,7 +25,6 @@ from tests.e2e.test_web_booking import (  # noqa: F401  (fixtures)
     web,
     web_slot,
 )
-from tests.e2e.test_unverified_holds import _book
 
 
 async def _used(committed: AsyncSession, raw_token: str) -> bool:

@@ -37,4 +37,4 @@ def test_the_four_retention_jobs_are_hourly_and_the_rest_are_not() -> None:
 def test_the_pool_recycles_connections() -> None:
     from app.db import get_engine
 
-    assert get_engine().sync_engine.pool._recycle == 1800  # noqa: SLF001
+    assert get_engine().sync_engine.pool._recycle == 1800

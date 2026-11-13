@@ -1239,9 +1239,7 @@ async def test_unscheduled_carries_the_wording_and_no_instant(
     # suite shares its database with a running install, so any real request
     # waiting on a time would fail it.
     mine = [e for e in entries if e.uuid == request.uuid]
-    assert [(e.desired_time_text, e.starts_at) for e in mine] == [
-        ("some evening next week?", None)
-    ]
+    assert [(e.desired_time_text, e.starts_at) for e in mine] == [("some evening next week?", None)]
 
 
 async def test_a_request_with_a_time_is_never_in_both_places(
@@ -1395,9 +1393,7 @@ async def test_a_countered_time_and_the_words_both_reach_the_therapist(
     drain(db)
 
     when = LATER + timedelta(days=1)
-    await booking.client_counter(
-        db, request.id, proposed_start=when, body_text="2026-08-29 13:30"
-    )
+    await booking.client_counter(db, request.id, proposed_start=when, body_text="2026-08-29 13:30")
 
     event = next(e for e in pending(db) if isinstance(e, RequestCounter))
     assert event.proposed_start == when
@@ -1847,9 +1843,7 @@ async def test_a_move_into_the_past_is_refused(
         )
 
 
-async def test_only_a_confirmed_session_can_be_moved(
-    db: AsyncSession, request_id: int
-) -> None:
+async def test_only_a_confirmed_session_can_be_moved(db: AsyncSession, request_id: int) -> None:
     """Before confirmation there is nothing booked to move; §7.1 has propose."""
     with pytest.raises(InvalidTransition):
         await booking.admin_reschedule(
@@ -1875,9 +1869,9 @@ async def test_a_clash_is_reported_but_never_refused(
     await db.flush()
 
     assert await booking.clashes_at(db, other.scheduled_start) is not None
-    assert (
-        await booking.clashes_at(db, other.scheduled_start, ignoring=other.id) is None
-    ), "a session never clashes with itself"
+    assert await booking.clashes_at(db, other.scheduled_start, ignoring=other.id) is None, (
+        "a session never clashes with itself"
+    )
 
     # Allowed anyway.
     await booking.admin_reschedule(db, request.id, new_start=other.scheduled_start)

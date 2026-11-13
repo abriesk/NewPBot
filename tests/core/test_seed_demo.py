@@ -27,16 +27,26 @@ async def test_demo_seed_covers_what_the_screenshots_need(db) -> None:
     rows = (await db.execute(select(BookingRequest))).scalars().all()
     assert {r.status for r in rows} == set(RequestStatus)
     assert all(r.scheduled_start is not None and r.client_id for r in rows)
-    free = await db.scalar(select(func.count()).select_from(Slot).where(Slot.status == SlotStatus.available))
+    free = await db.scalar(
+        select(func.count()).select_from(Slot).where(Slot.status == SlotStatus.available)
+    )
     assert free >= 30
     assert (await db.scalar(select(func.count()).select_from(WaitlistEntry))) >= 1
     assert (await db.scalar(select(func.count()).select_from(ContentBlock))) >= 1
     assert (await db.scalar(select(func.count()).select_from(NegotiationMessage))) >= 3
-    priced = await db.scalar(select(func.count()).select_from(SessionType).where(SessionType.price_amount_minor.is_not(None)))
+    priced = await db.scalar(
+        select(func.count())
+        .select_from(SessionType)
+        .where(SessionType.price_amount_minor.is_not(None))
+    )
     assert priced == 1
 
 
 def test_demo_seed_refuses_a_database_not_named_test(monkeypatch) -> None:
-    monkeypatch.setattr(seed_demo, "get_settings", lambda: type("S", (), {"database_url": "postgresql+asyncpg://u:p@h/psychobooking"})())
+    monkeypatch.setattr(
+        seed_demo,
+        "get_settings",
+        lambda: type("S", (), {"database_url": "postgresql+asyncpg://u:p@h/psychobooking"})(),
+    )
     with pytest.raises(SystemExit):
         seed_demo.refuse_unless_test_database()

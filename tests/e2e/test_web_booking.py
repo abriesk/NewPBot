@@ -9,9 +9,9 @@ end rather than rolled back.
 from __future__ import annotations
 
 import re
-from typing import Any
 from collections.abc import AsyncIterator, Iterator
 from datetime import UTC, datetime, timedelta
+from typing import Any
 from zoneinfo import ZoneInfo
 
 import pytest
@@ -622,9 +622,7 @@ async def test_a_client_can_open_a_request_from_a_link_and_add_information(
     assert request.scheduled_start is None  # not approved, so no scheduled time
 
     # The link as the notification builds it: a view token, no session yet.
-    raw = await issue_token(
-        committed, TokenPurpose.view_request, client_id=identity.client_id
-    )
+    raw = await issue_token(committed, TokenPurpose.view_request, client_id=identity.client_id)
     await committed.commit()
 
     web.cookies.delete(CLIENT_COOKIE)
@@ -1267,9 +1265,7 @@ async def test_the_request_page_names_the_status_in_words(
             select(BookingRequest).where(BookingRequest.client_id == identity.client_id)
         )
     ).scalar_one()
-    raw = await issue_token(
-        committed, TokenPurpose.view_request, client_id=identity.client_id
-    )
+    raw = await issue_token(committed, TokenPurpose.view_request, client_id=identity.client_id)
     await committed.commit()
 
     web.cookies.delete(CLIENT_COOKIE)
@@ -1476,9 +1472,7 @@ async def _proposed(web: TestClient, committed: AsyncSession, web_slot: int) -> 
     await booking.admin_propose(
         committed, request.id, proposed_start=datetime.now(UTC) + timedelta(days=9)
     )
-    raw = await issue_token(
-        committed, TokenPurpose.view_request, client_id=identity.client_id
-    )
+    raw = await issue_token(committed, TokenPurpose.view_request, client_id=identity.client_id)
     await committed.commit()
 
     _open_request(web, request.uuid, raw)
@@ -1785,9 +1779,7 @@ async def test_the_waitlist_page_reached_by_choice_does_not_claim_there_is_nothi
     assert nothing_free not in page.text
 
 
-async def test_the_waitlist_page_still_submits(
-    web: TestClient, committed: AsyncSession
-) -> None:
+async def test_the_waitlist_page_still_submits(web: TestClient, committed: AsyncSession) -> None:
     """The form behind it is the one that was already there."""
     web.get("/waitlist")
     response = web.post(
@@ -1820,9 +1812,7 @@ async def test_the_waitlist_page_still_submits(
     # row against a chat id that exists only in conftest. Scoped by `dedupe_key`
     # for the same reason as the `web_slot` teardown above.
     await committed.execute(
-        delete(OutboxMessage).where(
-            OutboxMessage.dedupe_key.like(f"waitlist-admin:{entry.id}:%")
-        )
+        delete(OutboxMessage).where(OutboxMessage.dedupe_key.like(f"waitlist-admin:{entry.id}:%"))
     )
     await committed.execute(delete(WaitlistEntry).where(WaitlistEntry.id == entry.id))
     await committed.execute(
@@ -1856,11 +1846,7 @@ async def test_the_web_offers_a_switch_when_the_other_modality_has_times(
     # `free_text_off` restores its setting there: these tests commit, so a
     # failure before cleanup would leave the picker empty for everything after.
     ambient = (
-        (
-            await committed.execute(
-                select(Slot.id).where(Slot.status == SlotStatus.available)
-            )
-        )
+        (await committed.execute(select(Slot.id).where(Slot.status == SlotStatus.available)))
         .scalars()
         .all()
     )

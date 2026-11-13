@@ -67,6 +67,7 @@ def every(seconds: float, job: Job) -> Job:
     gated.__name__ = getattr(job, "__name__", "job")
     return gated
 
+
 #: §14, in the order a pass runs them. Expiry before dispatch, so a request that
 #: lapsed since the last pass has its notification in the outbox by the time the
 #: dispatcher looks. Every job is idempotent and safe beside a second worker.

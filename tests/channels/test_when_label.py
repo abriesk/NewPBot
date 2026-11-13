@@ -32,7 +32,9 @@ async def test_when_label_follows_the_clients_zone_and_the_date_line(db) -> None
     # 23:30 UTC on the 17th is already the 18th in Yerevan, and 18:30 in New York (GMT-5 in November).
     late = datetime(2026, 11, 17, 23, 30, tzinfo=UTC)
     assert await when_label(db, "en", late, "Asia/Yerevan") == "Wed 18 Nov, 03:30 (Yerevan, GMT+4)"
-    assert await when_label(db, "ru", late, "America/New_York") == "вт 17 ноя, 18:30 (Нью-Йорк, GMT-5)"
+    assert (
+        await when_label(db, "ru", late, "America/New_York") == "вт 17 ноя, 18:30 (Нью-Йорк, GMT-5)"
+    )
 
 
 def test_zone_names_and_offsets() -> None:

@@ -84,9 +84,7 @@ def _updated_at() -> Mapped[Any]:
     (REVIEW C14). An explicit assignment still wins, as the hand-set sites rely
     on.
     """
-    return _tstz(
-        nullable=False, server_default=func.now(), onupdate=lambda: datetime.now(UTC)
-    )
+    return _tstz(nullable=False, server_default=func.now(), onupdate=lambda: datetime.now(UTC))
 
 
 # --- Practice ---------------------------------------------------------------
@@ -132,9 +130,7 @@ class Practice(Base):
         Integer, nullable=False, server_default="15"
     )
     #: Web bookings (POST /book) allowed per hour from one IP address.
-    book_per_ip_per_hour: Mapped[int] = mapped_column(
-        Integer, nullable=False, server_default="10"
-    )
+    book_per_ip_per_hour: Mapped[int] = mapped_column(Integer, nullable=False, server_default="10")
     #: Leading zero bits of SHA-256 the browser must find. Each step doubles
     #: the work; see `app/channels/web/captcha.py` for what the numbers cost.
     captcha_difficulty: Mapped[int] = mapped_column(Integer, nullable=False, server_default="16")

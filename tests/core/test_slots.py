@@ -50,10 +50,14 @@ async def _delete_probe(conn: object, external_id: str) -> None:
     §16.9's `unreachable_clients` counts.
     """
     client_ids = (
-        await conn.execute(  # type: ignore[attr-defined]
-            select(Identity.client_id).where(Identity.external_id == external_id)
+        (
+            await conn.execute(  # type: ignore[attr-defined]
+                select(Identity.client_id).where(Identity.external_id == external_id)
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     await conn.execute(  # type: ignore[attr-defined]
         Identity.__table__.delete().where(Identity.__table__.c.external_id == external_id)
     )
@@ -332,9 +336,7 @@ async def test_a_slot_a_finished_request_asked_for_cannot_be_deleted(
     assert blocked.status is SlotStatus.blocked
 
 
-async def test_an_unreferenced_slot_is_still_deletable(
-    db: AsyncSession, future_slot: Slot
-) -> None:
+async def test_an_unreferenced_slot_is_still_deletable(db: AsyncSession, future_slot: Slot) -> None:
     await slot_service.delete_slot(db, future_slot.id)
     assert (
         await db.execute(select(Slot).where(Slot.id == future_slot.id))

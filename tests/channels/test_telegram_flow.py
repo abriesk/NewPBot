@@ -140,9 +140,7 @@ async def test_a_topic_button_sends_its_blocks_as_separate_messages(
 # --- The full booking flow (§13.1 steps 5-8) -------------------------------
 
 
-async def _walk_to_slot_pick(
-    db: AsyncSession, slot: Slot, *, modality: str = "online"
-) -> Client:
+async def _walk_to_slot_pick(db: AsyncSession, slot: Slot, *, modality: str = "online") -> Client:
     """§13.1's order: how, then what, then when.
 
     Modality first, so the picker can filter by an answer it actually has --
@@ -1107,8 +1105,8 @@ async def test_a_dead_button_never_sends_the_therapist_through_start(
 
     # `_start` would have created one for her chat on the way to asking.
     identities = (
-        await db.execute(select(Identity).where(Identity.external_id == "1"))
-    ).scalars().all()
+        (await db.execute(select(Identity).where(Identity.external_id == "1"))).scalars().all()
+    )
     assert not identities
 
 
@@ -1287,8 +1285,7 @@ async def test_reject_asks_for_a_note_before_it_rejects(
 
     admin = await resolve_client(db, Channel.telegram, "1", verified=True)
     assert (
-        await flow.current_step(db, admin.id, Channel.telegram)
-        is Step.admin_entering_reject_note
+        await flow.current_step(db, admin.id, Channel.telegram) is Step.admin_entering_reject_note
     )
 
     await handle(db, Update(chat_id=1, text="Not my area — Anna at the centre takes these."))
@@ -1521,9 +1518,7 @@ async def _only_the_slots_this_test_makes(db: AsyncSession) -> None:
     be arranged. Rolled back with the rest of the test.
     """
     await db.execute(
-        update(Slot)
-        .where(Slot.status == SlotStatus.available)
-        .values(status=SlotStatus.blocked)
+        update(Slot).where(Slot.status == SlotStatus.available).values(status=SlotStatus.blocked)
     )
     await db.flush()
 
@@ -1538,9 +1533,7 @@ async def _to_the_modality_question(db: AsyncSession) -> Client:
     return await _client(db)
 
 
-async def test_the_first_question_is_how_not_when(
-    db: AsyncSession, future_slot: Slot
-) -> None:
+async def test_the_first_question_is_how_not_when(db: AsyncSession, future_slot: Slot) -> None:
     """Reported in use: the client picked a time, then found out whether it was
     ever an online time. The picker cannot filter by an answer it does not
     have."""
