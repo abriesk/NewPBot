@@ -337,3 +337,63 @@ async def test_the_partial_takes_a_day_and_a_day_without_times_falls_back(
     partial = web.get("/book/slots?modality=online&tz=Asia/Yerevan&day=1999-01-01")
     assert partial.status_code == 200 and f'value="{web_slot}"' in partial.text
     assert 'aria-current="true"' in partial.text
+
+
+# --- item 4: what happens next, and privacy ------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_what_happens_next_is_on_details_and_waitlist_and_says_only_her_and_her_hours(
+    web: TestClient, empty_content: None, committed
+) -> None:
+    hours = (await committed.execute(select(Practice.pending_expiry_hours))).scalar_one()
+    waitlist = web.get("/waitlist?lang=en").text
+    assert "Who reads what you write" in waitlist and "Only I do." in waitlist
+    assert f"stays open for {hours} hours" in waitlist
+    # Without her rule the default only says where to write; it names no fee or window.
+    assert "Write to me on your request page" in waitlist
+    assert 'href="/privacy"' in waitlist
+
+
+@pytest.mark.asyncio
+async def test_her_cancellation_block_replaces_the_default(
+    web: TestClient, her_content: None, committed
+) -> None:
+    topic = (
+        await committed.execute(select(ContentTopic.id).where(ContentTopic.code == "cancellation"))
+    ).scalar_one()
+    await content.upsert_block(
+        committed, topic_id=topic, lang="en", position=0, body_md="Please tell me a day ahead."
+    )
+    await committed.commit()
+    page = web.get("/waitlist?lang=en").text
+    assert "Please tell me a day ahead." in page
+    assert "Write to me on your request page" not in page
+
+
+@pytest.mark.asyncio
+async def test_the_privacy_page_is_linked_from_every_footer_and_has_a_reviewed_default(
+    web: TestClient, empty_content: None, committed
+) -> None:
+    assert 'href="/privacy"' in web.get("/?lang=en").text
+    page = web.get("/privacy?lang=en")
+    months = (await committed.execute(select(Practice.retention_months))).scalar_one()
+    assert page.status_code == 200
+    assert "Who reads it: only me." in page.text and f"about {months} months" in page.text
+    for lang in ("ru", "hy"):
+        assert web.get(f"/privacy?lang={lang}").status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_her_privacy_block_replaces_the_default(
+    web: TestClient, empty_content: None, committed
+) -> None:
+    topic = (
+        await committed.execute(select(ContentTopic.id).where(ContentTopic.code == "privacy"))
+    ).scalar_one()
+    await content.upsert_block(
+        committed, topic_id=topic, lang="en", position=0, body_md="My own privacy words."
+    )
+    await committed.commit()
+    page = web.get("/privacy?lang=en").text
+    assert "My own privacy words." in page and "Who reads it: only me." not in page

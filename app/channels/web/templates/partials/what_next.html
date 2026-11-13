@@ -1,0 +1,13 @@
+{# NP4b: what happens to the text a client just wrote, in three short answers. One block, used on the
+   details form, the done page and the waitlist form. The cancellation answer is her own content
+   block when she wrote one; otherwise a plain default that only says where to write to her. #}
+<aside class="what-next" aria-labelledby="what-next-title">
+  <h2 id="what-next-title">{{ what_next.title }}</h2>
+  <dl>
+    <div><dt>{{ what_next.who_title }}</dt><dd>{{ what_next.who_text }}</dd></div>
+    <div><dt>{{ what_next.when_title }}</dt><dd>{{ what_next.when_text }}</dd></div>
+    <div><dt>{{ what_next.cancel_title }}</dt>
+      <dd>{% if what_next.cancel_html %}<div class="prose">{{ what_next.cancel_html | safe }}</div>{% else %}{{ what_next.cancel_text }}{% endif %}</dd></div>
+  </dl>
+  <p class="privacy-link"><a href="/privacy">{{ what_next.privacy }}</a></p>
+</aside>

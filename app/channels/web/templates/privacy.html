@@ -1,0 +1,15 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} — {{ practice.name }}{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ title }}</h1>
+</div>
+{# Her own text when she has written the privacy block (sanitised by the web emitter, §11.3);
+   otherwise a general default she is asked to review. #}
+{% if blocks %}
+  {% for html in blocks %}<div class="prose">{{ html | safe }}</div>{% endfor %}
+{% else %}
+  <div class="prose">{% for line in default %}<p>{{ line }}</p>{% endfor %}</div>
+{% endif %}
+<div class="stack-actions"><a class="link-back" href="/">{{ t.home }}</a></div>
+{% endblock %}

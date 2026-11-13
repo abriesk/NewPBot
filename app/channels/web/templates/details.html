@@ -40,5 +40,6 @@
   {% if captcha %}{% include "partials/pow.html" %}{% endif %}
   <button type="submit">{{ t.submit }}</button>
 </form>
+{% include "partials/what_next.html" %}
 <a class="link-back" href="/book">{{ t.back }}</a>
 {% endblock %}

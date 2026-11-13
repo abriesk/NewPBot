@@ -553,6 +553,28 @@ async def _picker_view(
     }
 
 
+async def _what_next(
+    session: AsyncSession, lang: str, practice: Practice
+) -> dict[str, str]:
+    """The reusable "what happens next" block: who reads the client's text (only her), when she
+    answers (the hours her own setting gives a request), how to cancel (her content block, or a
+    plain default that only says where to write)."""
+    rule = await content.get_topic_blocks(session, CANCELLATION_TOPIC, lang)
+    return {
+        "title": await get_text(session, lang, "next.title"),
+        "who_title": await get_text(session, lang, "next.who.title"),
+        "who_text": await get_text(session, lang, "next.who.text"),
+        "when_title": await get_text(session, lang, "next.when.title"),
+        "when_text": await get_text(
+            session, lang, "next.when.text", hours=practice.pending_expiry_hours
+        ),
+        "cancel_title": await get_text(session, lang, "next.cancel.title"),
+        "cancel_text": await get_text(session, lang, "next.cancel.text"),
+        "cancel_html": "".join(to_web_html(block.body_md) for block in rule),
+        "privacy": await get_text(session, lang, "next.privacy"),
+    }
+
+
 async def _facts(session: AsyncSession, context: dict[str, Any]) -> list[dict[str, Any]]:
     """The three facts under her name: sessions (length, and price only where she stored one), how
     we meet, and the languages she wrote. A fact with nothing true to say is left out."""
@@ -626,6 +648,7 @@ async def _context(
                 url=practice.clinic_onsite_url or "",
             ),
         },
+        "what_next": await _what_next(session, resolved, practice),
         "csrf_token": csrf_token_for(request),
         "signed_in": client is not None,
         "email_enabled": get_settings().email_enabled,
@@ -864,6 +887,37 @@ def build_router() -> APIRouter:
             if request.headers.get("if-none-match") == etag:
                 return Response(status_code=304, headers=headers)
             return Response(row.data, media_type=row.content_type, headers=headers)
+
+    @router.get("/privacy", response_class=HTMLResponse, include_in_schema=False)
+    async def privacy_page(request: Request) -> Response:
+        """NP4b: the client privacy page. Her own block when she has written it; else a general
+        default (a text the owner reviews), with the retention she has set."""
+        async with unit_of_work() as session:
+            context = await _context(session, request)
+            lang = context["lang"]
+            blocks = await content.get_topic_blocks(session, PRIVACY_TOPIC, lang)
+            default = [
+                await get_text(session, lang, "privacy.default.1"),
+                await get_text(session, lang, "privacy.default.2"),
+                await get_text(session, lang, "privacy.default.3"),
+                await get_text(session, lang, "privacy.default.4"),
+                await get_text(
+                    session,
+                    lang,
+                    "privacy.default.5",
+                    months=context["practice"].retention_months,
+                ),
+                await get_text(session, lang, "privacy.default.6"),
+            ]
+            return _render(
+                "privacy.html",
+                {
+                    **context,
+                    "title": await get_text(session, lang, "privacy.title"),
+                    "blocks": [to_web_html(block.body_md) for block in blocks],
+                    "default": default,
+                },
+            )
 
     @router.get("/t/{topic_code}", response_class=HTMLResponse, include_in_schema=False)
     async def topic_page(request: Request, topic_code: str) -> Response:
