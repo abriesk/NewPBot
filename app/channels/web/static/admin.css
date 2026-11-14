@@ -530,3 +530,5 @@ details.tools-fold > .week-tools > h2 {
 @media (max-width: 40rem) {
   .stacked td[data-label="Contact"]::before { display: block; }
 }
+.msg-form { margin-bottom: .6rem; }
+.msg-form .admin-actions { margin-top: .6rem; }

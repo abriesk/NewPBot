@@ -365,7 +365,7 @@
           <tr><td>Settings</td><td><code>/admin/settings</code></td><td>Booking rules, your photo, hold time, the abuse guard, theme</td></tr>
           <tr><td>Privacy</td><td><code>/admin/privacy</code></td><td>Every client row there has ever been. Export one person, or erase them</td></tr>
           <tr><td>Maintenance</td><td><code>/admin/maintenance</code></td><td>Config export/import; download dumps</td></tr>
-          <tr><td>Status</td><td><code>/admin/status</code></td><td>The traffic light: what is working, and what to tell your IT person</td></tr>
+          <tr><td>Service status</td><td><code>/admin/status</code></td><td>The traffic light: what is working, and what to tell your IT person</td></tr>
           <tr><td>Help</td><td><code>/admin/help</code></td><td>This guide</td></tr>
         </tbody>
       </table>
@@ -631,7 +631,7 @@
     <section class="card" id="delivery">
       <h2>13. Delivery</h2>
       <p>One row = one outbound message. Status moves <code>pending</code> → <code>sending</code> → <code>sent</code>, or <code>failed</code> / <code>dead</code>.</p>
-      <p>The pills at the top filter by status and show how many there are; <strong>dead</strong> and <strong>failed</strong> come first and are outlined in red when there are any. The page opens on <em>All</em>. On a phone each message is a card. The Today page counts the same rows and links to them.</p>
+      <p>The pills at the top filter by status and show how many there are; <code>dead</code> (shown as <em>Gave up</em>) and <code>failed</code> (<em>Failed, will retry</em>) come first and are outlined in red when there are any. The page opens on <em>All</em>. On a phone each message is a card. The Today page counts the same rows and links to them.</p>
       <p><code>dead</code> means retries stopped (about a day of trying). Check SMTP, or whether the user blocked the bot, then press <strong>Retry</strong> on that row: the message is queued again and tried afresh. Retry is offered on <code>dead</code> rows only, and not on a message for a client who has been erased (it would have nobody to go to). A row that failed once and is still being retried needs nothing from you.</p>
     </section>
 
