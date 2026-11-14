@@ -45,6 +45,10 @@ from tests.e2e.test_admin_web import (  # noqa: F401 - fixtures and helpers of t
 #: too); the week below starts on a Monday.
 MONDAY = date(2028, 6, 5)
 
+#: Every slot id `_slots` made, so a test that used near dates (the chips) leaves nothing behind
+#: on the client's picker for the booking suites that run after it.
+_MADE: list[int] = []
+
 
 @pytest_asyncio.fixture(autouse=True)
 async def _clean(committed: AsyncSession) -> AsyncIterator[None]:
@@ -53,6 +57,9 @@ async def _clean(committed: AsyncSession) -> AsyncIterator[None]:
         await committed.execute(
             delete(Slot).where(Slot.starts_at >= datetime(2028, 1, 1, tzinfo=UTC))
         )
+        if _MADE:
+            await committed.execute(delete(Slot).where(Slot.id.in_(_MADE)))
+            _MADE.clear()
         await committed.execute(delete(WeekTemplate))
         await committed.commit()
 
@@ -84,6 +91,7 @@ async def _slots(
         committed.add(slot)
         await committed.flush()
         ids.append(int(slot.id))
+        _MADE.append(int(slot.id))
     await committed.commit()
     return ids
 

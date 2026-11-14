@@ -39,7 +39,7 @@
       {% for c in day.slots %}
         <div class="cell {{ 'blocked' if c.blocked else 'free' }}{{ ' past' if c.past }}" id="slot-{{ c.id }}">
           <span class="at">{{ c.time }}</span>
-          <span class="state">{% if c.blocked %}Blocked{% elif c.covered %}Covered{% else %}Free{% endif %}</span>
+          {% if c.blocked %}<span class="state">Blocked</span>{% elif c.covered %}<span class="state">Covered</span>{% else %}<span class="sr-only">Free</span>{% endif %}
           {% if not c.past %}
           <form method="post" action="/admin/slots/{{ c.id }}/{{ 'unblock' if c.blocked else 'block' }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
