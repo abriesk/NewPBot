@@ -316,3 +316,4 @@ body.skin-waterfall {
 
 /* A skipped optional question: a quieter stone that opens it again. */
 .skin-waterfall .stone.skipped button { border-style: dashed; background: transparent; color: var(--ink-soft); }
+.skin-waterfall .q .muted + .answers { margin-top: 1rem; }
