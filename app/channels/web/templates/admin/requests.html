@@ -1,8 +1,8 @@
 {% extends "admin/base.html" %}
 {% from "admin/partials/contact.html" import contact_link %}
-{% block title %}{{ t.nav_requests }}{% endblock %}
+{% block title %}{{ "Schedule" if view == "grid" else t.nav_requests }}{% endblock %}
 {% block content %}
-<h1>{{ t.nav_requests }}</h1>
+<h1>{{ "Schedule" if view == "grid" else t.nav_requests }}</h1>
 
 {# §12.2: two views of one query. The list answers "what needs answering";
    the schedule answers "what does my week look like". #}

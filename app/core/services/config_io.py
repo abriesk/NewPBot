@@ -27,7 +27,7 @@ from dataclasses import dataclass, field
 from datetime import time
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import BookingMode, ContentBlockKind, Modality
@@ -42,10 +42,11 @@ from app.core.models import (
 )
 from app.core.policies import now_utc
 from app.core.services import photo as photo_service
+from app.core.services import slots as slot_service
 from app.core.services.content import upsert_block
 from app.core.services.settings import MUTABLE_FIELDS, get_practice, update_settings
 from app.core.services.translations import invalidate_cache, set_text
-from app.core.services.week_templates import BadTemplate, clean_name
+from app.core.services.week_templates import ENTRIES_MAX, TEMPLATES_MAX, BadTemplate, clean_name
 
 #: What the envelope must say. A file that does not say it is not ours.
 FORMAT = "psychobooking.config"
@@ -720,9 +721,9 @@ __all__ = [
 
 #: A week template: how many entries, and what one entry may say. The Slots form allows 15-minute
 #: steps; nothing here may make a slot the form would refuse.
-_TEMPLATE_ENTRIES_MAX = 300
+_TEMPLATE_ENTRIES_MAX = ENTRIES_MAX
 _TEMPLATE_ENTRY_FIELDS = ("weekday", "time", "duration_min", "modality")
-_DURATION_RANGE = (15, 480)
+_DURATION_RANGE = (slot_service.MIN_DURATION, slot_service.MAX_DURATION)
 
 
 def _template_entry(raw: Any, where: str) -> dict[str, Any]:
@@ -759,6 +760,13 @@ async def _import_week_templates(session: AsyncSession, raw: Any, report: Import
     entry = report.section("week_templates")
     practice = await get_practice(session)
     seen: set[str] = set()
+    total = (
+        await session.execute(
+            select(func.count())
+            .select_from(WeekTemplate)
+            .where(WeekTemplate.practice_id == practice.id)
+        )
+    ).scalar_one()
 
     for item in _dicts(raw, "week_templates"):
         unknown = sorted(set(item) - {"name", "entries"})
@@ -782,11 +790,12 @@ async def _import_week_templates(session: AsyncSession, raw: Any, report: Import
             raise ConfigInvalid(f"{where}: at most {_TEMPLATE_ENTRIES_MAX} entries")
         entries = sorted(
             (_template_entry(e, f"{where}.entries") for e in entries_raw),
-            key=lambda e: (e["weekday"], e["time"]),
+            key=lambda e: (e["weekday"], e["time"], e["modality"] or ""),
         )
-        keys = [(e["weekday"], e["time"]) for e in entries]
+        # The slot unique index is (start, modality): the same time online and onsite are two slots.
+        keys = [(e["weekday"], e["time"], e["modality"]) for e in entries]
         if len(set(keys)) != len(keys):
-            raise ConfigInvalid(f"{where}: two entries share a weekday and a time")
+            raise ConfigInvalid(f"{where}: two entries share a weekday, a time and a modality")
 
         existing = (
             await session.execute(
@@ -796,6 +805,9 @@ async def _import_week_templates(session: AsyncSession, raw: Any, report: Import
             )
         ).scalar_one_or_none()
         if existing is None:
+            if total >= TEMPLATES_MAX:
+                raise ConfigInvalid(f"week_templates: at most {TEMPLATES_MAX} templates")
+            total += 1
             session.add(WeekTemplate(practice_id=practice.id, name=name, entries=entries))
             entry.created += 1
         elif _normalised(existing.entries) == entries:
@@ -819,5 +831,5 @@ def _normalised(stored: list[dict[str, Any]]) -> list[dict[str, Any]]:
             }
             for e in stored
         ),
-        key=lambda e: (e["weekday"], e["time"]),
+        key=lambda e: (e["weekday"], e["time"], e["modality"] or ""),
     )

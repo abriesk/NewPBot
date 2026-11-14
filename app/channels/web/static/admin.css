@@ -440,9 +440,9 @@ ul.more a {
 }
 ul.more li span { display: block; padding-bottom: .7rem; color: var(--ink-soft); font-size: .9rem; }
 
-/* Tables as cards under 40rem (requests, clients, delivery). The first cell is the card's
+/* Tables as cards below 58rem, where a six-column table no longer fits (requests, clients, delivery). The first cell is the card's
    heading; the others carry their column name from `data-label`. */
-@media (max-width: 40rem) {
+@media (max-width: 57.99rem) {
   .scroll.stacked { overflow: visible; background: none; }
   .stacked table, .stacked tbody, .stacked tr, .stacked td { display: block; }
   .stacked thead {
@@ -468,7 +468,7 @@ ul.more li span { display: block; padding-bottom: .7rem; color: var(--ink-soft);
    and hides the strip. */
 .daynav { display: none; }
 .daystep { display: flex; gap: .5rem; flex-wrap: wrap; margin: .5rem 0; }
-.daystep a { min-height: 2.75rem; flex: 1 1 8rem; justify-content: center; }
+.daystep a { min-height: 2.75rem; flex: 1 1 8rem; justify-content: center; gap: .4rem; }
 ul.weekpick {
   list-style: none; margin: 0 0 .75rem; padding: 0; display: grid;
   grid-template-columns: repeat(7, 1fr); gap: .25rem;
@@ -532,3 +532,11 @@ details.tools-fold > .week-tools > h2 {
 }
 .msg-form { margin-bottom: .6rem; }
 .msg-form .admin-actions { margin-top: .6rem; }
+
+/* A folded box says it can be opened: a small arrow before its title. */
+details.create > summary, details.slot-day > summary { list-style: none; }
+details.create > summary::-webkit-details-marker, details.slot-day > summary::-webkit-details-marker { display: none; }
+details.create > summary::before, details.slot-day > summary .when::before {
+  content: "\25B8"; display: inline-block; width: 1.1rem; color: var(--ink-soft);
+}
+details.create[open] > summary::before, details.slot-day[open] > summary .when::before { content: "\25BE"; }

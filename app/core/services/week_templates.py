@@ -8,9 +8,10 @@ practice's own clock, so a template applied across a DST change keeps 10:00 at 1
 
 from __future__ import annotations
 
+import unicodedata
 from datetime import date, time, timedelta
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -21,16 +22,23 @@ from app.core.services import slots as slot_service
 from app.core.services.settings import get_practice
 
 NAME_MAX = 60
+#: What a template may hold and how many there may be. The config import enforces the same numbers,
+#: so every template she can save can be exported and imported again.
+ENTRIES_MAX = 300
+TEMPLATES_MAX = 50
 
 
 class BadTemplate(ValueError):
-    """A name that is empty or too long, or a week with nothing to save."""
+    """A name that is empty, too long or holds a control character; a week with nothing to save, or
+    more than a template may hold; too many templates. `args[0]` says which: name, empty week,
+    limits, many."""
 
 
 def clean_name(raw: str) -> str:
     """One line: runs of whitespace (and any newline) become one space."""
     name = " ".join(raw.split())
-    if not name or len(name) > NAME_MAX:
+    # A NUL (or any other control character) is not a name, and Postgres refuses it in text.
+    if not name or len(name) > NAME_MAX or any(unicodedata.category(c) == "Cc" for c in name):
         raise BadTemplate("name")
     return name
 
@@ -48,6 +56,11 @@ async def save_template(session: AsyncSession, name: str, monday: date) -> tuple
     pattern, _blocked = await slot_service.week_pattern(session, monday)
     if not pattern:
         raise BadTemplate("empty week")
+    if len(pattern) > ENTRIES_MAX or any(
+        not slot_service.MIN_DURATION <= duration <= slot_service.MAX_DURATION
+        for _, _, duration, _ in pattern
+    ):
+        raise BadTemplate("limits")
     entries = [
         {
             "weekday": weekday,
@@ -58,6 +71,22 @@ async def save_template(session: AsyncSession, name: str, monday: date) -> tuple
         for weekday, at, duration, modality in pattern
     ]
     practice = await get_practice(session)
+    known = (
+        await session.execute(
+            select(func.count())
+            .select_from(WeekTemplate)
+            .where(WeekTemplate.practice_id == practice.id)
+        )
+    ).scalar_one()
+    replaces = (
+        await session.execute(
+            select(WeekTemplate.id).where(
+                WeekTemplate.practice_id == practice.id, WeekTemplate.name == name
+            )
+        )
+    ).first()
+    if replaces is None and known >= TEMPLATES_MAX:
+        raise BadTemplate("many")
     # One statement, so two saves of the same name cannot race on the unique (practice, name).
     saved = (
         (

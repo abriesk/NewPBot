@@ -495,6 +495,11 @@ class RangeTooLong(ValueError):
 
 MAX_RANGE_DAYS = 366
 
+#: How long one slot may last, in minutes. The bulk form, week templates and the config import all
+#: use these, so whatever she can make can be saved in a template and re-imported.
+MIN_DURATION = 15
+MAX_DURATION = 480
+
 
 @dataclass(frozen=True, slots=True)
 class WeekSlot:

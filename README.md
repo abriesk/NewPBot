@@ -171,9 +171,9 @@ timezone list, retention, and all practice content.
 
 On a phone the top of every admin page carries the five daily pages — Today,
 Requests, Schedule, Slots, Waitlist — and **More** (`/admin/more`), which lists
-the rest; a computer shows every page in one row. Tables become cards under
-40rem, the week grid shows one day at a time, and the Slots list is folded by
-day.
+the rest; a computer shows every page in one row. Tables become cards below
+58rem, the week grid shows one day at a time below 40rem, and the Slots list is
+folded by day.
 
 | Page | For |
 |---|---|

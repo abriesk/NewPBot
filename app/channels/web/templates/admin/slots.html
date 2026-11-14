@@ -61,7 +61,7 @@
 
 {# Folded like the two above: on a phone it is the tallest thing on the page. #}
 <details class="create card tools-fold">
-  <summary>Copy this week and week templates</summary>
+  <summary>Copy and templates</summary>
   {% set tools_id = "slots" %}
   {% include "admin/partials/week_tools.html" %}
 </details>
@@ -124,12 +124,17 @@
 {% endfor %}
 </div>
 <script>
-// A link to one slot (#slot-12, after Block) can land inside a folded day: open that day.
+// A link to one slot (#slot-12, after Block) or to #templates (after a save) can land inside a
+// folded box: open it.
 (function () {
   var reveal = function () {
     var el = location.hash.length > 1 ? document.getElementById(location.hash.slice(1)) : null;
-    var day = el && el.closest ? el.closest('details.slot-day') : null;
-    if (day) { day.open = true; el.scrollIntoView(); }
+    var found = false;
+    // Every folded box around the target: a slot's day, the copy-and-templates box.
+    for (var box = el && el.closest ? el.closest('details') : null; box; box = box.parentElement && box.parentElement.closest('details')) {
+      box.open = true; found = true;
+    }
+    if (found) { el.scrollIntoView(); }
   };
   reveal();
   window.addEventListener('hashchange', reveal);

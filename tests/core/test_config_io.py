@@ -582,6 +582,9 @@ async def test_week_templates_round_trip_through_export_wipe_import(db: AsyncSes
             }
         ],
         [_template("A", (0, "10:00", 60, None)), _template(" A ", (1, "10:00", 60, None))],
+        [_template("Nul\x00name", (0, "10:00", 60, None))],
+        [_template("Tab\x07bell", (0, "10:00", 60, None))],
+        [_template("Same", (0, "10:00", 60, "online"), (0, "10:00", 30, "online"))],
         ["not an object"],
         [
             {
@@ -608,3 +611,60 @@ async def test_a_template_in_a_preview_is_counted_but_not_written(db: AsyncSessi
     report = await import_config(db, payload, apply=False)
     assert report.sections["week_templates"].created == 1 and not report.applied
     assert await _stored(db) == {}
+
+
+async def test_the_same_time_online_and_onsite_is_two_entries_and_round_trips(
+    db: AsyncSession,
+) -> None:
+    """The slot unique index is (start, modality), so Monday 10:00 online and onsite can both exist
+    and a template saved from such a week must survive export and import."""
+    payload = await export_config(db)
+    payload["week_templates"] = [
+        _template(
+            "Both", (0, "10:00", 60, "online"), (0, "10:00", 60, "onsite"), (0, "10:00", 60, None)
+        )
+    ]
+    await import_config(db, payload, apply=True)
+    exported = (await export_config(db))["week_templates"]
+    assert len(exported[0]["entries"]) == 3
+    again = await import_config(db, {**payload, "week_templates": exported}, apply=True)
+    assert again.sections["week_templates"].unchanged == 1
+
+
+async def test_the_number_of_templates_is_capped_in_the_import(db: AsyncSession) -> None:
+    from app.core.services.week_templates import TEMPLATES_MAX
+
+    payload = await export_config(db)
+    payload["week_templates"] = [
+        _template(f"T{i}", (0, "10:00", 60, None)) for i in range(TEMPLATES_MAX)
+    ]
+    ok = await import_config(db, payload, apply=True)
+    assert ok.sections["week_templates"].created == TEMPLATES_MAX
+    # One more by a new name is refused; replacing an existing name is not a new template.
+    payload["week_templates"] = [_template("T0", (1, "11:00", 60, None))]
+    assert (await import_config(db, payload, apply=True)).sections["week_templates"].updated == 1
+    payload["week_templates"] = [_template("One too many", (0, "10:00", 60, None))]
+    with pytest.raises(ConfigInvalid, match="at most"):
+        await import_config(db, payload, apply=True)
+    assert len(await _stored(db)) == TEMPLATES_MAX
+
+
+async def test_an_oversize_template_is_refused_at_the_documented_bounds(db: AsyncSession) -> None:
+    payload = await export_config(db)
+    many = [
+        (d, f"{h:02d}:{m:02d}", 15, None)
+        for d in range(7)
+        for h in range(24)
+        for m in (0, 15, 30, 45)
+    ][:301]
+    payload["week_templates"] = [_template("Big", *many)]
+    with pytest.raises(ConfigInvalid):
+        await import_config(db, payload, apply=True)
+    payload["week_templates"] = [_template("Big", *many[:300])]
+    await import_config(db, payload, apply=True)
+    for bad in (14, 481):
+        payload["week_templates"] = [_template("D", (0, "10:00", bad, None))]
+        with pytest.raises(ConfigInvalid):
+            await import_config(db, payload, apply=True)
+    payload["week_templates"] = [_template("D", (0, "10:00", 15, None), (1, "10:00", 480, None))]
+    await import_config(db, payload, apply=True)

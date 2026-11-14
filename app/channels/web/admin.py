@@ -214,7 +214,15 @@ FLASH_ERROR = {
     "bad-range": (
         "Those dates could not be read, or the range is longer than a year. Nothing was changed."
     ),
-    "template-name": "Give the template a name (up to 60 characters). Nothing was saved.",
+    "template-name": (
+        "Give the template a name: 1 to 60 characters, no control characters. Nothing was saved."
+    ),
+    "template-limits": (
+        "That week cannot be saved as a template: a template holds at most 300 slots, each from "
+        "15 to 480 minutes long. Nothing was saved."
+    ),
+    "template-many": "You already have 50 templates, the most there can be. Delete one first.",
+    "bad-duration": "A slot lasts from 15 to 480 minutes. No slots were created.",
     "template-empty": "That week has no slots to save. Open some slots first, then save it.",
     "no-template": "That template no longer exists.",
     "type erase to confirm": "Nothing was erased. Type the word erase in the box to confirm.",
@@ -1157,6 +1165,8 @@ def build_router() -> APIRouter:
 
             if not weekdays:
                 return _back("/admin/slots", "no-weekday")
+            if not slot_service.MIN_DURATION <= duration_min <= slot_service.MAX_DURATION:
+                return _back("/admin/slots", "bad-duration")
 
             try:
                 pattern = SlotPattern(
@@ -1312,9 +1322,12 @@ def build_router() -> APIRouter:
             try:
                 _, count = await week_tpl.save_template(session, name, monday)
             except week_tpl.BadTemplate as exc:
-                return _back(
-                    "/admin/slots", "template-empty" if "empty" in str(exc) else "template-name"
-                )
+                code = {
+                    "empty week": "template-empty",
+                    "limits": "template-limits",
+                    "many": "template-many",
+                }.get(str(exc), "template-name")
+                return _back("/admin/slots", code, "#templates")
             return _back("/admin/slots", f"template-saved-{count}", "#templates")
 
     @router.post("/slots/templates/{template_id}/{action}", include_in_schema=False)

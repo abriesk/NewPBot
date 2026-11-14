@@ -194,3 +194,163 @@ async def test_a_bad_template_in_an_uploaded_file_is_an_alert_not_a_500(
     assert response.status_code == 400
     assert 'class="flash error" role="alert"' in response.text
     assert "week_templates[Bad]" in response.text
+
+
+# --- the bounds a template has, on the way in ---------------------------------------------------
+
+
+async def _make_slots(
+    committed: AsyncSession, day: date, specs: list[tuple[str, int, str | None]]
+) -> None:
+    from datetime import UTC, datetime, time
+
+    from sqlalchemy import select
+
+    from app.core.enums import Modality
+    from app.core.models import Practice, Slot
+    from tests.e2e.test_np5b import _MADE, _zone
+
+    zone = await _zone(committed)
+    practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
+    for at, minutes, modality in specs:
+        slot = Slot(
+            practice_id=practice.id,
+            starts_at=datetime.combine(day, time.fromisoformat(at), tzinfo=zone).astimezone(UTC),
+            duration_min=minutes,
+            modality=Modality(modality) if modality else None,
+            status=SlotStatus.available,
+        )
+        committed.add(slot)
+        await committed.flush()
+        _MADE.append(int(slot.id))
+    await committed.commit()
+
+
+def _flash_code(location: str) -> str:
+    from urllib.parse import parse_qs, urlparse
+
+    return parse_qs(urlparse(location).query).get("flash", [""])[0]
+
+
+async def test_the_bulk_form_refuses_a_duration_the_import_would_refuse(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    _sign_in(web)
+    for minutes, code in (("14", "bad-duration"), ("481", "bad-duration"), ("15", "created-1")):
+        location = _post(
+            web,
+            "/admin/slots/bulk",
+            date_from=str(MONDAY),
+            date_to=str(MONDAY),
+            weekdays="0",
+            times="10:00",
+            duration_min=minutes,
+        )
+        assert _flash_code(location) == code, minutes
+        if code == "bad-duration":
+            html = web.get(location).text
+            assert 'role="alert"' in html and "15 to 480 minutes" in html
+
+
+async def test_saving_a_template_refuses_what_the_import_would_refuse(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    from sqlalchemy import delete
+
+    from app.core.models import WeekTemplate
+
+    _sign_in(web)
+    # A 10-minute slot (made before the bound existed) keeps the week from being saved.
+    await _make_slots(committed, MONDAY, [("10:00", 10, None)])
+    location = _post(web, "/admin/slots/templates", name="Short", week=str(MONDAY))
+    assert _flash_code(location) == "template-limits" and location.endswith("#templates")
+    assert 'role="alert"' in web.get(location).text
+    await committed.execute(delete(WeekTemplate))
+    await committed.commit()
+
+
+async def test_saving_a_template_caps_entries_names_and_how_many(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    from sqlalchemy import delete, select
+
+    from app.core.models import Practice, WeekTemplate
+    from app.core.services.week_templates import TEMPLATES_MAX
+
+    _sign_in(web)
+    times = [f"{h:02d}:{m:02d}" for h in range(24) for m in (0, 15, 30, 45)]
+    # 192 + 96 + 13 = 301 slots in one week is one too many.
+    await _make_slots(
+        committed, MONDAY, [(t, 15, "online") for t in times] + [(t, 15, "onsite") for t in times]
+    )
+    await _make_slots(committed, MONDAY + timedelta(days=1), [(t, 15, None) for t in times])
+    await _make_slots(committed, MONDAY + timedelta(days=2), [(t, 15, None) for t in times[:13]])
+    location = _post(web, "/admin/slots/templates", name="Huge", week=str(MONDAY))
+    assert _flash_code(location) == "template-limits"
+
+    # A name with a NUL, or any control character, is refused like an empty one: never a 500.
+    for bad in ("a\x00b", "bell\x07"):
+        location = _post(web, "/admin/slots/templates", name=bad, week=str(MONDAY))
+        assert _flash_code(location) == "template-name"
+        assert 'role="alert"' in web.get(location).text
+
+    # Too many templates: the 51st by a new name is refused, a replacement is not.
+    practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
+    for i in range(TEMPLATES_MAX):
+        committed.add(
+            WeekTemplate(
+                practice_id=practice.id,
+                name=f"T{i}",
+                entries=[{"weekday": 0, "time": "10:00", "duration_min": 60, "modality": None}],
+            )
+        )
+    await committed.commit()
+    await _make_slots(committed, MONDAY + timedelta(days=14), [("10:00", 60, None)])
+    week2 = str(MONDAY + timedelta(days=14))
+    assert _flash_code(_post(web, "/admin/slots/templates", name="New", week=week2)) == (
+        "template-many"
+    )
+    assert _flash_code(_post(web, "/admin/slots/templates", name="T3", week=week2)).startswith(
+        "template-saved-"
+    )
+    await committed.execute(delete(WeekTemplate))
+    await committed.commit()
+
+
+async def test_the_modality_twins_survive_save_template_export_import(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    import json
+
+    from sqlalchemy import delete
+
+    from app.core.models import WeekTemplate
+    from tests.e2e.test_admin_web import _csrf
+
+    _sign_in(web)
+    await _make_slots(committed, MONDAY, [("10:00", 60, "online"), ("10:00", 60, "onsite")])
+    assert _flash_code(_post(web, "/admin/slots/templates", name="Twins", week=str(MONDAY))) == (
+        "template-saved-2"
+    )
+    exported = json.loads(web.get("/admin/maintenance/config/export").text)
+    assert len(exported["week_templates"][0]["entries"]) == 2
+    response = web.post(
+        "/admin/maintenance/config/import",
+        data={"csrf_token": _csrf(web), "apply": "1"},
+        files={"file": ("config.json", json.dumps(exported), "application/json")},
+    )
+    assert response.status_code == 200, response.text[:300]
+    await committed.execute(delete(WeekTemplate))
+    await committed.commit()
+
+
+def test_the_schedule_page_is_named_schedule_and_the_templates_box_opens_on_its_hash(
+    web: TestClient,
+) -> None:
+    _sign_in(web)
+    html = web.get("/admin/requests?view=grid").text
+    assert "<h1>Schedule</h1>" in html and "<title>Schedule" in html
+    assert "<h1>Requests</h1>" in web.get("/admin/requests").text
+    slots = web.get("/admin/slots").text
+    assert "<summary>Copy and templates</summary>" in slots
+    assert "closest('details')" in slots and "box.open = true" in slots
