@@ -36,6 +36,7 @@ MUTABLE_FIELDS = frozenset(
         "reminder_offsets_min",
         "retention_months",
         "languages",
+        "client_skin",
         "social_links",
         "captcha_on",
         "captcha_difficulty",
@@ -60,6 +61,10 @@ LANGUAGES_MAX = 120
 #: her believing a setting she cannot see.
 CAPTCHA_DIFFICULTY_MIN = 8
 CAPTCHA_DIFFICULTY_MAX = 24
+
+#: NP6: the looks the client site can have. Templates and CSS differ; routes, forms, rules and
+#: texts do not.
+CLIENT_SKINS = ("default", "river")
 
 #: §6.1. A footer, not a directory: past about this many the row stops reading
 #: as "where else to find me" and starts reading as a menu.
@@ -150,6 +155,9 @@ async def update_settings(session: AsyncSession, **changes: Any) -> Practice:
         if len(text) > LANGUAGES_MAX:
             raise ValueError(f"languages: longer than {LANGUAGES_MAX} characters")
         changes["languages"] = text or None
+
+    if "client_skin" in changes and changes["client_skin"] not in CLIENT_SKINS:
+        raise ValueError(f"client_skin: expected one of {list(CLIENT_SKINS)}")
 
     if "captcha_difficulty" in changes:
         difficulty = int(changes["captcha_difficulty"])

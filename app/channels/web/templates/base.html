@@ -6,10 +6,14 @@
 <meta name="color-scheme" content="light dark">
 <title>{% block title %}{{ practice.name }}{% endblock %}</title>
 <link rel="stylesheet" href="/static/style.css">
+{# NP6: a skin's own stylesheet and body class (the default skin leaves both empty). #}
+{% block skin_head %}{% endblock %}
 {# htmx only where a page uses it (/book): `{% block head %}` #}
 {% block head %}{% endblock %}
 </head>
-<body>
+<body{% block body_attrs %}{% endblock %}>
+{# NP6: shown only to a signed-in admin looking at a skin the clients do not get. #}
+{% if skin_preview %}<p class="skin-preview">Preview for you only: the {{ skin }} skin. Clients get the one set in Settings. <a href="?skin=live">End preview</a></p>{% endif %}
 <a class="skip-link" href="#main">{{ t.skip_to_content }}</a>
 <header>
   <div class="wrap">

@@ -1,0 +1,274 @@
+/* NP6: the "River" skin of the client site. Loaded after style.css by templates/river/base.html, and
+   only when the practice's `client_skin` is `river` (or an admin is previewing it). It re-paints the
+   tokens style.css already reads and lays the booking flow along one long vertical stream: spring
+   (session type), pool (day), stepping stones (times), later a bridge (details) and a quiet lake
+   (sent / status). Inline SVG and CSS only; no font, image or script is fetched.
+
+   Calm, not a game: nothing counts, scores, times or rewards. The water moves very slowly and
+   only where the visitor has not asked the system for less motion (the last block of this file).
+
+   Contrast, light: ink #12262b, soft #2c454b, muted #435c62 on the lightest and darkest background
+   used (#e9f4f6, #d7ebf0) are all above 4.5:1; button text #fff on #1b5b68 is above 7:1. The dark
+   palette is chosen the same way. The numbers are in the NP6 stage A report. */
+
+body.skin-river {
+  color-scheme: light;
+  --bg: #e9f4f6;
+  --bg-tint: #d7ebf0;
+  --surface: #f7fbfc;
+  --ink: #12262b;
+  --ink-soft: #2c454b;
+  --muted: #435c62;
+  --line: #b4d3da;
+  --line-strong: #7ea9b4;
+  --control: #4f7882;
+  --accent: #1b5b68;
+  --accent-hover: #134550;
+  --accent-ink: #ffffff;
+  --accent-soft: #cfe8ed;
+  --ring: #1b5b68;
+
+  --r-sky: #dff0f3;
+  --r-sun: #f3dc9a;
+  --r-hill-far: #bcdccb;
+  --r-hill: #9fcab5;
+  --r-water: #a6d2db;
+  --r-pool: #cfe8ed;
+  --r-stone: #ece6d8;
+  --r-stone-edge: #6f6955;
+  --r-stream: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 160'%3E%3Cpath d='M13 0Q17 40 13 80T13 160L27 160Q23 120 27 80T27 0Z' fill='%23a6d2db'/%3E%3Cpath d='M20 0Q24 40 20 80T20 160' fill='none' stroke='%23eaf6f8' stroke-width='1.6' stroke-dasharray='14 22' stroke-linecap='round'/%3E%3C/svg%3E");
+
+  --gut: 2.9rem;     /* the column the stream runs in, left of the content */
+  --mark: 2.4rem;    /* a place's round sign on the stream */
+  --stream-w: 2.5rem;
+
+  background-color: var(--bg);
+  background-image: linear-gradient(180deg, #f1f8f1 0, #e4f2f4 14rem, #d7ebf0 100%);
+}
+@media (min-width: 40rem) {
+  body.skin-river { --gut: 4.6rem; --mark: 3rem; --stream-w: 3rem; }
+  .skin-river .scene { height: auto; }
+}
+
+@media (prefers-color-scheme: dark) {
+  body.skin-river {
+    color-scheme: dark;
+    --bg: #0e1c21;
+    --bg-tint: #162a30;
+    --surface: #14282e;
+    --ink: #e3f0f2;
+    --ink-soft: #c4d9dd;
+    --muted: #9fbbc1;
+    --line: #2a4750;
+    --line-strong: #3f6a75;
+    --control: #78a3ad;
+    --accent: #7cc4d4;
+    --accent-hover: #9ad4e0;
+    --accent-ink: #0a1a1e;
+    --accent-soft: #17353d;
+    --ring: #7cc4d4;
+
+    --r-sky: #12303a;
+    --r-sun: #cdb877;
+    --r-hill-far: #1c3d3a;
+    --r-hill: #17332f;
+    --r-water: #245b69;
+    --r-pool: #123038;
+    --r-stone: #2b3a3c;
+    --r-stone-edge: #9aa7a0;
+    --r-stream: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 160'%3E%3Cpath d='M13 0Q17 40 13 80T13 160L27 160Q23 120 27 80T27 0Z' fill='%23245b69'/%3E%3Cpath d='M20 0Q24 40 20 80T20 160' fill='none' stroke='%235f9aa8' stroke-width='1.6' stroke-dasharray='14 22' stroke-linecap='round'/%3E%3C/svg%3E");
+    background-image: linear-gradient(180deg, #0f2127 0, #0e1c21 14rem, #0b171b 100%);
+  }
+}
+
+/* --- The stream and its places ---------------------------------------- */
+
+.skin-river .river { position: relative; padding-left: var(--gut); margin-top: .5rem; }
+.skin-river .river::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: calc((var(--gut) - var(--stream-w)) / 2);
+  width: var(--stream-w);
+  background: var(--r-stream) center top / 100% auto repeat-y;
+  -webkit-mask-image: linear-gradient(180deg, transparent, #000 2rem, #000 calc(100% - 2rem), transparent);
+  mask-image: linear-gradient(180deg, transparent, #000 2rem, #000 calc(100% - 2rem), transparent);
+  pointer-events: none;
+}
+.skin-river .place { position: relative; margin: 0 0 2.4rem; min-width: 0; }
+.skin-river .place > :last-child { margin-bottom: 0; }
+.skin-river .mark {
+  position: absolute;
+  top: 0;
+  left: calc(var(--gut) / -2 - var(--mark) / 2);
+  width: var(--mark);
+  height: var(--mark);
+}
+.skin-river .r-disc { fill: var(--surface); stroke: var(--line-strong); stroke-width: 1.5; }
+.skin-river .r-fill { fill: var(--r-water); }
+.skin-river .r-ring { fill: none; stroke: var(--surface); stroke-width: 1.4; opacity: .9; }
+.skin-river .r-stone { fill: var(--r-stone); stroke: var(--r-stone-edge); stroke-width: 1.2; }
+.skin-river .r-line-light { fill: none; stroke: var(--surface); stroke-width: 1.6; stroke-linecap: round; }
+.skin-river .r-sun { fill: var(--r-sun); }
+.skin-river .r-hill-far { fill: var(--r-hill-far); }
+.skin-river .r-hill { fill: var(--r-hill); }
+.skin-river .r-water { fill: var(--r-water); }
+.skin-river .scene {
+  display: block;
+  width: 100%;
+  height: 7.5rem;
+  margin: 0 0 1.5rem;
+  border-radius: var(--radius);
+  background: var(--r-sky);
+}
+
+/* --- Headings and text on the water ------------------------------------ */
+
+.skin-river .page-head { margin-bottom: 1.5rem; }
+.skin-river .place h2 { margin: 0 0 .8rem; font-size: 1.25rem; }
+.skin-river .place :where(legend) {
+  float: left;
+  width: 100%;
+  margin: 0 0 .8rem;
+  padding: 0;
+  color: var(--ink);
+  font-family: var(--serif);
+  font-size: 1.2rem;
+  font-weight: 600;
+  line-height: 1.3;
+  overflow-wrap: break-word;
+}
+.skin-river .place legend + * { clear: both; }
+.skin-river .place :where(h1, h2, h3, p, label, dd, dt, li) { overflow-wrap: break-word; }
+
+/* --- Landing ------------------------------------------------------------ */
+
+.skin-river .intro { margin: 0 0 2.4rem; padding-top: 0; }
+.skin-river .intro .portrait { margin-top: .25rem; }
+.skin-river .facts { margin: 0; box-shadow: var(--shadow-sm); }
+.skin-river .place .stack-actions { margin: 0; padding-top: .15rem; }
+.skin-river .how { margin-top: 0; }
+.skin-river .how-steps { counter-reset: how; gap: 1rem; }
+.skin-river .how-steps li { padding-left: 3.1rem; }
+.skin-river .how-steps li::before {
+  width: 2.4rem;
+  height: 1.9rem;
+  border: 1.5px solid var(--r-stone-edge);
+  border-radius: 55% 45% 52% 48% / 60% 55% 45% 40%;
+  background: var(--r-stone);
+  color: var(--ink);
+}
+.skin-river .her-words { margin: 0; padding: 0; border: 0; }
+.skin-river .lake > .topics { margin-top: .25rem; }
+.skin-river .lake { margin-bottom: 1rem; }
+
+/* --- The spring: type and how we meet ------------------------------------ */
+
+.skin-river .spring form > fieldset { margin: 0 0 1.5rem; padding: 0; border: 0; min-width: 0; }
+.skin-river .spring .pills { display: grid; gap: .55rem; }
+.skin-river .spring label.choice { margin: 0; min-height: 2.75rem; border-radius: 1.1rem; }
+.skin-river #tz-field { margin: 0 0 .5rem; }
+.skin-river .platforms {
+  margin: 0 0 1rem;
+  padding: 1rem 1.1rem;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-sm);
+  background: var(--bg-tint);
+}
+
+/* --- The pool: the day --------------------------------------------------- */
+
+.skin-river .pool {
+  position: relative;
+  margin: 0 0 .9rem;
+  padding: .9rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 2.2rem 1.6rem 2.4rem 1.8rem / 1.8rem 2.2rem 1.6rem 2.4rem;
+  background: var(--r-pool);
+  overflow: hidden;
+}
+.skin-river .pool::before {
+  content: "";
+  position: absolute;
+  right: -1.5rem;
+  bottom: -1.5rem;
+  width: 6rem;
+  height: 3rem;
+  border: 1.5px solid var(--surface);
+  border-radius: 50%;
+  opacity: .8;
+  pointer-events: none;
+}
+.skin-river .pool ul {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(4rem, 1fr));
+  gap: .5rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.skin-river .pool a {
+  display: grid;
+  justify-items: center;
+  align-content: center;
+  gap: .05rem;
+  min-height: 4.4rem;
+  padding: .45rem .25rem;
+  border: 1px solid var(--control);
+  border-radius: 1.3rem 1.1rem 1.4rem 1.2rem;
+  background: var(--surface);
+  color: var(--ink);
+  line-height: 1.2;
+  text-decoration: none;
+}
+.skin-river .pool a:hover { border-color: var(--accent); }
+.skin-river .pool a[aria-current="true"] {
+  border: 2px solid var(--accent);
+  background: var(--accent-soft);
+  box-shadow: none;
+}
+.skin-river .pool .dow, .skin-river .pool .mon { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .03em; }
+.skin-river .pool .num { font-family: var(--serif); font-size: 1.3rem; font-weight: 600; }
+.skin-river .pool .cnt { margin-top: .1rem; color: var(--accent); font-size: .8rem; font-weight: 600; }
+.skin-river .zone-line { margin: .25rem 0 0; }
+.skin-river .zone-line a { display: inline-block; padding: .35rem 0; }
+
+/* --- The stepping stones: the times --------------------------------------- */
+
+.skin-river .stones-place .part + .part { margin-top: 1.25rem; }
+.skin-river .stones-place .part h2 { margin: 0 0 .6rem; color: var(--muted); font-family: var(--sans); font-size: .82rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.skin-river .times.stones { grid-template-columns: repeat(auto-fill, minmax(5rem, 1fr)); gap: .6rem .55rem; padding-bottom: .35rem; }
+.skin-river .times.stones button {
+  min-height: 2.9rem;
+  border: 1.5px solid var(--r-stone-edge);
+  border-radius: 55% 45% 52% 48% / 62% 55% 45% 40%;
+  background: var(--r-stone);
+  color: var(--ink);
+}
+.skin-river .times.stones form:nth-child(even) button { transform: translateY(.3rem); }
+.skin-river .times.stones button:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); }
+.skin-river .waitlist-out a { display: inline-flex; align-items: center; min-height: 2.75rem; }
+
+/* --- The quiet lake: nothing free, sent, status --------------------------- */
+
+.skin-river .lake .muted { max-width: 34rem; }
+
+/* --- Motion: slow and gentle, and none when the system asks for less ------- */
+
+@media (prefers-reduced-motion: no-preference) {
+  .skin-river .river::before { animation: river-drift 26s linear infinite; }
+  .skin-river .pool::before { animation: river-ripple 7s ease-out infinite; }
+}
+@keyframes river-drift { to { background-position: center 160px; } }
+@keyframes river-ripple {
+  from { transform: scale(.7); opacity: .8; }
+  to { transform: scale(1.35); opacity: 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .skin-river *, .skin-river *::before, .skin-river *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

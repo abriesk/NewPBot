@@ -1,0 +1,49 @@
+<script>
+(function () {
+  var byName = function (n, v) { return document.querySelector('input[name=' + n + '][value=' + v + ']'); };
+  var show = function (id, on) { var el = document.getElementById(id); if (el) { el.hidden = !on; } };
+  var sync = function () {
+    var onsite = byName('modality', 'onsite').checked;
+    show('onsite-info', onsite);
+    show('tz-field', !onsite);
+    var link = document.querySelector('[data-zone-change]');
+    if (link) { link.hidden = onsite; }
+    show('online-info', !onsite);
+  };
+  Array.prototype.forEach.call(document.querySelectorAll('input[name=modality]'), function (r) {
+    r.addEventListener('change', sync);
+  });
+  // The "switch to the other kind" button in the slot list (an htmx partial) clicks the other radio.
+  // The listener sits on the card that holds both the form and #slots: the list is outside the form.
+  document.getElementById('picker-card').addEventListener('click', function (e) {
+    var b = e.target.closest ? e.target.closest('[data-switch-modality]') : null;
+    if (b) { byName('modality', b.getAttribute('data-switch-modality')).click(); }
+    // "change" on the zone line shows the choice (the fragment does it) and puts the keyboard in it.
+    var z = e.target.closest ? e.target.closest('[data-zone-change]') : null;
+    if (z) { setTimeout(function () { document.getElementById('tz').focus(); }, 0); }
+  });
+  // First visit: the zone cookie is written only by the end of this page, so the server rendered the practice's zone.
+  // Put the browser's zone in the select (adding it when it is not on the list) and, once htmx is up,
+  // ask for the times in it. Without htmx the list stays as the server rendered it.
+  try {
+    var detected = Intl.DateTimeFormat().resolvedOptions().timeZone;
+    var sel = document.getElementById('tz');
+    if (detected && sel && document.cookie.indexOf('pb_tz=') === -1) {
+      var found = Array.prototype.some.call(sel.options, function (o) { return o.value === detected; });
+      if (!found) {
+        var o = document.createElement('option');
+        o.value = detected;
+        o.textContent = detected.split('/').pop().replace(/_/g, ' ');
+        sel.appendChild(o);
+      }
+      if (sel.value !== detected) {
+        sel.value = detected;
+        window.addEventListener('load', function () {
+          sel.dispatchEvent(new Event('change', { bubbles: true }));
+        });
+      }
+    }
+  } catch (e) { /* the practice zone stays selected */ }
+  sync();
+})();
+</script>

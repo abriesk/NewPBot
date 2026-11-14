@@ -1030,3 +1030,7 @@ input[aria-invalid=true], textarea[aria-invalid=true] { border-color: #a3261c; }
 .held-card .held::before { content: none; }
 .held-card .held strong { margin-left: 0; }
 .how + .topics { margin-top: 2.5rem; }
+
+/* NP6: the admin-only preview line (see `_skin` in client.py); no client ever sees it. */
+.skin-preview { margin: 0; padding: .5rem 1.25rem; background: var(--ink); color: var(--bg); font-size: .85rem; text-align: center; }
+.skin-preview a { color: inherit; }

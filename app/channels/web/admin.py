@@ -2777,7 +2777,7 @@ def _settings_changes(form: Any) -> dict[str, Any]:
         if raw:
             changes[field] = int(raw)
 
-    for field in ("name", "timezone", "default_language"):
+    for field in ("name", "timezone", "default_language", "client_skin"):
         raw = form.get(field)
         if raw:
             changes[field] = str(raw)

@@ -1,0 +1,78 @@
+{# NP6: the river's booking page, steps 1 and 2 of the flow. Same form, same names and ids (the picker script and
+   htmx rely on them), same texts as book.html. The spring is the session type and how to meet; the pool (the day)
+   and the stepping stones (the times) are in partials/slots.html, swapped into #slots. #}
+{% extends "river/base.html" %}
+{% from "river/partials/art.html" import mark %}
+{% block title %}{{ t.consultation }} — {{ practice.name }}{% endblock %}
+{% block head %}<script src="/static/htmx.min.js" defer></script>{% endblock %}
+{% block content %}
+<div class="page-head">
+  <h1>{{ t.consultation }}</h1>
+  <p class="sr-only">{{ t.step.replace('{n}', '1').replace('{total}', '3') }}</p>
+</div>
+
+<div class="river" id="picker-card">
+  <section class="place spring">
+    {{ mark('spring') }}
+    <form method="get" action="/book" id="booking">
+      <fieldset {% if session_types|length < 2 %}hidden{% endif %}>
+        <legend>{{ t.choose_type }}</legend>
+        <div class="pills">
+        {% for st in session_types %}
+          <label class="choice">
+            <input type="radio" name="session_type_id" value="{{ st.id }}"
+                   {% if st.id == chosen_type %}checked{% endif %}
+                   hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
+            {{ st.label }}
+          </label>
+        {% endfor %}
+        </div>
+      </fieldset>
+
+      <fieldset {% if practice.online_only %}hidden{% endif %}>
+        <legend>{{ t.choose_modality }}</legend>
+        <div class="pills">
+        <label class="choice">
+          <input type="radio" name="modality" value="online" {% if chosen_modality != 'onsite' %}checked{% endif %}
+                 hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
+          {{ t.modality_online }}
+        </label>
+        <label class="choice">
+          <input type="radio" name="modality" value="onsite" {% if chosen_modality == 'onsite' %}checked{% endif %}
+                 hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
+          {{ t.modality_onsite }}
+        </label>
+        </div>
+      </fieldset>
+
+      <p id="onsite-info" hidden class="muted">
+        {% if practice.clinic_onsite_url %}
+          {% set parts = t.onsite_info.split(practice.clinic_onsite_url, 1) %}{{ parts[0] }}<a href="{{ practice.clinic_onsite_url }}">{{ practice.clinic_onsite_url }}</a>{{ parts[1] if parts|length > 1 else '' }}
+        {% else %}{{ t.onsite_no_address }}{% endif %}
+      </p>
+
+      {% if online_info %}
+        <div id="online-info" class="platforms prose">
+          {% for html in online_info %}{{ html | safe }}{% endfor %}
+        </div>
+      {% endif %}
+
+      <fieldset id="tz-field">
+        <div class="zone-choice">
+          <label for="tz">{{ t.choose_timezone }}</label>
+          <select name="tz" id="tz" hx-get="/book/slots" hx-target="#slots" hx-include="#booking">
+            {% for option in timezones %}
+              <option value="{{ option.iana_name }}" {% if option.iana_name == tz %}selected{% endif %}>{{ option.label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </fieldset>
+
+      <noscript><button type="submit" class="secondary">{{ t.picker_show_times }}</button></noscript>
+    </form>
+  </section>
+  {# Outside the form on purpose: every time is a form of its own (POST /book/hold), and forms do not nest. #}
+  <div id="slots" aria-live="polite">{% include "river/partials/slots.html" %}</div>
+</div>
+{% include "partials/book_js.html" %}
+{% endblock %}

@@ -53,6 +53,15 @@
     <label>Clinic address link
       <input type="text" name="clinic_onsite_url" value="{{ practice.clinic_onsite_url or '' }}">
     </label>
+    <label>Look of the client site
+      <select name="client_skin">
+        <option value="default" {% if practice.client_skin != "river" %}selected{% endif %}>Default</option>
+        <option value="river" {% if practice.client_skin == "river" %}selected{% endif %}>River (a calm stream: one long page)</option>
+      </select>
+      <small>What your clients see. To look at the River page before you switch, open
+        <code>/?skin=river</code> while you are signed in here: only you see it, and
+        <code>/?skin=live</code> goes back to what clients get.</small>
+    </label>
     <label>Languages you work in
       <input type="text" name="languages" maxlength="120" value="{{ practice.languages or '' }}"
              placeholder="Русский, English">

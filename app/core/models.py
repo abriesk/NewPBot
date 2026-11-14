@@ -160,6 +160,9 @@ class Practice(Base):
     #: NP4b: the languages she sees clients in, written by her as one line ("Русский, English").
     #: Empty until she writes it: the client site then leaves that fact out.
     languages: Mapped[str | None] = mapped_column(Text)
+    #: NP6: which look the client site has (`default` or `river`); the allowed names are
+    #: `settings.CLIENT_SKINS`. A column beside the other settings: no key/value table exists.
+    client_skin: Mapped[str] = mapped_column(Text, nullable=False, server_default="default")
     created_at: Mapped[datetime] = _tstz(nullable=False, server_default=func.now())
     updated_at: Mapped[datetime] = _updated_at()
 

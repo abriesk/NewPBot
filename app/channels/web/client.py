@@ -30,6 +30,7 @@ from app.channels.web.security import (
     client_session_value,
     csrf_ok,
     csrf_token_for,
+    current_admin,
     current_client_id,
     issue_client_session,
     issue_csrf,
@@ -70,7 +71,7 @@ from app.core.services.clients import (
 )
 from app.core.services.flow import Step
 from app.core.services.notifications import Envelope, Recipient
-from app.core.services.settings import get_practice
+from app.core.services.settings import CLIENT_SKINS, get_practice
 from app.core.services.slots import list_available_slots, open_slot_start
 from app.core.services.translations import get_text
 from app.db import unit_of_work
@@ -643,6 +644,37 @@ async def _facts(session: AsyncSession, context: dict[str, Any]) -> list[dict[st
     return facts
 
 
+SKIN_COOKIE = "pb_skin_preview"
+
+
+async def _skin(session: AsyncSession, request: Request, practice: Practice) -> dict[str, Any]:
+    """NP6: the look this request gets. Clients get the practice's `client_skin`.
+
+    The preview (`?skin=river`, `?skin=default`; `?skin=live` ends it) is for a signed-in admin
+    only: it is kept in a cookie so the pages and the htmx swaps that follow show the same skin,
+    and the cookie is read only together with a valid admin session, so for anybody else it does
+    nothing.
+    """
+    live = practice.client_skin if practice.client_skin in CLIENT_SKINS else "default"
+    asked = request.query_params.get("skin")
+    kept = request.cookies.get(SKIN_COOKIE)
+    out: dict[str, Any] = {"skin": live, "skin_preview": False, "skin_cookie": None}
+    if asked is None and kept is None:
+        return out
+    if await current_admin(session, request) is None:
+        return out
+    if asked == "live":
+        out["skin_cookie"] = ""
+        return out
+    chosen = asked if asked in CLIENT_SKINS else (kept if kept in CLIENT_SKINS else None)
+    if chosen is None:
+        return out
+    if asked in CLIENT_SKINS:
+        out["skin_cookie"] = asked
+    out.update(skin=chosen, skin_preview=True)
+    return out
+
+
 async def _context(
     session: AsyncSession, request: Request, lang: str | None = None
 ) -> dict[str, Any]:
@@ -670,6 +702,7 @@ async def _context(
     return {
         "request": request,
         "practice": practice,
+        **(await _skin(session, request, practice)),
         "lang": resolved,
         "topics": topics,
         "t": {
@@ -841,11 +874,31 @@ async def _error_page(
     )
 
 
+#: NP6: the templates the river skin has of its own. A page it does not have yet is the default one.
+RIVER_TEMPLATES = frozenset(
+    name for name in TEMPLATES.env.list_templates() if name.startswith("river/")
+)
+
+
 def _render(name: str, context: dict[str, Any], status_code: int = 200) -> HTMLResponse:
+    if context.get("skin") == "river" and f"river/{name}" in RIVER_TEMPLATES:
+        name = f"river/{name}"
     # Starlette takes the request first; the older (name, context) form is gone.
     response = TEMPLATES.TemplateResponse(
         context["request"], name, context, status_code=status_code
     )
+    cookie = context.get("skin_cookie")
+    if cookie:
+        response.set_cookie(
+            SKIN_COOKIE,
+            cookie,
+            httponly=True,
+            secure=get_settings().base_url.startswith("https://"),
+            samesite="lax",
+            path="/",
+        )
+    elif cookie == "":
+        response.delete_cookie(SKIN_COOKIE, path="/")
     # The cookie must carry exactly what the page embedded, or every form on
     # it would be rejected.
     issue_csrf(response, context.get("csrf_token"))
@@ -1139,7 +1192,8 @@ def build_router() -> APIRouter:
                 zone=zone,
                 day=day,
             )
-            return _render("partials/slots.html", view)
+            skin = await _skin(session, request, practice)
+            return _render("partials/slots.html", {**view, "skin": skin["skin"]})
 
     @router.post("/book/hold", include_in_schema=False)
     async def book_hold(
