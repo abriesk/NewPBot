@@ -24,12 +24,13 @@ import base64
 import binascii
 import json
 from dataclasses import dataclass, field
+from datetime import time
 from typing import Any
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.enums import BookingMode, ContentBlockKind
+from app.core.enums import BookingMode, ContentBlockKind, Modality
 from app.core.errors import DomainError
 from app.core.models import (
     ContentBlock,
@@ -37,12 +38,14 @@ from app.core.models import (
     SessionType,
     TimezoneOption,
     Translation,
+    WeekTemplate,
 )
 from app.core.policies import now_utc
 from app.core.services import photo as photo_service
 from app.core.services.content import upsert_block
 from app.core.services.settings import MUTABLE_FIELDS, get_practice, update_settings
 from app.core.services.translations import invalidate_cache, set_text
+from app.core.services.week_templates import BadTemplate, clean_name
 
 #: What the envelope must say. A file that does not say it is not ours.
 FORMAT = "psychobooking.config"
@@ -63,6 +66,7 @@ SECTIONS = (
     "timezone_options",
     "content",
     "translations",
+    "week_templates",
 )
 
 _ENVELOPE = ("format", "version", "exported_at")
@@ -222,6 +226,10 @@ async def export_config(session: AsyncSession) -> dict[str, Any]:
         )
     ).all()
 
+    week_templates = (
+        (await session.execute(select(WeekTemplate).order_by(WeekTemplate.name))).scalars().all()
+    )
+
     by_topic: dict[int, list[dict[str, Any]]] = {}
     for block in blocks:
         by_topic.setdefault(block.topic_id, []).append(_row(block, _BLOCK_FIELDS))
@@ -258,6 +266,10 @@ async def export_config(session: AsyncSession) -> dict[str, Any]:
             {**_row(topic, _TOPIC_FIELDS), "blocks": by_topic.get(topic.id, [])} for topic in topics
         ],
         "translations": {lang: catalogue.get(lang, {}) for lang in sorted(catalogue)},
+        "week_templates": [
+            {"name": row.name, "entries": [dict(entry) for entry in row.entries]}
+            for row in week_templates
+        ],
     }
 
 
@@ -366,6 +378,7 @@ async def _apply(session: AsyncSession, payload: dict[str, Any], *, applied: boo
     await _import_timezones(session, payload.get("timezone_options"), report)
     await _import_content(session, payload.get("content"), report)
     await _import_translations(session, payload.get("translations"), report)
+    await _import_week_templates(session, payload.get("week_templates"), report)
 
     await session.flush()
     return report
@@ -703,3 +716,108 @@ __all__ = [
     "import_config",
     "load_config",
 ]
+
+
+#: A week template: how many entries, and what one entry may say. The Slots form allows 15-minute
+#: steps; nothing here may make a slot the form would refuse.
+_TEMPLATE_ENTRIES_MAX = 300
+_TEMPLATE_ENTRY_FIELDS = ("weekday", "time", "duration_min", "modality")
+_DURATION_RANGE = (15, 480)
+
+
+def _template_entry(raw: Any, where: str) -> dict[str, Any]:
+    """One validated, normalised entry, so two files that say the same thing compare equal."""
+    if not isinstance(raw, dict):
+        raise ConfigInvalid(f"{where}: every entry must be an object")
+    unknown = sorted(set(raw) - set(_TEMPLATE_ENTRY_FIELDS))
+    if unknown:
+        raise ConfigInvalid(f"{where}: unknown field(s): {unknown}")
+    weekday, at, duration = raw.get("weekday"), raw.get("time"), raw.get("duration_min")
+    if type(weekday) is not int or not 0 <= weekday <= 6:
+        raise ConfigInvalid(
+            f"{where}: weekday must be a whole number 0 (Monday) to 6, not {weekday!r}"
+        )
+    if not isinstance(at, str) or len(at) != 5 or at[2] != ":":
+        raise ConfigInvalid(f"{where}: time must be written HH:MM, not {at!r}")
+    try:
+        at = time.fromisoformat(at).strftime("%H:%M")
+    except ValueError as exc:
+        raise ConfigInvalid(f"{where}: time must be a real clock time, not {at!r}") from exc
+    low, high = _DURATION_RANGE
+    if type(duration) is not int or not low <= duration <= high:
+        raise ConfigInvalid(f"{where}: duration_min must be a whole number from {low} to {high}")
+    modality = raw.get("modality")
+    if modality is not None:
+        modality = _enum(Modality, modality, f"{where}.modality")
+        modality = modality.value
+    return {"weekday": weekday, "time": at, "duration_min": duration, "modality": modality}
+
+
+async def _import_week_templates(session: AsyncSession, raw: Any, report: ImportReport) -> None:
+    """NP5c: named week patterns. Matched by name, added or replaced, never deleted (like every
+    other section). A malformed name or pattern refuses the whole file."""
+    entry = report.section("week_templates")
+    practice = await get_practice(session)
+    seen: set[str] = set()
+
+    for item in _dicts(raw, "week_templates"):
+        unknown = sorted(set(item) - {"name", "entries"})
+        if unknown:
+            raise ConfigInvalid(f"week_templates: unknown field(s): {unknown}")
+        try:
+            name = clean_name(item["name"] if isinstance(item.get("name"), str) else "")
+        except BadTemplate as exc:
+            raise ConfigInvalid(
+                "week_templates: every template needs a name of 1 to 60 characters"
+            ) from exc
+        if name in seen:
+            raise ConfigInvalid(f"week_templates: two templates are named {name!r}")
+        seen.add(name)
+
+        where = f"week_templates[{name}]"
+        entries_raw = item.get("entries")
+        if not isinstance(entries_raw, list) or not entries_raw:
+            raise ConfigInvalid(f"{where}: expected a non-empty list of entries")
+        if len(entries_raw) > _TEMPLATE_ENTRIES_MAX:
+            raise ConfigInvalid(f"{where}: at most {_TEMPLATE_ENTRIES_MAX} entries")
+        entries = sorted(
+            (_template_entry(e, f"{where}.entries") for e in entries_raw),
+            key=lambda e: (e["weekday"], e["time"]),
+        )
+        keys = [(e["weekday"], e["time"]) for e in entries]
+        if len(set(keys)) != len(keys):
+            raise ConfigInvalid(f"{where}: two entries share a weekday and a time")
+
+        existing = (
+            await session.execute(
+                select(WeekTemplate).where(
+                    WeekTemplate.practice_id == practice.id, WeekTemplate.name == name
+                )
+            )
+        ).scalar_one_or_none()
+        if existing is None:
+            session.add(WeekTemplate(practice_id=practice.id, name=name, entries=entries))
+            entry.created += 1
+        elif _normalised(existing.entries) == entries:
+            entry.unchanged += 1
+        else:
+            existing.entries = entries
+            entry.updated += 1
+
+    await session.flush()
+
+
+def _normalised(stored: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """What is stored, in the shape an import writes, so an unchanged template compares equal."""
+    return sorted(
+        (
+            {
+                "weekday": int(e["weekday"]),
+                "time": str(e["time"]),
+                "duration_min": int(e["duration_min"]),
+                "modality": e.get("modality") or None,
+            }
+            for e in stored
+        ),
+        key=lambda e: (e["weekday"], e["time"]),
+    )

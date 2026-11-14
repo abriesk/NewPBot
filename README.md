@@ -169,19 +169,27 @@ Everything the therapist changes is in the admin UI, not in `.env`:
 availability, booking mode, prices, session types, reminder offsets, the
 timezone list, retention, and all practice content.
 
+On a phone the top of every admin page carries the five daily pages — Today,
+Requests, Schedule, Slots, Waitlist — and **More** (`/admin/more`), which lists
+the rest; a computer shows every page in one row. Tables become cards under
+40rem, the week grid shows one day at a time, and the Slots list is folded by
+day.
+
 | Page | For |
 |---|---|
-| `/admin/requests` | Approve, propose another time, reject, cancel |
+| `/admin` (Today) | Who is waiting, with Approve on the row; today's and tomorrow's sessions; delivery and waitlist counts; the two daily switches |
+| `/admin/requests` | The list (opens on "Needs you"): approve, propose another time, reject, cancel; `?view=grid` is the week Schedule with free and blocked times, Block day, **Copy this week to next week** and named week templates |
 | `/admin/waitlist` | Mark contacted, converted, closed |
-| `/admin/slots` | Create a week at a time, block, delete |
+| `/admin/slots` | Create slots for a range of dates, block a date range, the upcoming slots by day |
+| `/admin/more` | The other pages, one line each |
 | `/admin/content` | Edit blocks, preview per channel, roll back |
 | `/admin/translations` | Reword UI strings; see what is missing per language |
-| `/admin/delivery` | Whether a message actually went out |
-| `/admin/clients` | Export everything about one person, or erase them |
+| `/admin/delivery` | Whether a message actually went out; **Retry** on a dead one |
+| `/admin/clients` | The practice's people; `/admin/privacy` exports or erases one |
 | `/admin/maintenance` | Export and import the configuration; download a backup |
 | `/admin/help` | The admin guide, in English or Russian |
 | `/admin/status` | The traffic light: what is working, and what to tell your IT person |
-| `/admin/settings` | The knobs above |
+| `/admin/settings` | Booking rules, her photo and languages, the unverified-email hold, per-address booking limit, captcha, theme |
 
 Telegram keeps a reduced admin surface for when you are away from a desk:
 `/admin` in the bot lists open requests and toggles availability, and the
@@ -191,7 +199,8 @@ settings are web-only and reply with a link.
 ### Configuration: export and import
 
 `/admin/maintenance` downloads everything typed into the admin UI as one JSON
-file — settings, session types, timezones, topics, blocks, translations. It
+file — settings, session types, timezones, topics, blocks, translations,
+her photo and named week templates. It
 carries **no client data**, so unlike a database dump it is safe to keep in a
 password manager or send to whoever is helping you rebuild.
 

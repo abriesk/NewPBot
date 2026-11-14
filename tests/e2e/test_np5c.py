@@ -170,3 +170,27 @@ def test_requests_clients_and_delivery_tables_become_cards_on_a_phone(web: TestC
     css = open("app/channels/web/static/admin.css", encoding="utf-8").read()
     assert ".stacked td[data-label]::before" in css and "max-width: 40rem" in css
     assert "nav.tabs { display: none; }" in css  # the phone bar is hidden on a wide screen
+
+
+# --- week templates in the config file ------------------------------------------------------------
+
+
+async def test_a_bad_template_in_an_uploaded_file_is_an_alert_not_a_500(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    import json
+
+    from tests.e2e.test_admin_web import _csrf
+
+    _sign_in(web)
+    exported = json.loads(web.get("/admin/maintenance/config/export").text)
+    assert exported["week_templates"] == [] or isinstance(exported["week_templates"], list)
+    exported["week_templates"] = [{"name": "Bad", "entries": [{"weekday": 9, "time": "10:00"}]}]
+    response = web.post(
+        "/admin/maintenance/config/import",
+        data={"csrf_token": _csrf(web), "apply": "1"},
+        files={"file": ("config.json", json.dumps(exported), "application/json")},
+    )
+    assert response.status_code == 400
+    assert 'class="flash error" role="alert"' in response.text
+    assert "week_templates[Bad]" in response.text

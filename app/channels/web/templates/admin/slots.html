@@ -59,8 +59,12 @@
   </form>
 </details>
 
-{% set tools_id = "slots" %}
-{% include "admin/partials/week_tools.html" %}
+{# Folded like the two above: on a phone it is the tallest thing on the page. #}
+<details class="create card tools-fold">
+  <summary>Copy this week and week templates</summary>
+  {% set tools_id = "slots" %}
+  {% include "admin/partials/week_tools.html" %}
+</details>
 
 <h2>Upcoming <span class="count">{{ count }}</span></h2>
 <div class="slot-days">
@@ -73,9 +77,11 @@
     <ul class="slots">
     {% for s in day.slots %}
       <li id="slot-{{ s.id }}">
-        <span class="at">{{ s.time }}</span>
-        <span class="badge {{ s.status }}">{{ s.status | human("slot") }}</span>
-        <span class="meta">{{ s.modality | human("modality") }} · {{ s.duration }} min</span>
+        <div class="info">
+          <span class="at">{{ s.time }}</span>
+          <span class="badge {{ s.status }}">{{ s.status | human("slot") }}</span>
+          <span class="meta">{{ s.modality | human("modality") }} · {{ s.duration }} min</span>
+        </div>
         <div class="admin-actions">
         {% if s.status == "available" %}
           <form method="post" action="/admin/slots/{{ s.id }}/block">

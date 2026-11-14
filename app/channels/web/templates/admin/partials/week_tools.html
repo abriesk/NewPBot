@@ -9,9 +9,9 @@
     <input type="hidden" name="source" value="{{ tools_week }}">
     <input type="hidden" name="target" value="{{ repeat_target }}">
     {% if week_back %}<input type="hidden" name="week" value="{{ week_back }}">{% endif %}
-    <button type="submit">Repeat this week into next week</button>
-    <span class="muted">{{ repeat_label }}. Skips slots that exist and times already past; a blocked
-      day is not copied.</span>
+    <button type="submit">Copy this week to next week</button>
+    <span class="muted">{{ repeat_label }}. Skips slots that exist and times already past; blocked
+      slots are not copied.</span>
   </form>
 
   <form method="post" action="/admin/slots/templates" class="tool">

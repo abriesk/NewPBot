@@ -480,13 +480,18 @@ async def test_repeat_week_reports_what_it_made_and_skips_what_exists(
     location = _post(web, "/admin/slots/repeat-week", source=str(MONDAY), week=str(MONDAY))
     assert location.startswith(f"/admin/requests?view=grid&start={nxt}"), "lands on the new week"
     sentence = _flash_of(web, location)
-    assert sentence.startswith("Copied 2 new slots.") and "1 already existed" in sentence
+    assert (
+        sentence.startswith("Copied this week to next week: 2 new slots.")
+        and "1 already existed" in sentence
+    )
     assert set((await _day_status(committed, nxt)).keys()) == {"10:00", "11:00"}
     assert (await _day_status(committed, nxt + timedelta(days=2))) == {"15:00": "available"}
 
     again = _post(web, "/admin/slots/repeat-week", source=str(MONDAY))
     assert again.startswith("/admin/slots") and "flash=repeated-0-3-0-0" in again
-    assert _flash_of(web, again).startswith("Copied no new slots. 3 already existed")
+    assert _flash_of(web, again).startswith(
+        "Copied this week to next week: no new slots. 3 already existed"
+    )
 
 
 async def test_the_slots_page_and_grid_carry_the_repeat_and_template_forms(
@@ -558,7 +563,8 @@ def test_the_new_flash_codes_become_sentences() -> None:
     text, kind = _flash("no-block:Tue 6 Jun 10:00") or ("", "")
     assert kind == "error" and "Tue 6 Jun 10:00" in text and "Move or cancel" in text
     assert _flash("repeated-8-3-2-1") == (
-        "Copied 8 new slots. 3 already existed; 2 in the past were skipped; "
+        "Copied this week to next week: 8 new slots. 3 already existed; 2 in the past "
+        "were skipped; "
         "1 blocked slot not copied.",
         "ok",
     )

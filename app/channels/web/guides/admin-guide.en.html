@@ -236,7 +236,11 @@
     margin-top: 40px;
   }
   @media (max-width: 860px) {
-    .app { grid-template-columns: 1fr; }
+    .app { grid-template-columns: minmax(0, 1fr); }
+    /* NP5c: nothing may widen the page: long codes and wide tables wrap or scroll in their own box. */
+    main { min-width: 0; }
+    td, th, code, li, p { overflow-wrap: anywhere; }
+    .flow, pre { max-width: 100%; }
     aside {
       position: relative;
       height: auto;
@@ -343,7 +347,7 @@
         <tbody>
           <tr><td>Today</td><td><code>/admin</code></td><td>The home screen: who is waiting for you (with Approve on the row), today's and tomorrow's sessions, the delivery and waitlist counts, and the two daily switches</td></tr>
           <tr><td>Requests</td><td><code>/admin/requests</code></td><td>The list. Opens on <strong>Needs you</strong>; the other statuses are one tap away</td></tr>
-          <tr><td>Schedule</td><td><code>/admin/requests?view=grid</code></td><td>The week: sessions and your free times, Block, repeat last week, templates</td></tr>
+          <tr><td>Schedule</td><td><code>/admin/requests?view=grid</code></td><td>The week: sessions and your free times, Block, copy this week, templates</td></tr>
           <tr><td>Slots</td><td><code>/admin/slots</code></td><td>Open times for a range of dates, block a date range, the list of upcoming slots day by day</td></tr>
           <tr><td>Waitlist</td><td><code>/admin/waitlist</code></td><td>People waiting while bookings are closed</td></tr>
         </tbody>
@@ -375,7 +379,7 @@
         <li>For a row with <strong>Open</strong> instead of Approve, open the request, read what they wrote (detail page only) and approve at a time, propose another, or reject.</li>
         <li>Before proposing a time of your own, look at the <strong>Schedule</strong>: your sessions and your free times for the week are on it. The request page also offers your free times as buttons.</li>
         <li>Under <strong>At a glance</strong>: the waitlist, and whether every message was delivered — a red count links straight to the ones that gave up.</li>
-        <li>Once a week: <strong>Schedule</strong> → <em>Repeat this week into next week</em>, or apply a saved template (section 7).</li>
+        <li>Once a week: <strong>Schedule</strong> → <em>Copy this week to next week</em>, or apply a saved template (section 7).</li>
         <li>Going away for a day or a week: <strong>Block day</strong> on the Schedule, or <strong>Slots</strong> → <em>Block a date range</em>. Closing bookings altogether is the switch on Today.</li>
         <li>On the phone, send <code>/admin</code> to the bot.</li>
       </ol>
@@ -494,8 +498,8 @@
         <li>Duration (default 60) and an optional modality lock (online / onsite / either).</li>
         <li>Create. You are told how many were made.</li>
       </ol>
-      <p><strong>Repeat last week — “Repeat this week into next week”.</strong> On the Schedule and on Slots, under <em>Copy and templates</em>. One tap copies the slots of the week you are looking at into the following week, day for day, and says how many it made. It skips a time that already exists and a time already past, and a blocked slot is not copied (the message says how many).</p>
-      <p><strong>Templates.</strong> Same box: <em>Save the week of … as a template</em> and give it a name (“Normal week”). Under <em>Your templates</em>, <em>Apply</em> lays that pattern on any From–To dates (it fills in next Monday to Sunday); <em>Delete…</em> asks first and leaves the slots already made. Saving under a name that exists replaces that template.</p>
+      <p><strong>Copy a week — “Copy this week to next week”.</strong> On the Schedule and on Slots, under <em>Copy and templates</em>. One tap copies the slots of the week you are looking at into the following week, day for day, and says how many it made. It skips a time that already exists and a time already past, and a blocked slot is not copied (the message says how many).</p>
+      <p><strong>Templates.</strong> Same box: <em>Save the week of … as a template</em> and give it a name (“Normal week”). Under <em>Your templates</em>, <em>Apply</em> lays that pattern on any From–To dates (it fills in next Monday to Sunday); <em>Delete…</em> asks first and leaves the slots already made. Saving under a name that exists replaces that template. Templates travel in the configuration export and import (Maintenance): an import adds or replaces by name and never deletes another, and a malformed template refuses the file with a message naming it.</p>
       <h3>Look at them and take them away</h3>
       <p><strong>On the Schedule</strong> the free times are in each day beside the sessions, dashed with a green edge; a blocked time is struck through and red. <em>Block</em> / <em>Unblock</em> on the time does it in one tap and brings you back to the same day. <em>Block day</em> (and <em>Free day</em> to undo) in the day's heading does the whole day. A time a session already covers says <em>Covered</em>; times already past have no button.</p>
       <p><strong>Block a date range</strong> (Slots, folded): From / To, <em>Block these days</em> or <em>Free them again</em>. For a holiday: one submit. If a session is booked in the range, <strong>nothing</strong> is blocked and you are told which times are in the way, so you can move that session first.</p>
@@ -510,7 +514,7 @@
         </tbody>
       </table>
       <div class="callout">A free time can say <strong>Cannot be deleted: a request asked for this time</strong>. Somebody once asked for that hour, and their request still records it — even if you rejected it, or it expired. Block it and it stops being offered; the old request keeps its history.</div>
-      <div class="callout">Slots are not in the configuration export. Repeat last week, or apply a template, to recreate them.</div>
+      <div class="callout">Slots are not in the configuration export (week templates are). Copy a week, or apply a template, to recreate them.</div>
     </section>
 
     <section class="card" id="settings">

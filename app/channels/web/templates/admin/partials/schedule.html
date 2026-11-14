@@ -18,7 +18,7 @@
     <a class="button-link" href="/admin/requests?view=grid&amp;start={{ day_prev }}&amp;day={{ day_prev }}"><span aria-hidden="true">&larr;</span> Previous day</a>
     <a class="button-link" href="/admin/requests?view=grid&amp;start={{ day_next }}&amp;day={{ day_next }}">Next day <span aria-hidden="true">&rarr;</span></a>
   </p>
-  <ul class="daystrip">
+  <ul class="weekpick">
     {% for day in days %}
       <li><a href="/admin/requests?view=grid&amp;start={{ week }}&amp;day={{ day.date }}"{% if day.shown %} aria-current="date"{% endif %}{% if day.today %} class="today"{% endif %}><span>{{ day.short }}</span><b>{{ day.num }}</b></a></li>
     {% endfor %}

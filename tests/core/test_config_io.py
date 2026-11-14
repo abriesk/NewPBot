@@ -12,11 +12,17 @@ import json
 from typing import Any
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import BookingMode
-from app.core.models import ContentBlock, ContentBlockRevision, ContentTopic, SessionType
+from app.core.models import (
+    ContentBlock,
+    ContentBlockRevision,
+    ContentTopic,
+    SessionType,
+    WeekTemplate,
+)
 from app.core.services.config_io import (
     FORMAT,
     VERSION,
@@ -71,6 +77,7 @@ async def test_the_export_is_exactly_the_admin_editable_configuration(db: AsyncS
         "timezone_options",
         "content",
         "translations",
+        "week_templates",
     } | ({"practice_photo"} & set(payload))  # NP5a: present only while she has a photo
     # §16.7: exactly MUTABLE_FIELDS, so adding a settings field does not
     # silently widen what an import can rewrite.
@@ -482,3 +489,122 @@ async def test_a_rejected_import_leaves_the_database_untouched(db: AsyncSession)
 
     practice = await get_practice(db)
     assert practice.slot_hold_minutes == hold_before
+
+
+# --- Week templates (NP5c) ------------------------------------------------------------------
+
+
+def _template(name: str, *entries: tuple[int, str, int, str | None]) -> dict[str, Any]:
+    return {
+        "name": name,
+        "entries": [
+            {"weekday": d, "time": t, "duration_min": n, "modality": m} for d, t, n, m in entries
+        ],
+    }
+
+
+async def _stored(db: AsyncSession) -> dict[str, list[dict[str, Any]]]:
+    rows = (await db.execute(select(WeekTemplate).order_by(WeekTemplate.name))).scalars().all()
+    return {row.name: sorted(row.entries, key=lambda e: (e["weekday"], e["time"])) for row in rows}
+
+
+async def test_week_templates_round_trip_through_export_wipe_import(db: AsyncSession) -> None:
+    payload = await export_config(db)
+    payload["week_templates"] = [
+        _template(
+            "Normal week",
+            (0, "10:00", 60, None),
+            (0, "11:00", 60, "online"),
+            (2, "15:30", 45, "onsite"),
+        ),
+        _template("Short", (4, "09:00", 60, None)),
+    ]
+    first = await import_config(db, payload, apply=True)
+    assert first.sections["week_templates"].created == 2
+    before = await _stored(db)
+    assert set(before) == {"Normal week", "Short"}
+
+    exported = (await export_config(db))["week_templates"]
+    assert [t["name"] for t in exported] == ["Normal week", "Short"]  # by name, no ids
+    assert all(
+        set(e) == {"weekday", "time", "duration_min", "modality"}
+        for t in exported
+        for e in t["entries"]
+    )
+
+    await db.execute(delete(WeekTemplate))
+    await db.flush()
+    assert await _stored(db) == {}
+    again = await import_config(db, {**payload, "week_templates": exported}, apply=True)
+    assert again.sections["week_templates"].created == 2
+    assert await _stored(db) == before
+
+    # Same file again: nothing to do. An altered pattern replaces by name; others stay.
+    same = await import_config(db, {**payload, "week_templates": exported}, apply=True)
+    assert same.sections["week_templates"].unchanged == 2
+    changed = [_template("Short", (4, "09:00", 90, None))]
+    report = await import_config(db, {**payload, "week_templates": changed}, apply=True)
+    assert report.sections["week_templates"].updated == 1
+    after = await _stored(db)
+    assert after["Short"][0]["duration_min"] == 90 and after["Normal week"] == before["Normal week"]
+
+
+@pytest.mark.parametrize(
+    "bad",
+    [
+        [{"name": "", "entries": [{"weekday": 0, "time": "10:00", "duration_min": 60}]}],
+        [{"name": "x" * 61, "entries": [{"weekday": 0, "time": "10:00", "duration_min": 60}]}],
+        [{"name": 5, "entries": [{"weekday": 0, "time": "10:00", "duration_min": 60}]}],
+        [{"name": "A", "entries": []}],
+        [{"name": "A", "entries": "10:00"}],
+        [{"name": "A", "entries": [{"weekday": 7, "time": "10:00", "duration_min": 60}]}],
+        [{"name": "A", "entries": [{"weekday": True, "time": "10:00", "duration_min": 60}]}],
+        [{"name": "A", "entries": [{"weekday": 0, "time": "25:00", "duration_min": 60}]}],
+        [{"name": "A", "entries": [{"weekday": 0, "time": "10:0", "duration_min": 60}]}],
+        [{"name": "A", "entries": [{"weekday": 0, "time": "10:00", "duration_min": 0}]}],
+        [{"name": "A", "entries": [{"weekday": 0, "time": "10:00", "duration_min": "60"}]}],
+        [
+            {
+                "name": "A",
+                "entries": [
+                    {"weekday": 0, "time": "10:00", "duration_min": 60, "modality": "boat"}
+                ],
+            }
+        ],
+        [{"name": "A", "entries": [{"weekday": 0, "time": "10:00", "duration_min": 60, "x": 1}]}],
+        [
+            {
+                "name": "A",
+                "entries": [
+                    {"weekday": 0, "time": "10:00", "duration_min": 60},
+                    {"weekday": 0, "time": "10:00", "duration_min": 30},
+                ],
+            }
+        ],
+        [_template("A", (0, "10:00", 60, None)), _template(" A ", (1, "10:00", 60, None))],
+        ["not an object"],
+        [
+            {
+                "name": "A",
+                "entries": [{"weekday": 0, "time": "10:00", "duration_min": 60}],
+                "extra": 1,
+            }
+        ],
+    ],
+)
+async def test_a_malformed_template_refuses_the_whole_file_and_writes_nothing(
+    db: AsyncSession, bad: Any
+) -> None:
+    payload = await export_config(db)
+    payload["week_templates"] = [_template("Fine", (1, "10:00", 60, None)), *bad]
+    with pytest.raises(ConfigInvalid):
+        await import_config(db, payload, apply=True)
+    assert await _stored(db) == {}
+
+
+async def test_a_template_in_a_preview_is_counted_but_not_written(db: AsyncSession) -> None:
+    payload = await export_config(db)
+    payload["week_templates"] = [_template("Preview", (0, "10:00", 60, None))]
+    report = await import_config(db, payload, apply=False)
+    assert report.sections["week_templates"].created == 1 and not report.applied
+    assert await _stored(db) == {}

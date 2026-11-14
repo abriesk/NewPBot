@@ -254,7 +254,10 @@ def _flash(code: str | None) -> tuple[str, str] | None:
             if count == 1:
                 return "Blocked 1 slot. It is no longer offered.", "ok"
             return f"Blocked {count} slots. They are no longer offered.", "ok"
-    for prefix, what in (("repeated-", "Copied"), ("applied-", "Applied the template:")):
+    for prefix, what in (
+        ("repeated-", "Copied this week to next week:"),
+        ("applied-", "Applied the template:"),
+    ):
         if code.startswith(prefix):
             sentence = _copy_sentence(what, code[len(prefix) :])
             if sentence:
