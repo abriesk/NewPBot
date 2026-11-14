@@ -241,10 +241,9 @@ def _flash(code: str | None) -> tuple[str, str] | None:
                 return f"Nothing to do: there are no {noun} in that range.", "ok"
             if verb == "Freed":
                 return f"{verb} {count} slot{'' if count == 1 else 's'}: offered again.", "ok"
-            return (
-                f"{verb} {count} slot{'' if count == 1 else 's'}. They are no longer offered.",
-                "ok",
-            )
+            if count == 1:
+                return "Blocked 1 slot. It is no longer offered.", "ok"
+            return f"Blocked {count} slots. They are no longer offered.", "ok"
     for prefix, what in (("repeated-", "Copied"), ("applied-", "Applied the template:")):
         if code.startswith(prefix):
             sentence = _copy_sentence(what, code[len(prefix) :])
