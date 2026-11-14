@@ -18,6 +18,7 @@ lang:
 
 common:
   skip: "Пропустить"
+  skipped: "Пропущено"   # TODO: review
   back: "Назад"                                  # TODO: confirm
   cancel: "Отмена"                               # TODO: confirm
   home: "На главную"   # TODO: review

@@ -851,6 +851,18 @@ async def _waterfall_details(
                     "act": f"goto:{name}",
                 }
             )
+        elif name != "email":
+            # An optional question that was skipped leaves a quiet stone, so it can be opened again.
+            skipped = await get_text(session, lang, "common.skipped")
+            stones.append(
+                {
+                    "kind": name,
+                    "label": skipped,
+                    "aria": f"{skipped}: {t['ask_' + name]}",
+                    "act": f"goto:{name}",
+                    "skipped": True,
+                }
+            )
     held_when = (
         await _format(session, datetime.fromisoformat(held_raw), context, reservation.get("tz"))
         if held_raw
@@ -1628,6 +1640,13 @@ def build_router() -> APIRouter:
             if reservation is None:
                 return RedirectResponse("/book", status_code=303)
             return await _details_page(session, request, context, client, reservation)
+
+    @router.get("/book/next", include_in_schema=False)
+    async def book_next_page(request: Request) -> Response:
+        """The language switch on a waterfall question is a GET to the page's own address; the
+        questions are posted, so a GET starts the details questions again in the chosen language."""
+        query = request.url.query
+        return RedirectResponse("/book/details" + (f"?{query}" if query else ""), status_code=303)
 
     @router.post("/book/next", include_in_schema=False)
     async def book_next(

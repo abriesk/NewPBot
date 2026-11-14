@@ -24,6 +24,7 @@ lang:
 
 common:
   skip: "Բաց թողնել"
+  skipped: "Բաց թողնված"   # TODO: review
   back: "Հետ"                                    # TODO: review
   cancel: "Չեղարկել"                             # TODO: review
   home: "Վերադառնալ"   # TODO: review

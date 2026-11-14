@@ -16,7 +16,7 @@ href="{{ o.href }}" hx-get="{{ o.frag }}" hx-target="#path" hx-swap="innerHTML" 
 {% if stones %}
 <ol class="trail">
   {% for s in stones %}
-  <li class="stone{% if loop.last and new_stone %} is-new{% endif %}" data-kind="{{ s.kind }}">
+  <li class="stone{% if s.skipped %} skipped{% endif %}{% if loop.last and new_stone %} is-new{% endif %}" data-kind="{{ s.kind }}">
     {% if s.act %}
     <button type="submit" name="act" value="{{ s.act }}" formnovalidate formaction="/book/next" hx-post="/book/next" hx-target="#path" hx-swap="innerHTML" hx-headers='{"X-WF": "back"}' aria-label="{{ t.change }}: {{ s.aria }}">
       <span class="stone-label">{{ s.label }}</span><span class="stone-edit" aria-hidden="true">{{ t.change }}</span>

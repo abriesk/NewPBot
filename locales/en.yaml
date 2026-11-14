@@ -23,6 +23,7 @@ lang:
 
 common:
   skip: "Skip"
+  skipped: "Skipped"
   back: "Back"
   cancel: "Cancel"
   home: "Back to the home page"

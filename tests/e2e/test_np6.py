@@ -111,7 +111,8 @@ def _hold_fields(html: str, slot_id: int | None = None) -> dict[str, str]:
 
 
 def _form_names(html: str, action: str) -> list[str]:
-    form = html.split(f'action="{action}"')[1].split("</form>")[0]
+    form = html.split('id="wf-form"')[1].split("</form>")[0]
+    assert f'action="{action}"' in html.split('id="wf-form"')[1].split(">")[0]
     return re.findall(r'<(?:input|textarea|select)[^>]*name="([a-z_]+)"', form)
 
 
@@ -236,7 +237,7 @@ async def _hold(web: TestClient, committed: AsyncSession, web_slot: int) -> str:
 def _next(web: TestClient, page: str, **answers: str) -> str:
     """Answer the question on `page` the way the form does without a script: every hidden field
     comes back, the visible one is typed."""
-    form = page.split('action="/book/next"')[1].split("</form>")[0]
+    form = page.split('id="wf-form"')[1].split("</form>")[0]
     fields = dict(re.findall(r'<input type="hidden" name="([a-z_]+)" value="([^"]*)"', form))
     fields.update({k: v for k, v in answers.items() if k != "act"})
     fields["act"] = answers.get("act", "next")
@@ -260,8 +261,8 @@ async def test_the_questions_after_the_time_are_one_page_each_and_carry_the_answ
         "name",
     ]
 
-    page = _next(web, page, name="Анна\nИванова")  # a text input strips line breaks
-    assert _kind(page) == "email" and "Анна Иванова" in page
+    page = _next(web, page, name="Zoya\nIvanova")  # a text input strips line breaks
+    assert _kind(page) == "email" and "Zoya Ivanova" in page
     # the address is required, and a refused one is an alert on the same question
     bad = _next(web, page, email="not-an-address")
     assert _kind(bad) == "email" and 'role="alert"' in bad
@@ -269,6 +270,8 @@ async def test_the_questions_after_the_time_are_one_page_each_and_carry_the_answ
     assert _kind(page) == "contact" and "waterfall@example.test" in page
     page = _next(web, page, act="skip", contact="never kept")  # skipped: no stone, nothing kept
     assert _kind(page) == "problem" and "never kept" not in page
+    # ... but a skipped question leaves a quiet stone that opens it again
+    assert 'class="stone skipped" data-kind="contact"' in page
     page = _next(web, page, problem="Line one\nLine two")
     assert _kind(page) == "send"
     # the last page posts the default flow's own form, every control name once
@@ -278,7 +281,7 @@ async def test_the_questions_after_the_time_are_one_page_each_and_carry_the_answ
 
     # a typed stone asks its question again, with the other answers kept
     back = _next(web, page, act="goto:name")
-    assert _kind(back) == "name" and 'value="Анна Иванова"' in back
+    assert _kind(back) == "name" and 'value="Zoya Ivanova"' in back
     assert 'name="email" value="waterfall@example.test"' in back
     # a stale page is told so, and what was typed is not repeated
     stale = web.post("/book/next", data={"csrf_token": "wrong", "step": "name", "name": "SECRET"})
@@ -328,7 +331,7 @@ async def test_both_flows_file_the_same_request(
         page = _next(web, page, contact="email is fine")
         page = _next(web, page, problem="work stress")
         names = _form_names(page, "/book")
-        form = page.split('action="/book"')[1].split("</form>")[0]
+        form = page.split('id="wf-form"')[1].split("</form>")[0]
         fields = dict(re.findall(r'<input type="hidden" name="([a-z_]+)" value="([^"]*)"', form))
         assert names.count("problem") == 1 and names.count("name") == 1
         done = web.post("/book", data=fields)
@@ -403,7 +406,7 @@ async def test_the_other_client_pages_answer_in_both_flows(
         ("/auth/email", 200, "<form"),
         ("/privacy", 200, "<h1"),
         ("/no-such-page", 404, "<h1"),
-        ("/r/00000000-0000-0000-0000-000000000000", 404, "<h1"),
+        ("/book/next", 200, "<form"),
     ):
         page = web.get(path)
         assert page.status_code == status and word in page.text, (skin, path)
