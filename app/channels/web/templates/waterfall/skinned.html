@@ -1,0 +1,5 @@
+{# NP6: any client page the waterfall has no layout of its own for (status, waitlist, confirm, errors, ...): the
+   default page, unchanged, in the waterfall's colours. `parent` is the default template's name. #}
+{% extends parent %}
+{% block skin_head %}<link rel="stylesheet" href="/static/waterfall.css">{% endblock %}
+{% block body_attrs %} class="skin-waterfall"{% endblock %}

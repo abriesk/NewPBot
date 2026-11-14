@@ -53,12 +53,12 @@
     <label>Clinic address link
       <input type="text" name="clinic_onsite_url" value="{{ practice.clinic_onsite_url or '' }}">
     </label>
-    <label>Look of the client site
+    <label>Client flow
       <select name="client_skin">
-        <option value="default" {% if practice.client_skin != "waterfall" %}selected{% endif %}>Default</option>
-        <option value="waterfall" {% if practice.client_skin == "waterfall" %}selected{% endif %}>Waterfall (one question at a time, the answers stack above)</option>
+        <option value="default" {% if practice.client_skin != "waterfall" %}selected{% endif %}>Default (the form on a few pages)</option>
+        <option value="waterfall" {% if practice.client_skin == "waterfall" %}selected{% endif %}>Waterfall (one question at a time)</option>
       </select>
-      <small>What your clients see. To look at the Waterfall booking before you switch, open
+      <small>How your clients book: the default form, or the Waterfall, which asks one question at a time and lets each answer settle into a small stone above the next question. Same rules, same requests in your inbox. To look at the Waterfall booking before you switch, open
         <code>/book?skin=waterfall</code> while you are signed in here: only you see it, and
         <code>/book?skin=live</code> goes back to what clients get.</small>
     </label>

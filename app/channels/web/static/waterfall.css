@@ -181,6 +181,74 @@ body.skin-waterfall {
 .skin-waterfall .ans.rock:hover { border-color: var(--accent); background: var(--accent-soft); }
 .skin-waterfall .lake p { margin: 0 0 1rem; }
 
+/* --- Questions after the time: one field each, and the quiet lake at the end ---- */
+
+.skin-waterfall .wf-form { display: contents; }
+.skin-waterfall .default-button { position: absolute; left: -9999px; width: 1px; height: 1px; opacity: 0; }
+.skin-waterfall .stone button {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: .7rem;
+  min-height: 2.75rem;
+  max-width: 100%;
+  padding: .45rem 1.15rem;
+  border: 1.5px solid var(--r-stone-edge);
+  border-radius: 1.5rem 1.2rem 1.6rem 1.3rem / 1.3rem 1.6rem 1.2rem 1.5rem;
+  background: var(--r-stone);
+  color: var(--ink);
+  font: inherit;
+  line-height: 1.25;
+  text-align: center;
+  cursor: pointer;
+}
+.skin-waterfall .stone button:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); box-shadow: none; }
+.skin-waterfall .field {
+  display: block;
+  width: 100%;
+  margin: 0 0 1rem;
+  padding: .85rem 1rem;
+  border: 1.5px solid var(--control);
+  border-radius: 1.1rem;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 1.05rem;
+  text-align: left;
+}
+.skin-waterfall .field:focus { outline: 2px solid var(--ring); outline-offset: 2px; }
+.skin-waterfall textarea.field { resize: vertical; min-height: 7rem; }
+.skin-waterfall .q .flash { margin: 0 0 1rem; padding: .7rem .9rem; border: 1.5px solid var(--accent); border-radius: .9rem; background: var(--accent-soft); color: var(--ink); text-align: left; }
+.skin-waterfall .q .hold { margin-top: 1.1rem; }
+.skin-waterfall .q-send .what-next { margin: 1.5rem 0 0; text-align: left; background: var(--bg-tint); }
+.skin-waterfall .answers .ans { width: 100%; }
+.skin-waterfall .zone { margin: .4rem 0 0; text-align: center; }
+.skin-waterfall .zone summary { display: inline-flex; align-items: center; min-height: 2.75rem; padding: 0 .5rem; color: var(--accent); text-decoration: underline; text-underline-offset: .18em; cursor: pointer; }
+.skin-waterfall .zone form { display: grid; gap: .6rem; margin-top: .4rem; text-align: left; }
+.skin-waterfall .zone select { width: 100%; min-height: 2.75rem; padding: .5rem .8rem; border: 1.5px solid var(--control); border-radius: .9rem; background: var(--surface); color: var(--ink); font: inherit; }
+.skin-waterfall .rocks form { display: contents; margin: 0; }
+
+/* The quiet lake: the request is sent */
+.skin-waterfall .lake-end { margin: 1rem 0 0; padding: 1.5rem 1.15rem 1.75rem; border: 1px solid var(--line-strong); border-radius: 1.7rem 1.4rem 1.8rem 1.5rem / 1.5rem 1.8rem 1.4rem 1.7rem; background: var(--surface); box-shadow: var(--shadow-md); text-align: center; }
+.skin-waterfall .lake-art { display: block; width: 100%; max-width: 17rem; height: auto; margin: 0 auto .5rem; overflow: visible; }
+.skin-waterfall .lake-water { fill: var(--r-water); }
+.skin-waterfall .lake-ring { fill: none; stroke: var(--surface); stroke-width: 1.6; opacity: .9; }
+.skin-waterfall .lake-photo { display: block; width: 6rem; height: 6rem; margin: -.25rem auto 1rem; border-radius: 50%; object-fit: cover; box-shadow: var(--shadow-md); }
+.skin-waterfall .lake-end h1 { margin: 0 0 .6rem; font-size: clamp(1.5rem, 1.2rem + 1.2vw, 1.9rem); }
+.skin-waterfall .lake-end .stack-actions { justify-content: center; }
+.skin-waterfall .lake-end .spark { fill: var(--r-sun); stroke: var(--r-stone-edge); stroke-width: .8; stroke-linejoin: round; }
+.skin-waterfall .wf .what-next { margin-top: 1.5rem; }
+.skin-waterfall .status-card, .skin-waterfall .card { border-radius: 1.5rem 1.2rem 1.6rem 1.3rem / 1.3rem 1.6rem 1.2rem 1.5rem; }
+
+@media (prefers-reduced-motion: no-preference) {
+  .skin-waterfall .lake-ring { transform-box: fill-box; transform-origin: center; animation: wf-ring 3.2s ease-out 2 both; }
+  .skin-waterfall .lake-ring.r2 { animation-delay: .9s; }
+  .skin-waterfall .lake-end .spark { transform-box: fill-box; transform-origin: center; animation: wf-twinkle 1.6s ease-in-out both; }
+  .skin-waterfall .lake-end .s2 { animation-delay: .25s; }
+  .skin-waterfall .lake-end .s3 { animation-delay: .5s; }
+}
+
 /* --- Motion: short, soft, and none when the system asks for less ------------ */
 
 @media (prefers-reduced-motion: no-preference) {
@@ -195,7 +263,7 @@ body.skin-waterfall {
   .skin-waterfall .s2 { animation-delay: .25s; }
   .skin-waterfall .s3 { animation-delay: .5s; }
   /* The answer that was just given condenses into its stone, with a little bounce and a ring. */
-  .skin-waterfall .stone.is-new a { animation: wf-condense .55s cubic-bezier(.3, .7, .4, 1) both; }
+  .skin-waterfall .stone.is-new :is(a, button) { animation: wf-condense .55s cubic-bezier(.3, .7, .4, 1) both; }
   .skin-waterfall .stone.is-new::before { content: ""; position: absolute; top: .2rem; left: 50%; margin-left: -1.1rem; width: 2.2rem; height: 2.2rem; border: 2px solid var(--accent); border-radius: 50%; opacity: 0; pointer-events: none; animation: wf-stone-ring .7s ease-out .1s both; }
   .skin-waterfall .stone.is-new::after { transform-origin: top; animation: wf-fill .35s ease-out both; }
   /* The tapped answer ripples from where it was touched. */

@@ -1,0 +1,30 @@
+{# NP6: the quiet lake: the request is sent (or the waitlist joined). Her photo, what happens next, one gentle
+   sparkle. Same message, links and what-next block as done.html. #}
+{% extends "base.html" %}
+{% block title %}{{ heading }} — {{ practice.name }}{% endblock %}
+{% block skin_head %}<link rel="stylesheet" href="/static/waterfall.css">{% endblock %}
+{% block body_attrs %} class="skin-waterfall"{% endblock %}
+{% block content %}
+<div class="wf">
+  <section class="lake-end" role="status">
+    <svg class="lake-art" viewBox="0 0 240 70" aria-hidden="true" focusable="false">
+      <ellipse class="lake-water" cx="120" cy="44" rx="112" ry="22"/>
+      <ellipse class="lake-ring r1" cx="120" cy="44" rx="30" ry="7"/>
+      <ellipse class="lake-ring r2" cx="120" cy="44" rx="56" ry="12"/>
+      <path class="spark s1" d="M44 20l2-6 2 6 6 2-6 2-2 6-2-6-6-2z"/>
+      <path class="spark s2" d="M120 12l1.6-4 1.6 4 4 1.6-4 1.6-1.6 4-1.6-4-4-1.6z"/>
+      <path class="spark s3" d="M196 20l2-6 2 6 6 2-6 2-2 6-2-6-6-2z"/>
+    </svg>
+    {% if photo_version %}<img class="lake-photo" src="/media/photo?v={{ photo_version }}" alt="{{ practice.name }}" width="96" height="96">{% endif %}
+    <h1>{{ heading }}</h1>
+    <p>{{ message }}</p>
+    {% if verify_notice %}<p class="muted">{{ verify_notice }}</p>{% endif %}
+    {% if telegram_link %}
+      <div class="stack-actions"><a class="cta" href="{{ telegram_link }}">{{ t.connect_telegram }}</a></div>
+      <p class="muted">{{ t.telegram_hint }}</p>
+    {% endif %}
+    <div class="stack-actions"><a class="link-back" href="/">{{ t.home }}</a></div>
+  </section>
+  {% include "partials/what_next.html" %}
+</div>
+{% endblock %}

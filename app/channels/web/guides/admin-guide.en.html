@@ -537,6 +537,7 @@
         <li><strong>Timezone</strong> must be IANA, e.g. <code>Asia/Yerevan</code> — never <code>UTC+4</code>.</li>
         <li><strong>Default language</strong> <code>ru</code> / <code>hy</code> / <code>en</code>.</li>
         <li><strong>Languages you work in</strong> — free text, shown to clients as one of three facts on the front page, as you write it (<em>Русский, English</em>). Empty shows nothing.</li>
+        <li><strong>Client flow</strong> — how clients book. <em>Default</em> is the booking form over three pages. <em>Waterfall</em> asks one question at a time (format, online or in person, day, time, name, address, contact, note), and each answer settles into a small stone above the next question; it works without JavaScript and holds still for visitors whose device asks for less motion. The rules, the 15-minute hold and the requests you receive are identical. To look at the Waterfall first, open <code>/book?skin=waterfall</code> while signed in here — only you see it; <code>/book?skin=live</code> ends the preview.</li>
         <li><strong>Clinic address link</strong> and <strong>standing meeting room</strong>. You can still override the meeting URL when approving.</li>
         <li>Join links are not sent by email; email points at the request page.</li>
         <li><strong>Slot hold</strong> (minutes) — how long a time is kept for a client who has picked it; <strong>pending expiry</strong> (hours), <strong>cancellation window</strong>, <strong>retention</strong> (months — free text is later cleared, rows stay).</li>

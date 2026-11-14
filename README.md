@@ -161,6 +161,32 @@ docker compose logs -f web worker
   pruning) run hourly, not every 20 s.
 - **The image is the runtime only** (see [Development](#development) for tests).
 
+## Client flow: Default or Waterfall (NP6)
+
+> **Owner's verdict on the first working version: not completely what he wanted, but closer than the first try (the river skin) - expect another round of changes to the flow.**
+
+`/admin/settings` has a setting **Client flow** (stored as `practice.client_skin`, `default` or
+`waterfall`; migration 0013, default `default`). It changes only how clients are asked; the booking
+rules, the hold, CSRF, rate limits, texts and the request row that reaches the therapist are the
+same, and `tests/e2e/test_np6.py` checks that the same answers file the same row in both.
+
+- **Default**: the form over three pages (unchanged).
+- **Waterfall**: one question on screen at a time -- format, online or in person, day, time, name, address
+  (skipped when signed in), contact, an optional note, then send. An answered question condenses into a
+  small stone at the top, tapping a stone asks it again, the next question falls in below. Playful but never
+  pressing: a drop, a ripple, a few sparkles at the end; no timers, scores or rewards, no sound. Under
+  `prefers-reduced-motion` nothing moves. Without JavaScript each question is a page of its own: the
+  pick questions are links carrying the answers in the address; the typed ones (name, address, contact,
+  note) travel as hidden fields of one form, never in an address. The time is the default flow's own
+  `POST /book/hold`; the last page is the default flow's own `POST /book`.
+- Pages the Waterfall has no layout of its own for (request status, waitlist, confirm, errors) keep the
+  default layout in the Waterfall's colours.
+- **Preview**: while signed in to the admin, `/book?skin=waterfall` (or `?skin=default`) shows that flow to
+  you alone; `?skin=live` ends it. Clients always get the setting.
+- Code: `app/channels/web/client.py` (`_waterfall_view`, `_waterfall_details`, `/book/q`, `/book/next`),
+  `templates/waterfall/`, `static/waterfall.css`, `static/waterfall.js`. Shots and recordings of the flow are
+  made with the lab's NP tooling, not the repo.
+
 ## Operations
 
 ### Day to day

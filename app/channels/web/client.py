@@ -208,6 +208,26 @@ async def _details_page(
     message about the whole form)."""
     t = context["t"]
     lang = context["lang"]
+    if context["skin"] == "waterfall":
+        # NP6: the same page, asked one question at a time. A refused address goes back to the
+        # address question; a stale page starts again at the first one, nothing typed repeated.
+        view = await _waterfall_details(
+            session,
+            context,
+            client,
+            reservation,
+            values=dict(values)
+            if values is not None
+            else {
+                "name": (client.display_name if client else None) or "",
+                "contact": (await booking.last_contact_note(session, client.id) if client else None)
+                or "",
+            },
+            step="email" if errors and errors.get("email") else "name",
+            errors=errors or {},
+            fragment=False,
+        )
+        return _render("details.html", {**context, **view}, status_code=status)
     # `booking.slot.held` carries {minutes}: the hold window the client is racing, so it must be a
     # number and not the placeholder (§15).
     labels = {
@@ -595,9 +615,10 @@ async def _waterfall_view(
         "picker_time": await get_text(session, lang, "picker.time"),
         "continue": await get_text(session, lang, "common.continue"),
     }
-    state: dict[str, Any] = {}
+    state: dict[str, Any] = {"tz": tz} if tz and _valid_zone(tz) else {}
     stones: list[dict[str, str]] = []
     out: dict[str, Any] = {
+        "phase": "pick",
         "kind": "",
         "options": [],
         "groups": [],
@@ -618,7 +639,8 @@ async def _waterfall_view(
         out["kind"] = kind
         out["stones"] = stones
         asked = [step for step in ("type", "mode", "day", "time") if step not in skipped]
-        out["step_total"] = len(asked)
+        # then name, how to reach her (the address, unless signed in), a contact line and a note
+        out["step_total"] = len(asked) + 3 + (0 if context["signed_in"] else 1)
         out["step_n"] = asked.index(kind) + 1 if kind in asked else 0
         return out
 
@@ -670,6 +692,9 @@ async def _waterfall_view(
         day=query.get("day"),
     )
     out["zone_line"] = picker["zone_line"]
+    if mode == "online":
+        platforms = await content.get_topic_blocks(session, ONLINE_PLATFORMS_TOPIC, lang)
+        out["online_info"] = [to_web_html(block.body_md) for block in platforms]
     if not picker["has_times"]:
         switch = picker["switch_to"]
         out["empty"] = {
@@ -683,6 +708,9 @@ async def _waterfall_view(
     day = query.get("day", "")
     if day not in strip:
         out["options"] = [{**row, **link(day=row["iso"])} for row in picker["strip"]]
+        out["zone_state"] = {key: value for key, value in state.items() if key != "tz"}
+        out["timezones"] = await _timezone_options(session, lang, zone)
+        out["zone"] = zone
         return finish("day")
     chosen = strip[day]
     answered(
@@ -693,28 +721,168 @@ async def _waterfall_view(
         picker["chosen_heading"],
     )
 
-    times = {t["id"]: t for group in picker["groups"] for t in group["times"]}
-    slot_id = _int_or_none(query.get("slot"))
-    if slot_id not in times:
-        out["groups"] = [
-            {
-                "title": group["title"],
-                "times": [{**t, **link(slot=t["id"])} for t in group["times"]],
-            }
-            for group in picker["groups"]
-        ]
-        return finish("time")
-    answered("time", "slot", slot_id, times[slot_id]["label"], times[slot_id]["aria"])
+    # The time: every time is a form of its own (the default flow's `POST /book/hold`), so the
+    # next question is the details page, entered through the same hold.
+    out["groups"] = picker["groups"]
+    out["hold"] = {"session_type_id": type_id, "modality": mode, "tz": zone}
+    out["zone_state"] = {key: value for key, value in state.items() if key != "tz"}
+    out["timezones"] = await _timezone_options(session, lang, zone)
+    out["zone"] = zone
+    return finish("time")
 
-    # What follows the time in stage B (name, contact, note, consent) is the details page for now:
-    # the same hold the default flow posts.
-    out["go"] = {
-        "slot_id": slot_id,
-        "session_type_id": type_id,
-        "modality": mode,
-        "tz": zone,
+
+async def _timezone_options(session: AsyncSession, lang: str, zone: str) -> list[dict[str, str]]:
+    """Her zone list, localised, plus the visitor's own when it is not on it (quick win 1)."""
+    rows = (
+        (
+            await session.execute(
+                select(TimezoneOption)
+                .where(TimezoneOption.is_active.is_(True))
+                .order_by(TimezoneOption.sort_order, TimezoneOption.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    ids = [row.iana_name for row in rows]
+    if zone not in ids:
+        ids.append(zone)
+    now = now_utc()
+    return [{"iana_name": iana, "label": zone_label(iana, lang, now)} for iana in ids]
+
+
+#: NP6: the questions after the time, in order. Their answers travel as hidden fields of the one
+#: form on the page (never in an address), so each question is a page of its own without a script.
+DETAIL_STEPS = ("name", "email", "contact", "problem")
+_STONE_TEXT_MAX = 40
+
+
+def _one_line(value: str, limit: int) -> str:
+    """A single-line answer: every kind of line break and run of spaces becomes one space."""
+    return " ".join(value.split())[:limit]
+
+
+def _short(value: str) -> str:
+    text = _one_line(value, 500)
+    return text if len(text) <= _STONE_TEXT_MAX else text[: _STONE_TEXT_MAX - 1] + "\u2026"
+
+
+async def _waterfall_details(
+    session: AsyncSession,
+    context: dict[str, Any],
+    client: Client | None,
+    reservation: dict[str, Any],
+    *,
+    values: dict[str, str],
+    step: str,
+    errors: dict[str, str],
+    fragment: bool,
+    new_stone: bool = False,
+) -> dict[str, Any]:
+    """NP6: the waterfall's questions after the time (name, address, contact, note, send).
+
+    The answers so far (the held time and the typed ones) are the stones; the answers are carried as
+    hidden fields except the one being asked. The last question posts the default flow's
+    `POST /book` with exactly the fields it has always taken.
+    """
+    lang = context["lang"]
+    practice = context["practice"]
+    t = context["t"]
+    zone = str(reservation.get("tz") or practice.timezone)
+    stones: list[dict[str, Any]] = []
+
+    type_id = int(reservation["session_type_id"])
+    types = await _session_type_options(session, lang)
+    label = next((row["label"] for row in types if row["id"] == type_id), "")
+    mode = str(reservation.get("modality", "online"))
+    held_raw = reservation.get("starts_at")
+    # The stones for what was picked lead back into the pick flow, one question each.
+    base: dict[str, Any] = {"tz": reservation.get("tz") or ""}
+    if label and len(types) > 1:
+        stones.append(
+            {"kind": "type", "label": label, "aria": label, "href": _wf_url("/book", base)}
+        )
+    base = {**base, "session_type_id": type_id}
+    if not practice.online_only:
+        stones.append(
+            {
+                "kind": "mode",
+                "label": t["modality_onsite"] if mode == "onsite" else t["modality_online"],
+                "aria": "",
+                "href": _wf_url("/book", base),
+            }
+        )
+    base = {**base, "modality": mode}
+    if held_raw:
+        local = datetime.fromisoformat(held_raw).astimezone(ZoneInfo(zone))
+        dow = await get_text(session, lang, f"date.weekday.{local.weekday()}")
+        mon = await get_text(session, lang, f"date.month.{local.month}")
+        stones.append(
+            {
+                "kind": "day",
+                "label": f"{dow} {local.day} {mon}",
+                "aria": "",
+                "href": _wf_url("/book", base),
+            }
+        )
+        stones.append(
+            {
+                "kind": "time",
+                "label": local.strftime("%H:%M"),
+                "aria": "",
+                "href": _wf_url("/book", {**base, "day": local.date().isoformat()}),
+            }
+        )
+    for stone in stones:
+        stone["aria"] = stone["aria"] or stone["label"]
+        stone["plain"] = True
+
+    asked = [name for name in DETAIL_STEPS if name != "email" or client is None]
+    kind = step if step in asked or step == "send" else asked[0]
+    for name in asked:
+        if name == kind:
+            break
+        if values.get(name):
+            stones.append(
+                {
+                    "kind": name,
+                    "label": _short(values[name]),
+                    "aria": _short(values[name]),
+                    "act": f"goto:{name}",
+                }
+            )
+    held_when = (
+        await _format(session, datetime.fromisoformat(held_raw), context, reservation.get("tz"))
+        if held_raw
+        else None
+    )
+    hold = await get_text(session, lang, "booking.slot.held", minutes=practice.slot_hold_minutes)
+    # the questions the visitor already passed or skipped travel along unchanged
+    hidden = [
+        {"name": name, "value": values.get(name, "")} for name in DETAIL_STEPS if name != kind
+    ]
+    # how many questions of the pick flow were asked (the others were skipped: one answer only)
+    picked = sum(1 for stone in stones if stone.get("plain"))
+    out: dict[str, Any] = {
+        "phase": "details",
+        "kind": kind,
+        "stones": stones,
+        "hidden": hidden,
+        "value": values.get(kind, ""),
+        "error": errors.get(kind) or errors.get("form") or "",
+        "hold_line": hold + (f" {held_when}" if held_when else ""),
+        "form_action": "/book" if kind == "send" else "/book/next",
+        "captcha": _challenge(practice) if kind == "send" else None,
+        "new_stone": fragment and new_stone,
+        "options": [],
+        "wf": {
+            "picker_time": await get_text(session, lang, "picker.time"),
+            "continue": await get_text(session, lang, "common.continue"),
+        },
     }
-    return finish("go")
+    out["step_total"] = picked + len(asked)
+    out["step_n"] = (picked + asked.index(kind) + 1) if kind != "send" else 0
+    return out
 
 
 async def _session_type_options(session: AsyncSession, lang: str) -> list[dict[str, Any]]:
@@ -884,10 +1052,15 @@ async def _context(
             }
         )
 
+    skin = await _skin(session, request, practice)
     return {
         "request": request,
         "practice": practice,
-        **(await _skin(session, request, practice)),
+        **skin,
+        # The waterfall's "sent" page shows her photo, as the front page does.
+        "photo_version": (
+            await photo_service.photo_version(session) if skin["skin"] == "waterfall" else None
+        ),
         "lang": resolved,
         "topics": topics,
         "t": {
@@ -1066,8 +1239,14 @@ WATERFALL_TEMPLATES = frozenset(
 
 
 def _render(name: str, context: dict[str, Any], status_code: int = 200) -> HTMLResponse:
-    if context.get("skin") == "waterfall" and f"waterfall/{name}" in WATERFALL_TEMPLATES:
-        name = f"waterfall/{name}"
+    if context.get("skin") == "waterfall" and not name.startswith(("waterfall/", "partials/")):
+        if f"waterfall/{name}" in WATERFALL_TEMPLATES:
+            name = f"waterfall/{name}"
+        else:
+            # A page the waterfall has no layout of its own for keeps its default layout, in the
+            # waterfall's colours: the wrapper only adds the stylesheet and the body class.
+            context = {**context, "parent": name}
+            name = "waterfall/skinned.html"
     # Starlette takes the request first; the older (name, context) form is gone.
     response = TEMPLATES.TemplateResponse(
         context["request"], name, context, status_code=status_code
@@ -1449,6 +1628,79 @@ def build_router() -> APIRouter:
             if reservation is None:
                 return RedirectResponse("/book", status_code=303)
             return await _details_page(session, request, context, client, reservation)
+
+    @router.post("/book/next", include_in_schema=False)
+    async def book_next(
+        request: Request,
+        step: str = Form(""),
+        act: str = Form("next"),
+        name: str = Form(""),
+        email: str = Form(""),
+        contact: str = Form(""),
+        problem: str = Form(""),
+        csrf_token: str = Form("", alias=CSRF_FIELD),
+    ) -> Response:
+        """NP6: the waterfall's next question after the time. Stateless: the answers so far come
+        back as hidden fields of the form, are checked here, and go out again in the next page.
+        Without a script this is a full page with one question; with htmx, the fragment."""
+        fragment = request.headers.get("hx-request") == "true"
+        typed = {
+            "name": _one_line(name, 200),
+            "email": _one_line(email, 254),
+            "contact": _one_line(contact, CLIENT_TEXT_MAX_CHARS),
+            "problem": problem.replace("\r\n", "\n")[:CLIENT_TEXT_MAX_CHARS].strip(),
+        }
+        async with unit_of_work() as session:
+            context = await _context(session, request)
+            client = await _session_client(session, request)
+            reservation = await _reservation(session, request, client)
+            if reservation is None:
+                if fragment:
+                    return Response(status_code=200, headers={"HX-Redirect": "/book"})
+                return RedirectResponse("/book", status_code=303)
+
+            asked = [item for item in DETAIL_STEPS if item != "email" or client is None]
+            kind = step if step in asked else asked[0]
+            errors: dict[str, str] = {}
+            status = 200
+            moved = False
+            if not csrf_ok(request, csrf_token):
+                errors = {"form": context["t"]["stale"]}
+                typed = {}
+                status = 200 if fragment else 403
+                kind = asked[0]
+            elif act.startswith("goto:") and act[5:] in asked:
+                kind = act[5:]
+            else:
+                if act == "skip" and kind != "email":
+                    typed[kind] = ""
+                if kind == "email" and client is None:
+                    address = normalise_email(typed["email"])
+                    if address is None:
+                        errors = {"email": context["t"]["email_invalid"]}
+                        status = 200 if fragment else 400
+                    else:
+                        typed["email"] = address
+                if not errors:
+                    later = asked[asked.index(kind) + 1 :]
+                    kind = later[0] if later else "send"
+                    moved = True
+            view = await _waterfall_details(
+                session,
+                context,
+                client,
+                reservation,
+                values=typed,
+                step=kind,
+                errors=errors,
+                fragment=fragment,
+                new_stone=moved,
+            )
+            return _render(
+                "waterfall/partials/path.html" if fragment else "details.html",
+                {**context, **view},
+                status_code=status,
+            )
 
     @router.post("/book", include_in_schema=False)
     async def submit(

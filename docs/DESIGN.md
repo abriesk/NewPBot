@@ -6,6 +6,9 @@
 
 ---
 
+> **Client booking flow (NP6).** **Owner's verdict on the first working version: not completely what he wanted, but closer than the first try (the river skin) - expect another round of changes to the flow.**
+> The flow is described in section 6.1 below; the setting is `client_skin` (README, "Client flow").
+
 ## 1. Purpose and scope
 
 A booking service for a single psychotherapist's private practice. Prospective and returning clients read practice information and request a consultation; the therapist stays in the loop for every scheduling decision.
@@ -193,6 +196,26 @@ Three settings compose into the behaviour a client sees. Keeping them orthogonal
 It is a setting of its own rather than "`clinic_onsite_url` is empty", which would have been free. The two mean different things: an address she keeps while not working there is not an address she has not filled in, and deriving the mode from the field would flip the whole flow the moment she pasted one in to save it for later.
 
 ---
+
+### 6.1 Two client flows (NP6)
+
+The practice chooses how clients are asked, in settings (**Client flow**): the *default* form, or the
+*waterfall*. Only the asking differs; everything in this section still decides what is offered, and the
+request that arrives is the same row.
+
+> **Owner's verdict on the first working version: not completely what he wanted, but closer than the
+> first try (the river skin) - expect another round of changes to the flow.**
+
+The waterfall follows the owner's reason for it: a person shown **one question at a time** is more at ease
+than one shown several, and **small playful moments** can take the mind off the problem for a second.
+So: one question on screen; an answered one shrinks into a *stone* above (tap to change it); the next
+falls in below; a drop, a ripple and a few sparkles; and never pressure -- no countdown, score, streak,
+level, failure or sound, and none of the motion under `prefers-reduced-motion`. Rejected: the *river*
+skin (the same form with a stream drawn beside it), which kept every question on screen at once. The
+state of the pick questions is the address (so each is a link and the flow works without a script);
+the typed answers are never in an address -- they ride in hidden fields of the one form. A page with no
+layout of its own in the waterfall keeps the default layout in its colours (the request status page
+included, unless the owner asks otherwise).
 
 ## 7. Request lifecycle
 
