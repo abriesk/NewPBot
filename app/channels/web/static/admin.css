@@ -384,6 +384,7 @@ a.button-link {
 /* Slots on the week grid and the week tools. */
 .week .dayform { margin: 0 0 .4rem; }
 .week .cell {
+  position: relative; /* contains the screen-reader-only "Free", which is absolutely placed */
   display: flex; flex-wrap: wrap; gap: .25rem .4rem; align-items: center;
   padding: .3rem .35rem; margin-bottom: .25rem; border-radius: var(--radius-sm);
   border-left: 3px dashed var(--accent); background: var(--accent-soft);
