@@ -565,3 +565,147 @@ def test_the_new_flash_codes_become_sentences() -> None:
     assert _copy_sentence("Copied", "1-0-0-0") == "Copied 1 new slot."
     assert _copy_sentence("Copied", "x-0-0") == ""
     assert _flash("availability-on") is not None and _flash("template-saved-5") is not None
+
+
+async def _scalar(committed: AsyncSession, stmt: object) -> object:
+    """One value, read on a session of its own: the `scratch` request lives on `committed`, and
+    expunging it (as `_fresh` does) breaks that fixture's teardown."""
+    async with AsyncSession(committed.bind) as reader:
+        return (await reader.execute(stmt)).scalars().first()  # type: ignore[call-overload]
+
+
+# --- review round 1 ------------------------------------------------------------------------------
+
+
+def test_the_free_text_time_has_its_own_field_name_so_it_cannot_overwrite_a_chip() -> None:
+    html = open("app/channels/web/templates/admin/request_detail.html", encoding="utf-8").read()
+    assert 'type="datetime-local" name="scheduled_start"' not in html
+    assert html.count('type="datetime-local" name="scheduled_other"') == 3
+    assert html.count('<button type="submit" name="scheduled_start"') == 1  # the chip macro
+
+
+async def _chip_case(
+    web: TestClient,
+    committed: AsyncSession,
+    scratch: dict[str, object],
+    action: str,
+    how: str,
+    days: int = 4,
+) -> tuple[datetime, str]:
+    """Post what a browser posts: the chip button AND the (empty) datetime field, or the reverse."""
+    zone = await _zone(committed)
+    # End the read's transaction: the `scratch` teardown rolls back, and a rollback with one open
+    # expires the fixture's request, which its own teardown then cannot read.
+    await committed.commit()
+    when = datetime.combine(
+        datetime.now(zone).date() + timedelta(days=days), time(16, 0), tzinfo=zone
+    )
+    value = when.strftime("%Y-%m-%dT%H:%M")
+    if action == "reschedule":
+        await committed.execute(
+            update(BookingRequest)
+            .where(BookingRequest.id == scratch["request_id"])
+            .values(
+                status=RequestStatus.confirmed,
+                scheduled_start=datetime.now(UTC) + timedelta(days=9),
+                confirmed_at=datetime.now(UTC),
+            )
+        )
+        await committed.commit()
+    _sign_in(web)
+    fields = (
+        {"scheduled_start": value, "scheduled_other": ""}
+        if how == "chip"
+        else {
+            "scheduled_start": "",
+            "scheduled_other": value,
+        }
+    )
+    location = _post(web, f"/admin/requests/{scratch['request_uuid']}/{action}", **fields)
+    assert location.endswith(f"flash={action}-done"), location
+    return when.astimezone(UTC), location
+
+
+async def test_a_chip_or_the_other_field_gives_a_proposal_its_time(
+    web: TestClient, scratch: dict[str, object], committed: AsyncSession
+) -> None:
+    for how in ("chip", "other"):
+        when, _ = await _chip_case(web, committed, scratch, "propose", how)
+        message = await _scalar(
+            committed,
+            select(NegotiationMessage)
+            .where(NegotiationMessage.request_id == scratch["request_id"])
+            .order_by(NegotiationMessage.id.desc()),
+        )
+        assert message is not None and message.proposed_start == when, how
+
+
+async def test_a_chip_or_the_other_field_gives_an_approval_its_time(
+    web: TestClient, scratch: dict[str, object], committed: AsyncSession
+) -> None:
+    when, _ = await _chip_case(web, committed, scratch, "approve", "chip")
+    got = await _scalar(
+        committed,
+        select(BookingRequest.scheduled_start).where(BookingRequest.id == scratch["request_id"]),
+    )
+    assert got == when, "approved at the chip's time, not at the held slot's"
+
+
+async def test_the_other_field_alone_gives_an_approval_its_time(
+    web: TestClient, scratch: dict[str, object], committed: AsyncSession
+) -> None:
+    when, _ = await _chip_case(web, committed, scratch, "approve", "other")
+    got = await _scalar(
+        committed,
+        select(BookingRequest.scheduled_start).where(BookingRequest.id == scratch["request_id"]),
+    )
+    assert got == when
+
+
+async def test_a_chip_or_the_other_field_gives_a_move_its_time(
+    web: TestClient, scratch: dict[str, object], committed: AsyncSession
+) -> None:
+    for days, how in ((4, "chip"), (5, "other")):
+        when, _ = await _chip_case(web, committed, scratch, "reschedule", how, days)
+        got = await _scalar(
+            committed,
+            select(BookingRequest.scheduled_start).where(
+                BookingRequest.id == scratch["request_id"]
+            ),
+        )
+        assert got == when, how
+        # The next round moves it again: a different day from the one just booked.
+        await committed.execute(
+            update(BookingRequest)
+            .where(BookingRequest.id == scratch["request_id"])
+            .values(scheduled_start=datetime.now(UTC) + timedelta(days=9))
+        )
+        await committed.commit()
+
+
+def test_a_hand_edited_flash_number_cannot_raise() -> None:
+    huge = "9" * 5000
+    for code in (
+        f"blocked-{huge}",
+        f"unblocked-{huge}",
+        f"template-saved-{huge}",
+        f"created-{huge}",
+        f"translations-{huge}-{huge}",
+        f"repeated-{huge}-1-1-1",
+        "applied-1-1-1-" + huge,
+    ):
+        assert _flash(code) is not None  # shown as plain text at worst, never a 500
+    assert _copy_sentence("Copied", f"{huge}-0-0-0") == ""
+
+
+def test_the_no_block_flash_echoes_only_a_times_sentence() -> None:
+    text, kind = _flash("no-block:Tue 6 Jun 10:00, 11:00; Wed 7 Jun 09:00 and 3 more") or ("", "")
+    assert kind == "error" and "Tue 6 Jun 10:00, 11:00" in text
+    text, kind = _flash("no-block:<b>call me on 555</b> https://evil.example") or ("", "")
+    assert kind == "error" and "evil" not in text and "<b>" not in text
+    assert "a booked or held slot is in that range" in text
+
+
+async def test_the_flash_codes_over_http_never_500(web: TestClient) -> None:
+    _sign_in(web)
+    assert web.get("/admin?flash=blocked-" + "9" * 5000).status_code == 200

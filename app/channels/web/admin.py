@@ -16,6 +16,7 @@ into app/core/services/.
 from __future__ import annotations
 
 import logging
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import UTC, date, datetime, time, timedelta
@@ -220,6 +221,15 @@ FLASH_ERROR = {
 }
 
 
+def _digits(text: str) -> bool:
+    """A short run of ASCII digits: `int()` on a longer one (a hand-edited URL) raises past 4300."""
+    return text.isascii() and text.isdecimal() and len(text) <= 9
+
+
+#: What a `no-block:` flash may carry: the times sentence `_times_sentence` writes, nothing else.
+_TIMES_TEXT = re.compile(r"[A-Za-z0-9 ,:;]{1,400}")
+
+
 def _flash(code: str | None) -> tuple[str, str] | None:
     """`?flash=` -> (sentence, "ok" | "error"), or None when there is nothing to say."""
     if not code:
@@ -228,13 +238,13 @@ def _flash(code: str | None) -> tuple[str, str] | None:
         return FLASH_OK[code], "ok"
     if code in FLASH_ERROR:
         return FLASH_ERROR[code], "error"
-    if code.startswith("created-") and code[8:].isdecimal():
+    if code.startswith("created-") and _digits(code[8:]):
         count = int(code[8:])
         if count == 0:
             return "No new slots: those times already exist, or none of the days fit.", "ok"
         return f"Created {count} slot{'' if count == 1 else 's'}.", "ok"
     for prefix, verb in (("blocked-", "Blocked"), ("unblocked-", "Freed")):
-        if code.startswith(prefix) and code[len(prefix) :].isdecimal():
+        if code.startswith(prefix) and _digits(code[len(prefix) :]):
             count = int(code[len(prefix) :])
             noun = "blocked slots" if verb == "Freed" else "free slots"
             if count == 0:
@@ -249,21 +259,26 @@ def _flash(code: str | None) -> tuple[str, str] | None:
             sentence = _copy_sentence(what, code[len(prefix) :])
             if sentence:
                 return sentence, "ok"
-    if code.startswith("template-saved-") and code[15:].isdecimal():
+    if code.startswith("template-saved-") and _digits(code[15:]):
         return f"Template saved with {int(code[15:])} slots a week.", "ok"
     if code.startswith("no-block:"):
+        # Only the sentence the route writes is echoed: any other text in an error-styled alert
+        # would be somebody else's words in her console.
+        which = (
+            f"these are booked or held: {code[9:]}"
+            if _TIMES_TEXT.fullmatch(code[9:])
+            else "a booked or held slot is in that range"
+        )
         return (
-            "Nothing was blocked, because these are booked or held: "
-            + code[9:]
-            + ". Move or cancel them first, then block the day.",
+            f"Nothing was blocked, because {which}. Move or cancel them first, then block the day.",
             "error",
         )
     if code.startswith("translations-"):
         _, _, tail = code.partition("-")
         saved, _, skipped = tail.partition("-")
-        if saved.isdecimal():
+        if _digits(saved):
             text = f"Saved {saved} wording{'' if saved == '1' else 's'}."
-            if skipped.isdecimal() and int(skipped):
+            if _digits(skipped) and int(skipped):
                 text += f" {skipped} left empty and not saved."
             return (text if int(saved) else "Nothing had changed."), "ok"
     if code.startswith("rejected:"):
@@ -279,7 +294,7 @@ def _flash(code: str | None) -> tuple[str, str] | None:
 def _copy_sentence(what: str, tail: str) -> str:
     """`created-existing-past-blocked` (four numbers) -> what a copy or a template made (NP5b)."""
     parts = tail.split("-")
-    if len(parts) != 4 or not all(p.isdecimal() for p in parts):
+    if len(parts) != 4 or not all(_digits(p) for p in parts):
         return ""
     made, existing, past, blocked = (int(p) for p in parts)
     text = f"{what} {made} new slot{'' if made == 1 else 's'}." if made else f"{what} no new slots."
@@ -832,6 +847,7 @@ def build_router() -> APIRouter:
         uuid: str,
         action: str,
         scheduled_start: str = Form(""),
+        scheduled_other: str = Form(""),
         meeting_url: str = Form(""),
         body: str = Form(""),
         reason: str = Form(""),
@@ -860,6 +876,10 @@ def build_router() -> APIRouter:
             body = body.replace("\r\n", "\n")
             reason = reason.replace("\r\n", "\n")
             home = "/admin" if back == "today" else f"/admin/requests/{uuid}"
+            # A free-time chip posts `scheduled_start`; the datetime field under "another time"
+            # posts `scheduled_other` (one name for both let the empty field overwrite the chip).
+            # The chip wins.
+            scheduled_start = scheduled_start.strip() or scheduled_other.strip()
             practice = await get_practice(session)
             when = _parse_local(scheduled_start, practice.timezone)
             if scheduled_start.strip() and when is None:

@@ -90,7 +90,7 @@
       <summary>Approve at a different time</summary>
       {{ chip_buttons("Approve at") }}
       <label>Another time <small>(practice timezone)</small>
-        <input type="datetime-local" name="scheduled_start">
+        <input type="datetime-local" name="scheduled_other">
       </label>
       <button type="submit" class="secondary">Approve at this time</button>
     </details>
@@ -112,7 +112,7 @@
     <details class="another">
       <summary>Another time, or words only</summary>
       <label>Time <small>(practice timezone; leave empty to propose in words only)</small>
-        <input type="datetime-local" name="scheduled_start">
+        <input type="datetime-local" name="scheduled_other">
       </label>
       <button type="submit" class="secondary">{{ t.propose }}</button>
     </details>
@@ -133,7 +133,7 @@
     <details class="another">
       <summary>Another time</summary>
       <label>New time <small>(practice timezone)</small>
-        <input type="datetime-local" name="scheduled_start">
+        <input type="datetime-local" name="scheduled_other">
       </label>
       <button type="submit" class="secondary">Move</button>
     </details>

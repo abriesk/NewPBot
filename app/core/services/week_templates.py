@@ -11,6 +11,7 @@ from __future__ import annotations
 from datetime import date, time, timedelta
 
 from sqlalchemy import delete, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.enums import Modality
@@ -57,20 +58,24 @@ async def save_template(session: AsyncSession, name: str, monday: date) -> tuple
         for weekday, at, duration, modality in pattern
     ]
     practice = await get_practice(session)
-    existing = (
-        await session.execute(
-            select(WeekTemplate).where(
-                WeekTemplate.practice_id == practice.id, WeekTemplate.name == name
+    # One statement, so two saves of the same name cannot race on the unique (practice, name).
+    saved = (
+        (
+            await session.execute(
+                pg_insert(WeekTemplate)
+                .values(practice_id=practice.id, name=name, entries=entries)
+                .on_conflict_do_update(
+                    index_elements=["practice_id", "name"], set_={"entries": entries}
+                )
+                .returning(WeekTemplate)
+                .execution_options(populate_existing=True)
             )
         )
-    ).scalar_one_or_none()
-    if existing is None:
-        existing = WeekTemplate(practice_id=practice.id, name=name, entries=entries)
-        session.add(existing)
-    else:
-        existing.entries = entries
+        .scalars()
+        .one()
+    )
     await session.flush()
-    return existing, len(entries)
+    return saved, len(entries)
 
 
 async def delete_template(session: AsyncSession, template_id: int) -> None:
