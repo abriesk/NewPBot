@@ -54,6 +54,7 @@ from app.core.enums import (
     Modality,
     OutboxStatus,
     RequestStatus,
+    SlotStatus,
     WaitlistStatus,
 )
 from app.core.errors import DomainError, NotFound, SlotReferenced
@@ -78,6 +79,7 @@ from app.core.ref import short_ref
 from app.core.services import booking, content, notifications, waitlist
 from app.core.services import photo as photo_service
 from app.core.services import slots as slot_service
+from app.core.services import week_templates as week_tpl
 from app.core.services.clients import (
     erase_client,
     export_client,
@@ -95,7 +97,7 @@ from app.core.services.config_io import (
 )
 from app.core.services.content import MarkdownNotAllowed
 from app.core.services.settings import MUTABLE_FIELDS, get_practice, update_settings
-from app.core.services.slots import SlotPattern
+from app.core.services.slots import CopyResult, RangeTooLong, SlotPattern
 from app.core.services.translations import get_text, invalidate_cache, missing_keys, set_text
 from app.db import unit_of_work
 from app.render.markdown import to_email_text, to_telegram, to_web_html
@@ -181,6 +183,11 @@ FLASH_OK = {
     "slot-blocked": "Slot blocked. It is no longer offered.",
     "slot-unblocked": "Slot unblocked. It is offered again.",
     "slot-deleted": "Slot deleted.",
+    "availability-on": "Accepting new bookings is on. Clients can ask for a time again.",
+    "availability-off": "Accepting new bookings is off. Clients are told you are not taking any.",
+    "online-only-on": "Online only is on. Only online times are offered.",
+    "online-only-off": "Online only is off. In-person times are offered again.",
+    "template-deleted": "Template deleted.",
     "saved": "Saved.",
     "restored": "Earlier version restored.",
     "requeued": "Message queued again. It will be sent shortly.",
@@ -203,6 +210,12 @@ FLASH_ERROR = {
     "not-an-iana-name": (
         "That is not a timezone name. Use one like Europe/Lisbon (Region/City). Nothing was saved."
     ),
+    "bad-range": (
+        "Those dates could not be read, or the range is longer than a year. Nothing was changed."
+    ),
+    "template-name": "Give the template a name (up to 60 characters). Nothing was saved.",
+    "template-empty": "That week has no slots to save. Open some slots first, then save it.",
+    "no-template": "That template no longer exists.",
     "type erase to confirm": "Nothing was erased. Type the word erase in the box to confirm.",
 }
 
@@ -220,6 +233,32 @@ def _flash(code: str | None) -> tuple[str, str] | None:
         if count == 0:
             return "No new slots: those times already exist, or none of the days fit.", "ok"
         return f"Created {count} slot{'' if count == 1 else 's'}.", "ok"
+    for prefix, verb in (("blocked-", "Blocked"), ("unblocked-", "Freed")):
+        if code.startswith(prefix) and code[len(prefix) :].isdecimal():
+            count = int(code[len(prefix) :])
+            noun = "blocked slots" if verb == "Freed" else "free slots"
+            if count == 0:
+                return f"Nothing to do: there are no {noun} in that range.", "ok"
+            if verb == "Freed":
+                return f"{verb} {count} slot{'' if count == 1 else 's'}: offered again.", "ok"
+            return (
+                f"{verb} {count} slot{'' if count == 1 else 's'}. They are no longer offered.",
+                "ok",
+            )
+    for prefix, what in (("repeated-", "Copied"), ("applied-", "Applied the template:")):
+        if code.startswith(prefix):
+            sentence = _copy_sentence(what, code[len(prefix) :])
+            if sentence:
+                return sentence, "ok"
+    if code.startswith("template-saved-") and code[15:].isdecimal():
+        return f"Template saved with {int(code[15:])} slots a week.", "ok"
+    if code.startswith("no-block:"):
+        return (
+            "Nothing was blocked, because these are booked or held: "
+            + code[9:]
+            + ". Move or cancel them first, then block the day.",
+            "error",
+        )
     if code.startswith("translations-"):
         _, _, tail = code.partition("-")
         saved, _, skipped = tail.partition("-")
@@ -236,6 +275,27 @@ def _flash(code: str | None) -> tuple[str, str] | None:
         # Done, but she must read it: announced like an error, worded as a note.
         return code, "warn"
     return code, "ok"
+
+
+def _copy_sentence(what: str, tail: str) -> str:
+    """`created-existing-past-blocked` (four numbers) -> what a copy or a template made (NP5b)."""
+    parts = tail.split("-")
+    if len(parts) != 4 or not all(p.isdecimal() for p in parts):
+        return ""
+    made, existing, past, blocked = (int(p) for p in parts)
+    text = f"{what} {made} new slot{'' if made == 1 else 's'}." if made else f"{what} no new slots."
+    notes = []
+    if existing:
+        notes.append(f"{existing} already existed")
+    if past:
+        notes.append(f"{past} in the past {'was' if past == 1 else 'were'} skipped")
+    if blocked:
+        notes.append(f"{blocked} blocked slot{'' if blocked == 1 else 's'} not copied")
+    return text + (" " + "; ".join(notes) + "." if notes else "")
+
+
+def _copy_code(prefix: str, result: CopyResult) -> str:
+    return f"{prefix}{result.created}-{result.existing}-{result.past}-{result.blocked}"
 
 
 #: Words for the codes the console used to print (NP5a). Kept apart per kind of thing: `pending` is
@@ -426,6 +486,104 @@ def _back(path: str, flash: str = "", fragment: str = "") -> RedirectResponse:
     return RedirectResponse(target + fragment, status_code=303)
 
 
+#: The two daily switches (NP5b): URL name -> practice field. They live on the Today page.
+SWITCHES = {"availability": "availability_on", "online-only": "online_only"}
+
+#: How many free times the Propose / Approve / Move cards offer as chips, and how far ahead.
+CHIP_LIMIT = 40
+
+
+def _chips(slots: Sequence[slot_service.SlotView]) -> list[dict[str, Any]]:
+    """Free times grouped by local day, each carrying the value the form posts (`_parse_local`)."""
+    days: list[dict[str, Any]] = []
+    for slot in slots[:CHIP_LIMIT]:
+        local = slot.starts_at_local
+        if not days or days[-1]["date"] != local.date():
+            days.append(
+                {"date": local.date(), "label": f"{local:%a} {local.day} {local:%b}", "times": []}
+            )
+        days[-1]["times"].append(
+            {"value": local.strftime("%Y-%m-%dT%H:%M"), "time": local.strftime("%H:%M")}
+        )
+    return days
+
+
+def _grid_url(monday: date, flash: str = "") -> str:
+    url = f"/admin/requests?view=grid&start={monday.isoformat()}"
+    return url + ("&flash=" + quote(flash, safe="") if flash else "")
+
+
+def _week_back(week: str) -> date | None:
+    """The Monday a form came from, if it said one (`week=2028-01-03`), else None."""
+    try:
+        day = date.fromisoformat(week)
+    except ValueError:
+        return None
+    return slot_service.week_monday(day)
+
+
+def _times_sentence(starts: Sequence[datetime], zone: ZoneInfo) -> str:
+    """`Tue 17 Nov 10:00, 11:00; Wed 18 Nov 09:00` -- times only, never a name (it rides a URL)."""
+    by_day: dict[date, list[str]] = {}
+    for at in starts[:12]:
+        local = at.astimezone(zone)
+        by_day.setdefault(local.date(), []).append(local.strftime("%H:%M"))
+    parts = [f"{d:%a} {d.day} {d:%b} " + ", ".join(times) for d, times in by_day.items()]
+    more = len(starts) - 12
+    return "; ".join(parts) + (f" and {more} more" if more > 0 else "")
+
+
+async def _today(session: AsyncSession) -> dict[str, Any]:
+    """The Today page's facts. Counts and lists come from the core calls Telegram's panel uses."""
+    practice = await get_practice(session)
+    zone = ZoneInfo(practice.timezone)
+    now = now_utc()
+    today = now.astimezone(zone).date()
+    tomorrow = today + timedelta(days=1)
+
+    waiting = await booking.count_with_status(
+        session, RequestStatus.pending, RequestStatus.negotiating
+    )
+    first = await booking.queue_for_admin(session, limit=5)
+    rows = await _summaries(session, first)
+    for row, request in zip(rows, first, strict=True):
+        row["approvable"] = await booking.can_approve_as_held(session, request)
+
+    start, end = slot_service.local_day_bounds(zone, today, tomorrow)
+    days: dict[date, list[dict[str, Any]]] = {today: [], tomorrow: []}
+    for entry in await booking.scheduled_in_window(session, window_from=start, window_to=end):
+        if entry.starts_at is None or entry.status not in (
+            RequestStatus.confirmed,
+            RequestStatus.completed,
+        ):
+            continue
+        local = entry.starts_at.astimezone(zone)
+        if local.date() in days:
+            days[local.date()].append(
+                {
+                    "uuid": str(entry.uuid),
+                    "time": local.strftime("%H:%M"),
+                    "name": entry.display_name or "no name",
+                    "done": entry.status is RequestStatus.completed,
+                }
+            )
+
+    undelivered = await notifications.undelivered_counts(session)
+    free_week = await slot_service.list_available_slots(
+        session, window_from=now, window_to=now + timedelta(days=7)
+    )
+    return {
+        "waiting": waiting,
+        "waiting_rows": rows,
+        "sessions": [("Today", today, days[today]), ("Tomorrow", tomorrow, days[tomorrow])],
+        "waitlist_open": await waitlist.count_open(session),
+        "failed": undelivered[OutboxStatus.failed],
+        "dead": undelivered[OutboxStatus.dead],
+        "free_week": len(free_week),
+        "today_label": f"{today:%A} {today.day} {today:%B}",
+    }
+
+
 def build_router() -> APIRouter:
     router = APIRouter(prefix="/admin")
 
@@ -482,7 +640,7 @@ def build_router() -> APIRouter:
                     status_code=401,
                 )
 
-            response = _back("/admin/requests")
+            response = _back("/admin")
             raw_session = await start_admin_session(session, response, admin)
             issue_csrf(response, csrf_token_for(request, new_admin_cookie=raw_session))
             return response
@@ -501,7 +659,37 @@ def build_router() -> APIRouter:
     @router.get("", response_class=HTMLResponse, include_in_schema=False)
     @router.get("/", response_class=HTMLResponse, include_in_schema=False)
     async def index(request: Request) -> Response:
-        return _back("/admin/requests")
+        """NP5b: Today -- what waits for her, today's and tomorrow's sessions, and the two daily
+        switches. The counts come from the same core calls as the Telegram panel."""
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+            return _render(
+                "admin/today.html",
+                await _context(session, request, admin, **await _today(session)),
+            )
+
+    @router.post("/switch/{name}", include_in_schema=False)
+    async def switch(
+        request: Request,
+        name: str,
+        value: str = Form(""),
+        csrf_token: str = Form("", alias=CSRF_FIELD),
+    ) -> Response:
+        """The two daily switches, one tap each (NP5b). Everything else about setup stays on
+        Settings."""
+        if not csrf_ok(request, csrf_token):
+            return Response(status_code=403)
+        if name not in SWITCHES:
+            return Response(status_code=404)
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+            on = value == "on"
+            await update_settings(session, **{SWITCHES[name]: on})
+            return _back("/admin", f"{name}-{'on' if on else 'off'}")
 
     @router.get("/requests", response_class=HTMLResponse, include_in_schema=False)
     async def requests_list(
@@ -625,6 +813,9 @@ def build_router() -> APIRouter:
                     },
                     thread=thread,
                     turn=await booking.whose_turn(session, booking_request.id),
+                    chips=_chips(
+                        await booking.free_slots_for_request(session, booking_request),
+                    ),
                 ),
             )
 
@@ -638,9 +829,13 @@ def build_router() -> APIRouter:
         body: str = Form(""),
         reason: str = Form(""),
         keep_slot: str = Form(""),
+        back: str = Form(""),
         csrf_token: str = Form("", alias=CSRF_FIELD),
     ) -> Response:
-        """§12.2: approve, propose, reject, cancel, reschedule."""
+        """§12.2: approve, propose, reject, cancel, reschedule.
+
+        `back=today` (the inline Approve on the Today page) returns there instead of to the
+        request."""
         if not csrf_ok(request, csrf_token):
             return Response(status_code=403)
 
@@ -654,6 +849,10 @@ def build_router() -> APIRouter:
             except (NotFound, ValueError):
                 return Response(status_code=404)
 
+            # A textarea posts CRLF; the client reads this verbatim, so it is stored as plain \n.
+            body = body.replace("\r\n", "\n")
+            reason = reason.replace("\r\n", "\n")
+            home = "/admin" if back == "today" else f"/admin/requests/{uuid}"
             practice = await get_practice(session)
             when = _parse_local(scheduled_start, practice.timezone)
             if scheduled_start.strip() and when is None:
@@ -708,10 +907,10 @@ def build_router() -> APIRouter:
                     return Response(status_code=404)
             except DomainError as exc:
                 logger.info("admin action %r refused: %s", action, type(exc).__name__)
-                return _back(f"/admin/requests/{uuid}", "refused")
+                return _back(home, "refused")
 
             await notifications.publish(session)
-            return _back(f"/admin/requests/{uuid}", f"{action}-done")
+            return _back(home, f"{action}-done")
 
     # --- Waitlist -----------------------------------------------------------
 
@@ -831,10 +1030,8 @@ def build_router() -> APIRouter:
                 .all()
             )
 
-            # NP5a: the list comes first and is grouped by day; the form below it opens on next
-            # Monday to Sunday with the working week ticked.
+            # NP5a: the list comes first and is grouped by day.
             today = datetime.now(zone).date()
-            next_monday = today + timedelta(days=7 - today.weekday())
             days: list[dict[str, Any]] = []
             for s in rows:
                 local = s.starts_at.astimezone(zone)
@@ -868,8 +1065,8 @@ def build_router() -> APIRouter:
                     count=len(rows),
                     modalities=[m.value for m in Modality],
                     weekdays=list(enumerate(("Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"))),
-                    default_from=next_monday.isoformat(),
-                    default_to=(next_monday + timedelta(days=6)).isoformat(),
+                    today_iso=today.isoformat(),
+                    **await _week_tools(session, slot_service.week_monday(today)),
                 ),
             )
 
@@ -920,6 +1117,7 @@ def build_router() -> APIRouter:
         request: Request,
         slot_id: int,
         action: str,
+        week: str = Form(""),
         csrf_token: str = Form("", alias=CSRF_FIELD),
     ) -> Response:
         if not csrf_ok(request, csrf_token):
@@ -929,6 +1127,14 @@ def build_router() -> APIRouter:
             admin = await current_admin(session, request)
             if admin is None:
                 return _back("/admin/login")
+
+            # NP5b: a cell on the week grid sends the week it came from and goes back to it.
+            monday = _week_back(week)
+
+            def home(flash: str, fragment: str = "") -> RedirectResponse:
+                if monday is not None:
+                    return RedirectResponse(_grid_url(monday, flash) + fragment, status_code=303)
+                return _back("/admin/slots", flash, fragment)
 
             try:
                 if action == "block":
@@ -940,16 +1146,138 @@ def build_router() -> APIRouter:
                 else:
                     return Response(status_code=404)
             except SlotReferenced:
-                return _back("/admin/slots", SLOT_REFERENCED, f"#slot-{slot_id}")
+                return home(SLOT_REFERENCED, f"#slot-{slot_id}")
             except DomainError:
                 # A held or booked slot is blocked, not deleted (DESIGN.md §8).
-                return _back("/admin/slots", "refused", f"#slot-{slot_id}")
+                return home("refused", f"#slot-{slot_id}")
             # Land on the row she touched; a deleted one is gone, so the top of the list.
-            return _back(
-                "/admin/slots",
-                SLOT_FLASH[action],
-                "" if action == "delete" else f"#slot-{slot_id}",
-            )
+            return home(SLOT_FLASH[action], "" if action == "delete" else f"#slot-{slot_id}")
+
+    # --- Week-sized slot edits (NP5b) ---------------------------------------
+
+    @router.post("/slots/block-range", include_in_schema=False)
+    async def slots_block_range(
+        request: Request,
+        date_from: str = Form(...),
+        date_to: str = Form(""),
+        do: str = Form("block"),
+        week: str = Form(""),
+        csrf_token: str = Form("", alias=CSRF_FIELD),
+    ) -> Response:
+        """Block (or free again) every slot from one date to another, in one submit. A day is a
+        range of one. Refuses, and lists them, when a booked or held slot is in the way."""
+        if not csrf_ok(request, csrf_token):
+            return Response(status_code=403)
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+            monday = _week_back(week)
+
+            def home(flash: str) -> RedirectResponse:
+                if monday is not None:
+                    return RedirectResponse(_grid_url(monday, flash), status_code=303)
+                return _back("/admin/slots", flash)
+
+            try:
+                first = date.fromisoformat(date_from)
+                last = date.fromisoformat(date_to) if date_to.strip() else first
+                if do == "unblock":
+                    done = await slot_service.unblock_range(session, first, last)
+                else:
+                    done = await slot_service.block_range(session, first, last)
+            except (ValueError, RangeTooLong):
+                return home("bad-range")
+            if done.in_use:
+                zone = ZoneInfo((await get_practice(session)).timezone)
+                return home("no-block:" + _times_sentence(done.in_use, zone))
+            return home(f"{'unblocked' if do == 'unblock' else 'blocked'}-{done.changed}")
+
+    @router.post("/slots/repeat-week", include_in_schema=False)
+    async def slots_repeat_week(
+        request: Request,
+        source: str = Form(...),
+        target: str = Form(""),
+        week: str = Form(""),
+        csrf_token: str = Form("", alias=CSRF_FIELD),
+    ) -> Response:
+        """Copy one week's slot pattern onto another (by default the next one)."""
+        if not csrf_ok(request, csrf_token):
+            return Response(status_code=403)
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+            monday = _week_back(week)
+            src = _week_back(source)
+            dst = _week_back(target) if target else (src + timedelta(days=7) if src else None)
+            if src is None or dst is None or src == dst:
+                flash = "bad-range"
+                return RedirectResponse(
+                    _grid_url(monday, flash) if monday else f"/admin/slots?flash={flash}",
+                    status_code=303,
+                )
+            result = await slot_service.repeat_week(session, src, dst)
+            flash = _copy_code("repeated-", result)
+            if monday is not None:
+                return RedirectResponse(_grid_url(dst, flash), status_code=303)
+            return _back("/admin/slots", flash)
+
+    @router.post("/slots/templates", include_in_schema=False)
+    async def template_save(
+        request: Request,
+        name: str = Form(""),
+        week: str = Form(...),
+        csrf_token: str = Form("", alias=CSRF_FIELD),
+    ) -> Response:
+        """Save a week's pattern as a named template."""
+        if not csrf_ok(request, csrf_token):
+            return Response(status_code=403)
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+            monday = _week_back(week)
+            if monday is None:
+                return _back("/admin/slots", "bad-range")
+            try:
+                _, count = await week_tpl.save_template(session, name, monday)
+            except week_tpl.BadTemplate as exc:
+                return _back(
+                    "/admin/slots", "template-empty" if "empty" in str(exc) else "template-name"
+                )
+            return _back("/admin/slots", f"template-saved-{count}", "#templates")
+
+    @router.post("/slots/templates/{template_id}/{action}", include_in_schema=False)
+    async def template_action(
+        request: Request,
+        template_id: int,
+        action: str,
+        date_from: str = Form(""),
+        date_to: str = Form(""),
+        csrf_token: str = Form("", alias=CSRF_FIELD),
+    ) -> Response:
+        """Apply a template to a date range, or delete it."""
+        if not csrf_ok(request, csrf_token):
+            return Response(status_code=403)
+        if action not in ("apply", "delete"):
+            return Response(status_code=404)
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+            try:
+                if action == "delete":
+                    await week_tpl.delete_template(session, template_id)
+                    return _back("/admin/slots", "template-deleted", "#templates")
+                result = await week_tpl.apply_template(
+                    session, template_id, date.fromisoformat(date_from), date.fromisoformat(date_to)
+                )
+            except NotFound:
+                return _back("/admin/slots", "no-template", "#templates")
+            except (ValueError, RangeTooLong):
+                return _back("/admin/slots", "bad-range", "#templates")
+            return _back("/admin/slots", _copy_code("applied-", result))
 
     # --- Content ------------------------------------------------------------
 
@@ -2033,16 +2361,49 @@ async def _schedule(session: AsyncSession, start: str) -> dict[str, Any]:
             }
         )
 
+    # NP5b: the slots she has opened, beside the requests. Held and booked ones are not drawn
+    # twice: the request that holds or booked them is already in its column.
+    cells: dict[date, list[dict[str, Any]]] = {day: [] for day in columns}
+    now = now_utc()
+    for slot in await slot_service.slots_in_window(
+        session,
+        window_from=datetime.combine(monday, time.min, tzinfo=zone).astimezone(UTC),
+        window_to=datetime.combine(monday + timedelta(days=7), time.min, tzinfo=zone).astimezone(
+            UTC
+        ),
+    ):
+        if slot.status not in (SlotStatus.available, SlotStatus.blocked):
+            continue
+        local = slot.starts_at.astimezone(zone)
+        if local.date() in cells:
+            cells[local.date()].append(
+                {
+                    "id": slot.id,
+                    "time": local.strftime("%H:%M"),
+                    "blocked": slot.status is SlotStatus.blocked,
+                    "covered": slot.covered,
+                    "past": slot.starts_at <= now,
+                    "modality": slot.modality.value if slot.modality else "either",
+                }
+            )
+
     today = datetime.now(UTC).astimezone(zone).date()
     return {
+        "week": monday.isoformat(),
         "days": [
             {
                 "label": day.strftime("%a %d %b"),
+                "date": day.isoformat(),
                 "today": day == today,
                 "entries": rows,
+                "slots": cells[day],
+                "free": sum(1 for c in cells[day] if not c["blocked"] and not c["past"]),
+                "blocked": sum(1 for c in cells[day] if c["blocked"] and not c["past"]),
+                "over": day < today,
             }
             for day, rows in columns.items()
         ],
+        **await _week_tools(session, monday),
         "unscheduled": [
             {
                 "uuid": str(entry.uuid),
@@ -2058,6 +2419,26 @@ async def _schedule(session: AsyncSession, start: str) -> dict[str, Any]:
         "next": (monday + timedelta(days=7)).isoformat(),
         "this_week": _week_start("", zone).isoformat(),
         "is_this_week": monday == _week_start("", zone),
+    }
+
+
+async def _week_tools(session: AsyncSession, monday: date) -> dict[str, Any]:
+    """What the Slots page and the week grid share: the templates, and the weeks the repeat
+    button copies between."""
+    zone = ZoneInfo((await get_practice(session)).timezone)
+    today = datetime.now(zone).date()
+    next_monday = today + timedelta(days=7 - today.weekday())
+    return {
+        "templates": await week_tpl.list_templates(session),
+        "default_from": next_monday.isoformat(),
+        "default_to": (next_monday + timedelta(days=6)).isoformat(),
+        "tools_week": monday.isoformat(),
+        "tools_week_label": f"{monday:%d %b} \u2013 {monday + timedelta(days=6):%d %b}",
+        "repeat_target": (monday + timedelta(days=7)).isoformat(),
+        "repeat_label": (
+            f"{monday:%d %b} \u2013 {monday + timedelta(days=6):%d %b}"
+            f" to {monday + timedelta(days=7):%d %b} \u2013 {monday + timedelta(days=13):%d %b}"
+        ),
     }
 
 
@@ -2270,12 +2651,13 @@ def _parse_local(value: str, practice_tz: str) -> datetime | None:
 
 #: Settings that arrive as checkboxes: absent means false, which a plain
 #: "only what was submitted" read would silently treat as "unchanged".
+#:
+#: `availability_on` and `online_only` are not here: since NP5b they are the Today page's switches,
+#: and a Settings form that no longer carries them must not read their absence as "off".
 _BOOLEAN_SETTINGS = (
-    "availability_on",
     "fallback_to_negotiation",
     "negotiation_enabled",
     "auto_confirm_slots",
-    "online_only",
     "captcha_on",
 )
 

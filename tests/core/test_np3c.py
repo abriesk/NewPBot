@@ -121,5 +121,5 @@ def test_the_migration_chain_has_a_single_head() -> None:
     config = Config(str(root / "alembic.ini"))
     config.set_main_option("script_location", str(root / "alembic"))
     config.set_main_option("path_separator", "os")
-    assert ScriptDirectory.from_config(config).get_heads() == ["0011_privacy_contact_copy"]
+    assert ScriptDirectory.from_config(config).get_heads() == ["0012_week_template"]
     assert _migration().down_revision == "0007_unverified_holds"

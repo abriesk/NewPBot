@@ -41,6 +41,27 @@
   </form>
 </details>
 
+<details class="create card">
+  <summary>Block a date range</summary>
+  <form method="post" action="/admin/slots/block-range">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <p class="muted">Takes every free slot between these dates (both included) off offer, in one
+      step: a day off, a holiday. If a session is booked in the range nothing is blocked and you
+      are told which, so you can move it first. Slots can be freed again below.</p>
+    <div class="row">
+      <label>From <input type="date" name="date_from" value="{{ today_iso }}" required></label>
+      <label>To <input type="date" name="date_to" value="{{ today_iso }}" required></label>
+    </div>
+    <div class="buttons">
+      <button type="submit" name="do" value="block">Block these days</button>
+      <button type="submit" name="do" value="unblock" class="secondary">Free them again</button>
+    </div>
+  </form>
+</details>
+
+{% set tools_id = "slots" %}
+{% include "admin/partials/week_tools.html" %}
+
 <h2>Upcoming <span class="count">{{ count }}</span></h2>
 <div class="slot-days">
 {% for day in days %}

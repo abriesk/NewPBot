@@ -363,6 +363,22 @@ class Slot(Base):
     updated_at: Mapped[datetime] = _updated_at()
 
 
+class WeekTemplate(Base):
+    """A named weekly slot pattern (NP5b): "my normal week", saved from a real week and applied to a
+    date range. Entries are `{"weekday": 0-6, "time": "HH:MM", "duration_min": int, "modality":
+    "online" | "onsite" | null}` in the practice's own clock, so a template applied across a DST
+    change keeps 10:00 at 10:00."""
+
+    __tablename__ = "week_template"
+    __table_args__ = (UniqueConstraint("practice_id", "name"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    practice_id: Mapped[int] = mapped_column(ForeignKey("practice.id"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    entries: Mapped[list[dict[str, Any]]] = mapped_column(JSONB, nullable=False)
+    created_at: Mapped[datetime] = _tstz(nullable=False, server_default=func.now())
+
+
 class SlotSessionType(Base):
     """An empty set for a slot means it accepts **all** active session types."""
 

@@ -1,6 +1,7 @@
 {# The week schedule (§12.2). Seven day columns in the practice timezone, each
-   holding its day in time order. Read-only by design: a cell is a link to the
-   request, and the request page keeps the actions (DESIGN.md §15). #}
+   holding its day in time order. A request cell is a link to the request, and the request page
+   keeps its actions (DESIGN.md §15). NP5b: the slots she has opened sit beside the requests --
+   free ones and blocked ones, with Block / Unblock on the cell and "Block day" on the header. #}
 <p class="weeknav">
   <a href="/admin/requests?view=grid&amp;start={{ prev }}">&larr; previous</a>
   <strong>{{ week_from }} &ndash; {{ week_to }}</strong>
@@ -13,8 +14,20 @@
 <div class="scroll">
 <div class="week">
   {% for day in days %}
-    <section class="wday{% if day.today %} is-today{% endif %}">
+    <section class="wday{% if day.today %} is-today{% endif %}" id="d-{{ day.date }}">
       <h3>{{ day.label }}</h3>
+      {% if not day.over and (day.free or day.blocked) %}
+      <form method="post" action="/admin/slots/block-range" class="dayform">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="date_from" value="{{ day.date }}">
+        <input type="hidden" name="week" value="{{ week }}">
+        {% if day.free %}
+          <button type="submit" name="do" value="block" class="secondary small" aria-label="Block {{ day.label }}">Block day</button>
+        {% else %}
+          <button type="submit" name="do" value="unblock" class="secondary small" aria-label="Free {{ day.label }} again">Free day</button>
+        {% endif %}
+      </form>
+      {% endif %}
       {% for entry in day.entries %}
         {# No problem_text here, ever (hard rule 8). Time, who, and status. #}
         <a class="entry {{ entry.status }}" href="/admin/requests/{{ entry.uuid }}">
@@ -22,13 +35,30 @@
           <span class="who">{{ entry.name }}</span>
           <span class="badge {{ entry.status }}">{{ entry.status }}</span>
         </a>
-      {% else %}
-        <p class="muted empty">&mdash;</p>
       {% endfor %}
+      {% for c in day.slots %}
+        <div class="cell {{ 'blocked' if c.blocked else 'free' }}{{ ' past' if c.past }}" id="slot-{{ c.id }}">
+          <span class="at">{{ c.time }}</span>
+          <span class="state">{% if c.blocked %}Blocked{% elif c.covered %}Covered{% else %}Free{% endif %}</span>
+          {% if not c.past %}
+          <form method="post" action="/admin/slots/{{ c.id }}/{{ 'unblock' if c.blocked else 'block' }}">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <input type="hidden" name="week" value="{{ week }}">
+            <button type="submit" class="secondary small">{{ "Unblock" if c.blocked else "Block" }}</button>
+          </form>
+          {% endif %}
+        </div>
+      {% endfor %}
+      {% if not day.entries and not day.slots %}
+        <p class="muted empty">&mdash;</p>
+      {% endif %}
     </section>
   {% endfor %}
 </div>
 </div>
+
+{% set tools_id = "grid" %}{% set week_back = week %}
+{% include "admin/partials/week_tools.html" %}
 
 {# A free-text request has wording rather than an instant, so there is no
    honest cell for it. Listed rather than dropped: these are the ones most in

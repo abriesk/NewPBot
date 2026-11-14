@@ -9,19 +9,8 @@
 
   <fieldset>
     <legend>Booking</legend>
-    <label class="choice">
-      <input type="checkbox" name="availability_on" value="1"
-             {% if practice.availability_on %}checked{% endif %}>
-      Accepting new bookings
-    </label>
-    <label class="choice">
-      <input type="checkbox" name="online_only" value="1"
-             {% if practice.online_only %}checked{% endif %}>
-      Online only for now
-    </label>
-    <p class="muted">Clients stop being asked how they would like to meet, and
-       only online times are offered. In-person slots you have already created
-       are kept and come back when you untick this.</p>
+    <p class="muted">Accepting new bookings and Online only are daily switches now: they are on
+       <a href="/admin">Today</a>, one tap each.</p>
     <label>Mode
       <select name="booking_mode">
         <option value="slots" {% if practice.booking_mode.value == "slots" %}selected{% endif %}>{{ "slots" | human("mode") }}</option>

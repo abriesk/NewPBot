@@ -448,9 +448,13 @@ async def create_slots_bulk(session: AsyncSession, pattern: SlotPattern) -> list
                 )
         day += timedelta(days=1)
 
+    return await _insert_slots(session, rows)
+
+
+async def _insert_slots(session: AsyncSession, rows: list[dict[str, object]]) -> list[Slot]:
+    """Insert the rows that do not exist yet; the unique index (§6.4) says what "exists" means."""
     if not rows:
         return []
-
     created = (
         (
             await session.execute(
@@ -480,3 +484,223 @@ async def expire_hold(session: AsyncSession, slot_id: int) -> Slot:
     slot.held_by_request = None
     await session.flush()
     return slot
+
+
+# --- The week at a glance, and week-sized edits (NP5b) --------------------------------------------
+
+
+class RangeTooLong(ValueError):
+    """A date range longer than a year, or one that ends before it starts."""
+
+
+MAX_RANGE_DAYS = 366
+
+
+@dataclass(frozen=True, slots=True)
+class WeekSlot:
+    """A slot as the admin's week grid draws it."""
+
+    id: int
+    starts_at: datetime
+    duration_min: int
+    modality: Modality | None
+    status: SlotStatus
+    #: `available` in the table, but an overlapping booking has closed it (F12): not really free.
+    covered: bool
+
+
+@dataclass(frozen=True, slots=True)
+class RangeResult:
+    """What a block / unblock over a date range did. `in_use` is non-empty only when it refused:
+    the start of every booked or held slot in the range, soonest first."""
+
+    changed: int
+    in_use: tuple[datetime, ...] = ()
+
+
+@dataclass(frozen=True, slots=True)
+class CopyResult:
+    """What a week copy or a template application made, and why it did not make the rest."""
+
+    created: int = 0
+    existing: int = 0
+    past: int = 0
+    blocked: int = 0
+
+
+def local_day_bounds(zone: ZoneInfo, first: date, last: date) -> tuple[datetime, datetime]:
+    """UTC instants of local midnight on `first` and of local midnight after `last`."""
+    return (
+        datetime.combine(first, time.min, tzinfo=zone).astimezone(UTC),
+        datetime.combine(last + timedelta(days=1), time.min, tzinfo=zone).astimezone(UTC),
+    )
+
+
+async def slots_in_window(
+    session: AsyncSession, *, window_from: datetime, window_to: datetime
+) -> list[WeekSlot]:
+    """Every slot in `[from, to)`, whatever its status, soonest first."""
+    rows = await session.execute(
+        select(Slot, overlaps_a_booked_slot())
+        .where(Slot.starts_at >= window_from, Slot.starts_at < window_to)
+        .order_by(Slot.starts_at, Slot.id)
+    )
+    return [
+        WeekSlot(
+            id=slot.id,
+            starts_at=slot.starts_at,
+            duration_min=slot.duration_min,
+            modality=slot.modality,
+            status=slot.status,
+            covered=bool(shadowed) and slot.status is SlotStatus.available,
+        )
+        for slot, shadowed in rows.all()
+    ]
+
+
+async def _range_rows(
+    session: AsyncSession, practice_tz: str, date_from: date, date_to: date
+) -> list[Slot]:
+    if date_to < date_from or (date_to - date_from).days >= MAX_RANGE_DAYS:
+        raise RangeTooLong(f"{date_from}..{date_to}")
+    start, end = local_day_bounds(ZoneInfo(practice_tz), date_from, date_to)
+    # What is already behind her is not hers to block or free.
+    start = max(start, now_utc())
+    return list(
+        (
+            await session.execute(
+                select(Slot)
+                .where(Slot.starts_at >= start, Slot.starts_at < end)
+                .order_by(Slot.id)
+                .with_for_update()
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+
+async def block_range(session: AsyncSession, date_from: date, date_to: date) -> RangeResult:
+    """Block every free slot from local `date_from` to `date_to` inclusive, in one step.
+
+    All or nothing: if any slot in the range is booked or held, **nothing** is blocked and the
+    ones in the way are returned, because "block the day" over a booked session would otherwise
+    leave her believing the day was clear. Blocking a booked session stays what it always was --
+    a deliberate act on that one session (cancel and block).
+    """
+    practice = await get_practice(session)
+    rows = await _range_rows(session, practice.timezone, date_from, date_to)
+    in_use = sorted(r.starts_at for r in rows if r.status in (SlotStatus.booked, SlotStatus.held))
+    if in_use:
+        return RangeResult(0, tuple(in_use))
+    free = [r for r in rows if r.status is SlotStatus.available]
+    for slot in free:
+        slot.status = SlotStatus.blocked
+    await session.flush()
+    return RangeResult(len(free))
+
+
+async def unblock_range(session: AsyncSession, date_from: date, date_to: date) -> RangeResult:
+    """The inverse: every blocked slot in the range is offered again."""
+    practice = await get_practice(session)
+    rows = await _range_rows(session, practice.timezone, date_from, date_to)
+    blocked = [r for r in rows if r.status is SlotStatus.blocked]
+    for slot in blocked:
+        slot.status = SlotStatus.available
+    await session.flush()
+    return RangeResult(len(blocked))
+
+
+def slot_rows(
+    practice_id: int,
+    zone: ZoneInfo,
+    entries: list[tuple[date, time, int, Modality | None]],
+) -> tuple[list[dict[str, object]], int]:
+    """(rows to insert, how many were in the past) for local (day, time, duration, modality)."""
+    now = now_utc()
+    rows: list[dict[str, object]] = []
+    past = 0
+    for day, local_time, duration, modality in entries:
+        starts_at = datetime.combine(day, local_time, tzinfo=zone).astimezone(UTC)
+        if starts_at <= now:
+            past += 1
+            continue
+        rows.append(
+            {
+                "practice_id": practice_id,
+                "starts_at": starts_at,
+                "duration_min": duration,
+                "modality": modality,
+                "status": SlotStatus.available,
+            }
+        )
+    return rows, past
+
+
+async def create_entries(
+    session: AsyncSession,
+    entries: list[tuple[date, time, int, Modality | None]],
+    *,
+    blocked: int = 0,
+) -> CopyResult:
+    """Make the slots for these local entries: never one in the past, never one that exists."""
+    practice = await get_practice(session)
+    rows, past = slot_rows(practice.id, ZoneInfo(practice.timezone), entries)
+    created = await _insert_slots(session, rows)
+    return CopyResult(
+        created=len(created), existing=len(rows) - len(created), past=past, blocked=blocked
+    )
+
+
+def week_monday(day: date) -> date:
+    return day - timedelta(days=day.weekday())
+
+
+async def week_pattern(
+    session: AsyncSession, monday: date
+) -> tuple[list[tuple[int, time, int, Modality | None]], int]:
+    """The slot pattern of the week starting `monday`, local clock: ((weekday, time, duration,
+    modality) ..., how many blocked slots were left out).
+
+    A blocked slot is a day she took off, not part of how she works, so it is not part of the
+    pattern; a booked or held one is, because she offered that hour.
+    """
+    practice = await get_practice(session)
+    zone = ZoneInfo(practice.timezone)
+    start, end = local_day_bounds(zone, monday, monday + timedelta(days=6))
+    rows = (
+        (
+            await session.execute(
+                select(Slot)
+                .where(Slot.starts_at >= start, Slot.starts_at < end)
+                .order_by(Slot.starts_at, Slot.id)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    pattern: list[tuple[int, time, int, Modality | None]] = []
+    blocked = 0
+    for slot in rows:
+        if slot.status is SlotStatus.blocked:
+            blocked += 1
+            continue
+        local = slot.starts_at.astimezone(zone)
+        pattern.append(
+            (local.weekday(), local.time().replace(tzinfo=None), slot.duration_min, slot.modality)
+        )
+    return pattern, blocked
+
+
+async def repeat_week(
+    session: AsyncSession, source_monday: date, target_monday: date
+) -> CopyResult:
+    """Copy the slot pattern of the week starting `source_monday` onto the week starting
+    `target_monday` (same weekday, same local time). Skips what already exists and what is already
+    in the past, and says how many of each."""
+    pattern, blocked = await week_pattern(session, source_monday)
+    entries = [
+        (target_monday + timedelta(days=weekday), at, duration, modality)
+        for weekday, at, duration, modality in pattern
+    ]
+    return await create_entries(session, entries, blocked=blocked)

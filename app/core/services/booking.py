@@ -345,6 +345,40 @@ async def upcoming_sessions(
     return list(rows.all())
 
 
+async def can_approve_as_held(session: AsyncSession, request: BookingRequest) -> bool:
+    """Whether Approve needs no time from her: a pending request whose slot is still held for it.
+
+    §7.1's `admin_approve` takes the held slot's time when none is given, so this is the case an
+    inline Approve (the Today page) can offer without asking anything. Anything else -- a free-text
+    request, a negotiation, a hold that lapsed -- needs her to look at it first.
+    """
+    if request.status is not RequestStatus.pending or request.slot_id is None:
+        return False
+    held = await _slot(session, request.slot_id)
+    return (
+        held is not None
+        and held.status is SlotStatus.held
+        and held.held_by_request == request.id
+        and held.hold_expires_at is not None
+        and held.hold_expires_at > now_utc()
+    )
+
+
+async def free_slots_for_request(
+    session: AsyncSession, request: BookingRequest, *, days: int = 14
+) -> list[slot_service.SlotView]:
+    """The openings she has published for this request over the next `days` days (§13.2's
+    propose-from-free-slots: its session type and its modality, in the practice's own clock)."""
+    now = now_utc()
+    return await slot_service.list_available_slots(
+        session,
+        window_from=now,
+        window_to=now + timedelta(days=days),
+        session_type_id=request.session_type_id,
+        modality=request.modality,
+    )
+
+
 def _slot_still_belongs(request_id: Any) -> Any:
     """Whether the joined slot is actually this request's, as SQL.
 

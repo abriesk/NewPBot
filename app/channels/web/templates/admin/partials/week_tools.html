@@ -1,0 +1,54 @@
+{# NP5b: copy a week's pattern, and the named week templates. Shared by the week grid and Slots.
+   `tools_week` = the Monday of the week these act on; `week_back` (grid only) sends the actions
+   back to that grid. #}
+<section class="card week-tools" id="templates" aria-labelledby="tools-h-{{ tools_id }}">
+  <h2 id="tools-h-{{ tools_id }}">Copy and templates</h2>
+
+  <form method="post" action="/admin/slots/repeat-week" class="tool">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="source" value="{{ tools_week }}">
+    <input type="hidden" name="target" value="{{ repeat_target }}">
+    {% if week_back %}<input type="hidden" name="week" value="{{ week_back }}">{% endif %}
+    <button type="submit">Repeat this week into next week</button>
+    <span class="muted">{{ repeat_label }}. Skips slots that exist and times already past; a blocked
+      day is not copied.</span>
+  </form>
+
+  <form method="post" action="/admin/slots/templates" class="tool">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <input type="hidden" name="week" value="{{ tools_week }}">
+    <label>Save the week of {{ tools_week_label }} as a template
+      <input type="text" name="name" maxlength="60" placeholder="Normal week" required>
+    </label>
+    <button type="submit" class="secondary">Save template</button>
+  </form>
+
+  {% if templates %}
+  <h3>Your templates</h3>
+  <ul class="templates">
+    {% for tpl in templates %}
+    <li>
+      <p><strong>{{ tpl.name }}</strong> <span class="muted">{{ tpl.entries | length }} slots a week</span></p>
+      <form method="post" action="/admin/slots/templates/{{ tpl.id }}/apply" class="row">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <label>From <input type="date" name="date_from" value="{{ default_from }}" required></label>
+        <label>To <input type="date" name="date_to" value="{{ default_to }}" required></label>
+        <button type="submit" class="small">Apply</button>
+      </form>
+      <form method="post" action="/admin/slots/templates/{{ tpl.id }}/delete">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <details class="confirm">
+          <summary class="danger">Delete…</summary>
+          <div class="really">
+            <p><strong>Really delete the template “{{ tpl.name }}”?</strong> Slots already made stay.</p>
+            <button type="submit" class="danger small">Yes, delete</button>
+          </div>
+        </details>
+      </form>
+    </li>
+    {% endfor %}
+  </ul>
+  {% else %}
+  <p class="muted">No templates yet. Save a week you like and apply it to any dates.</p>
+  {% endif %}
+</section>

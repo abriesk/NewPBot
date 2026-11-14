@@ -54,40 +54,92 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
 {%- endmacro %}
 
+{# NP5b: the free times she has published, as buttons: one tap posts that time (practice clock).
+   A button that is not a chip must come first in each form -- Enter in a field submits the first
+   submit button, and that must never be somebody's slot -- so each card opens with a hidden
+   default button that posts nothing. #}
+{% macro chip_buttons(label) %}
+  {% if chips %}
+  <div class="chips" role="group" aria-label="{{ label }}">
+    {% for day in chips %}
+      <h4>{{ day.label }}</h4>
+      <div class="chip-row">
+        {% for c in day.times %}
+          <button type="submit" name="scheduled_start" value="{{ c.value }}" class="chip" aria-label="{{ label }} {{ day.label }} {{ c.time }}">{{ c.time }}</button>
+        {% endfor %}
+      </div>
+    {% endfor %}
+  </div>
+  {% else %}
+  <p class="muted">You have no free times published for this request in the next 14 days. Use
+     another time below, or open more on <a href="/admin/slots">Slots</a>.</p>
+  {% endif %}
+{% endmacro %}
+
+{% macro default_button() %}
+  <button type="submit" class="sr-only" tabindex="-1" aria-hidden="true">Submit</button>
+{% endmacro %}
+
 {% macro card_approve() %}
   {{ form_head("admin_approve", "approve", "primary") }}
     <h3>{{ t.approve }}</h3>
-    <label>Time <small>(practice timezone; blank uses the held slot)</small>
-      <input type="datetime-local" name="scheduled_start">
-    </label>
     <label>{{ t.meeting_url }}<input type="text" name="meeting_url"></label>
     <button type="submit">{{ t.approve }}</button>
+    <p class="muted">Confirms the time already agreed or held for this request.</p>
+    <details class="another">
+      <summary>Approve at a different time</summary>
+      {{ chip_buttons("Approve at") }}
+      <label>Another time <small>(practice timezone)</small>
+        <input type="datetime-local" name="scheduled_start">
+      </label>
+      <button type="submit" class="secondary">Approve at this time</button>
+    </details>
   </form>
 {% endmacro %}
 
 {% macro card_propose() %}
   {{ form_head("admin_propose", "propose") }}
+    {{ default_button() }}
     <h3>{{ t.propose }}</h3>
-    <label>Time <small>(practice timezone)</small> <input type="datetime-local" name="scheduled_start"></label>
-    <label>Note <input type="text" name="body"></label>
-    <button type="submit" class="secondary">{{ t.propose }}</button>
+    <p class="muted">Tap one of your free times to propose it (practice timezone). Your note, if you
+       write one, goes with it.</p>
+    {{ chip_buttons("Propose") }}
+    {# A textarea, not an input: a browser strips line breaks from an input, and what is written
+       here is read by the client as it was typed. #}
+    <label>Note to the client <small>(optional)</small>
+      <textarea name="body" rows="2" maxlength="2000"></textarea>
+    </label>
+    <details class="another">
+      <summary>Another time, or words only</summary>
+      <label>Time <small>(practice timezone; leave empty to propose in words only)</small>
+        <input type="datetime-local" name="scheduled_start">
+      </label>
+      <button type="submit" class="secondary">{{ t.propose }}</button>
+    </details>
   </form>
 {% endmacro %}
 
 {# §7.1's other exit from `confirmed`, and the one that keeps the booking. #}
 {% macro card_reschedule() %}
   {{ form_head("admin_reschedule", "reschedule") }}
+    {{ default_button() }}
     <h3>Move this session</h3>
-    <label>New time <small>(practice timezone)</small>
-      <input type="datetime-local" name="scheduled_start" required>
+    <p class="muted">Tap a free time to move the session there (practice timezone).</p>
+    {{ chip_buttons("Move to") }}
+    <label>Note to the client <small>(optional)</small>
+      <textarea name="reason" rows="2" maxlength="2000"
+                placeholder="Leave empty to send your standing message"></textarea>
     </label>
-    <label>Note to the client
-      <input type="text" name="reason" placeholder="Leave empty to send your standing message">
-    </label>
+    <details class="another">
+      <summary>Another time</summary>
+      <label>New time <small>(practice timezone)</small>
+        <input type="datetime-local" name="scheduled_start">
+      </label>
+      <button type="submit" class="secondary">Move</button>
+    </details>
     <p class="muted">The session stays booked and the client is told both
        times. The hour you are leaving is <strong>blocked</strong>, not put
        back on the picker — unblock it on Slots when the day is yours again.</p>
-    <button type="submit" class="secondary">Move</button>
   </form>
 {% endmacro %}
 
@@ -101,8 +153,8 @@
         {# Not "Reason": the answer to a request she cannot take is as often a referral as a
            refusal, and the client reads this verbatim. #}
         <label>Anything to tell them? <small>(optional)</small>
-          <input type="text" name="reason"
-                 placeholder="Another practice, another time to ask, or why not">
+          <textarea name="reason" rows="2" maxlength="2000"
+                    placeholder="Another practice, another time to ask, or why not"></textarea>
         </label>
         <button type="submit" class="danger">Yes, {{ t.reject | lower }}</button>
       </div>
@@ -117,7 +169,7 @@
       <summary class="danger">{{ t.cancel }}…</summary>
       <div class="really">
         <p><strong>Really cancel this session?</strong> The client is told the reason.</p>
-        <label>Reason <small>(optional)</small> <input type="text" name="reason"></label>
+        <label>Reason <small>(optional)</small> <textarea name="reason" rows="2" maxlength="2000"></textarea></label>
         <p class="muted">Cancel puts the hour back on the picker. Cancel &amp; block keeps it off,
            for when the reason is your own day.</p>
         <div class="buttons">

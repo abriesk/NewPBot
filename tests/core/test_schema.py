@@ -38,6 +38,7 @@ EXPECTED_TABLES = {
     "slot_session_type",
     "timezone_option",
     "translation",
+    "week_template",
     "waitlist_entry",
 }
 

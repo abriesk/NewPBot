@@ -353,3 +353,60 @@ fieldset.days label.choice { margin: 0; }
 table.wording textarea, table.wording input[type=text] { width: 100%; max-width: none; margin: 0; }
 .savebar { display: flex; gap: .75rem; align-items: center; margin-top: .75rem; }
 td.wide-link a { font-weight: 600; }
+
+/* --- NP5b ---------------------------------------------------------------- */
+
+/* Today. */
+.today-date { font-size: 1rem; font-weight: 400; }
+.inbox, .day-sessions, .glance, .templates { list-style: none; padding: 0; margin: .5rem 0; }
+.inbox li {
+  display: flex; flex-wrap: wrap; gap: .4rem .75rem; align-items: center;
+  padding: .6rem 0; border-bottom: 1px solid var(--line);
+}
+.inbox li:last-child { border-bottom: 0; }
+.inbox .who { font-weight: 600; }
+.inbox .meta { color: var(--ink-soft); font-size: .9rem; flex: 1 1 12rem; }
+.inbox form.inline { margin: 0; }
+.inbox form.inline button, a.button-link.small { min-height: 2.5rem; }
+a.button-link {
+  display: inline-flex; align-items: center; padding: .25rem .9rem; border: 1px solid var(--control);
+  border-radius: var(--radius-sm); text-decoration: none; color: var(--ink);
+}
+.day-sessions li { display: flex; gap: .75rem; padding: .3rem 0; }
+.day-sessions .at { font-variant-numeric: tabular-nums; font-weight: 600; min-width: 3rem; }
+.day-sessions li.done { color: var(--ink-soft); }
+.glance li { padding: .4rem 0; }
+.glance .bad { color: var(--red-ink); }
+.switches { display: flex; flex-wrap: wrap; gap: 1rem 2.5rem; }
+.switches form { margin: 0; }
+
+/* Slots on the week grid and the week tools. */
+.week .dayform { margin: 0 0 .4rem; }
+.week .cell {
+  display: flex; flex-wrap: wrap; gap: .25rem .4rem; align-items: center;
+  padding: .3rem .35rem; margin-bottom: .25rem; border-radius: var(--radius-sm);
+  border-left: 3px dashed var(--accent); background: var(--accent-soft);
+}
+.week .cell .at { font-variant-numeric: tabular-nums; font-weight: 600; font-size: .88rem; }
+.week .cell .state { font-size: .8rem; color: var(--ink-soft); flex: 1; }
+.week .cell form { margin: 0; }
+.week .cell.blocked { border-left-style: solid; border-left-color: var(--red-line); background: var(--red-bg); }
+.week .cell.blocked .at { text-decoration: line-through; }
+.week .cell.blocked .state { color: var(--red-ink); }
+.week .cell.past { opacity: 1; background: transparent; border-left-color: var(--line); }
+.week .cell.past .at, .week .cell.past .state { color: var(--ink-soft); }
+.week-tools .tool { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: end; margin: .5rem 0 1rem; }
+.week-tools .tool label { flex: 1 1 14rem; }
+.templates li { border-top: 1px solid var(--line); padding: .5rem 0; }
+.templates form.row { display: flex; flex-wrap: wrap; gap: .5rem 1rem; align-items: end; }
+
+/* Free-time chips on Propose / Approve / Move. */
+.chips { margin: .5rem 0; }
+.chips h4 { margin: .6rem 0 .25rem; font-size: .85rem; color: var(--ink-soft); font-weight: 600; }
+.chips .chip-row { display: flex; flex-wrap: wrap; gap: .4rem; }
+.chips button.chip {
+  min-height: 2.5rem; min-width: 4.2rem; font-variant-numeric: tabular-nums;
+  background: var(--accent-soft); color: var(--ink); border: 1px solid var(--accent);
+}
+details.another { margin: .5rem 0; }
+details.another > summary { cursor: pointer; padding: .4rem 0; color: var(--ink-soft); }

@@ -24,7 +24,7 @@ from enum import StrEnum
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -730,3 +730,18 @@ async def enqueue_raw(
         rows.extend((await session.execute(stmt)).scalars().all())
     await session.flush()
     return rows
+
+
+async def undelivered_counts(session: AsyncSession) -> dict[OutboxStatus, int]:
+    """Messages that did not go out: `failed` (will retry) and `dead` (gave up), for the admin's
+    landing page. Queued and sending ones are on their way, not a problem."""
+    rows = await session.execute(
+        select(OutboxMessage.status, func.count())
+        .where(OutboxMessage.status.in_((OutboxStatus.failed, OutboxStatus.dead)))
+        .group_by(OutboxMessage.status)
+    )
+    counted = {status: int(n) for status, n in rows.tuples().all()}
+    return {
+        OutboxStatus.failed: counted.get(OutboxStatus.failed, 0),
+        OutboxStatus.dead: counted.get(OutboxStatus.dead, 0),
+    }

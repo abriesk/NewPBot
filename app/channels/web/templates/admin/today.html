@@ -1,0 +1,96 @@
+{% extends "admin/base.html" %}
+{% block title %}Today{% endblock %}
+{% block content %}
+<h1>Today <span class="muted today-date">{{ today_label }}</span></h1>
+
+{# NP5b: the landing page. What waits for her first, then her day, then the two switches she turns
+   most; the counts come from the same core calls as the Telegram panel. #}
+<section class="card" aria-labelledby="waiting-h">
+  <h2 id="waiting-h">Waiting for you <span class="count">{{ waiting }}</span></h2>
+  {% if waiting_rows %}
+  <ul class="inbox">
+    {% for r in waiting_rows %}
+    <li>
+      <a class="who" href="/admin/requests/{{ r.uuid }}">{{ r.name or "Unnamed" }}</a>
+      <span class="badge {{ r.status }}">{{ r.status | human("request") }}</span>
+      <span class="meta">{{ r.session_type }} · {{ r.modality | human("modality") }} ·
+        {% if r.scheduled %}{{ r.scheduled }}{% elif r.desired %}<span class="muted">asked for</span> {{ r.desired }}{% else %}no time yet{% endif %}</span>
+      {% if r.approvable %}
+      <form method="post" action="/admin/requests/{{ r.uuid }}/approve" class="inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <input type="hidden" name="back" value="today">
+        <button type="submit" class="small">Approve</button>
+      </form>
+      {% else %}
+      <a class="button-link small" href="/admin/requests/{{ r.uuid }}">Open</a>
+      {% endif %}
+    </li>
+    {% endfor %}
+  </ul>
+  {% if waiting > waiting_rows | length %}
+    <p><a href="/admin/requests">All {{ waiting }} waiting requests</a></p>
+  {% endif %}
+  <p class="muted">Approve is offered where the client's time is still held for them. For the
+    others, open the request to propose or choose a time.</p>
+  {% else %}
+  <p class="muted">Nothing is waiting for you.</p>
+  {% endif %}
+</section>
+
+<section class="card" aria-labelledby="days-h">
+  <h2 id="days-h">Your sessions</h2>
+  {% for label, day, rows in sessions %}
+    <h3>{{ label }} <span class="muted">{{ day.strftime("%a") }} {{ day.day }} {{ day.strftime("%b") }}</span></h3>
+    {% if rows %}
+    <ul class="day-sessions">
+      {% for e in rows %}
+      <li{% if e.done %} class="done"{% endif %}><span class="at">{{ e.time }}</span>
+        <a href="/admin/requests/{{ e.uuid }}">{{ e.name }}</a>{% if e.done %} <span class="muted">finished</span>{% endif %}</li>
+      {% endfor %}
+    </ul>
+    {% else %}
+    <p class="muted">No sessions.</p>
+    {% endif %}
+  {% endfor %}
+  <p><a href="/admin/requests?view=grid">Open the week</a></p>
+</section>
+
+<section class="card" aria-labelledby="glance-h">
+  <h2 id="glance-h">At a glance</h2>
+  <ul class="glance">
+    <li><a href="/admin/waitlist"><strong>{{ waitlist_open }}</strong> waiting on the waitlist</a></li>
+    <li>
+      {% if dead or failed %}
+        <strong class="bad">Messages not delivered:</strong>
+        {% if dead %}<a href="/admin/delivery?status=dead">{{ dead }} gave up</a>{% endif %}
+        {% if dead and failed %} · {% endif %}
+        {% if failed %}<a href="/admin/delivery?status=failed">{{ failed }} failed, will retry</a>{% endif %}
+      {% else %}
+        <a href="/admin/delivery">All messages delivered</a>
+      {% endif %}
+    </li>
+    <li><a href="/admin/slots"><strong>{{ free_week }}</strong> free time{{ "" if free_week == 1 else "s" }} in the next 7 days</a></li>
+  </ul>
+</section>
+
+<section class="card" aria-labelledby="switch-h">
+  <h2 id="switch-h">Bookings</h2>
+  <div class="switches">
+    <form method="post" action="/admin/switch/availability">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <p><strong>Accepting new bookings:</strong>
+         <span class="badge {{ 'confirmed' if practice.availability_on else 'rejected' }}">{{ "On" if practice.availability_on else "Off" }}</span></p>
+      <button type="submit" name="value" value="{{ 'off' if practice.availability_on else 'on' }}" class="secondary">Turn {{ "off" if practice.availability_on else "on" }}</button>
+    </form>
+    <form method="post" action="/admin/switch/online-only">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <p><strong>Online only for now:</strong>
+         <span class="badge {{ 'pending' if practice.online_only else 'completed' }}">{{ "On" if practice.online_only else "Off" }}</span></p>
+      <button type="submit" name="value" value="{{ 'off' if practice.online_only else 'on' }}" class="secondary">Turn {{ "off" if practice.online_only else "on" }}</button>
+    </form>
+  </div>
+  <p class="muted">Online only stops asking clients how they would like to meet and offers only
+    online times; your in-person slots are kept. The rest of the setup is on
+    <a href="/admin/settings">Settings</a>.</p>
+</section>
+{% endblock %}

@@ -28,7 +28,7 @@ try {
 <body class="admin">
 <header>
  <div class="wrap">
-  <a class="brand" href="/admin/requests">{{ practice.name }}</a>
+  <a class="brand" href="/admin">{{ practice.name }}</a>
   {# The health dot sits here, beside Sign out, not at the end of the scrolling row: on a phone
      the 14th link is off-screen, and "is anything failing" should not be. #}
   <a class="health-dot health-{{ health.state.value }}" href="/admin/status"
@@ -42,7 +42,7 @@ try {
   </form>
   {% set here = request.url.path %}
   {% set nav_items = [
-    ("/admin/requests", t.nav_requests), ("/admin/waitlist", t.nav_waitlist),
+    ("/admin", "Today"), ("/admin/requests", t.nav_requests), ("/admin/waitlist", t.nav_waitlist),
     ("/admin/slots", t.nav_slots), ("/admin/content", t.nav_content),
     ("/admin/translations", t.nav_translations), ("/admin/session-types", t.nav_session_types),
     ("/admin/timezones", t.nav_timezones), ("/admin/delivery", t.nav_delivery),
@@ -51,7 +51,7 @@ try {
     ("/admin/help", t.nav_help)] %}
   <nav aria-label="Admin sections">
     {% for href, label in nav_items %}
-      <a href="{{ href }}"{% if here == href or here.startswith(href ~ "/") %} aria-current="page"{% endif %}>{{ label }}</a>
+      <a href="{{ href }}"{% if here == href or (href != "/admin" and here.startswith(href ~ "/")) or (href == "/admin" and here == "/admin/") %} aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
   </nav>
  </div>
