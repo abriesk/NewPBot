@@ -288,45 +288,24 @@ async def test_the_m7_acceptance_path(
     """§19 M7, verb by verb, entirely over HTTP."""
     _sign_in(web)
 
-    # 1. Change availability.
-    web.get("/admin/settings")
+    # 1. Change availability (NP5b: a switch on the Today page, one tap).
+    web.get("/admin")
     response = web.post(
-        "/admin/settings",
-        data={
-            "csrf_token": _csrf(web),
-            "booking_mode": "slots",
-            "name": "Practice",
-            "timezone": "Asia/Yerevan",
-            "default_language": "ru",
-            "reminder_offsets_min": "1440, 60",
-            # availability_on omitted: an unchecked box means off.
-        },
+        "/admin/switch/availability",
+        data={"csrf_token": _csrf(web), "value": "off"},
         follow_redirects=False,
     )
     assert response.status_code == 303
-    # A redirect alone proves nothing: the handler redirects to the login page
-    # when the session is missing, and back here with a flash when a value is
-    # refused. Both are 303.
-    assert response.headers["location"].startswith("/admin/settings"), response.headers["location"]
-    assert "rejected" not in response.headers["location"], response.headers["location"]
+    # A redirect alone proves nothing: it is also what a missing session answers.
+    assert response.headers["location"].startswith("/admin?flash=availability-off"), (
+        response.headers["location"]
+    )
     await _fresh(committed)
     practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
     assert practice.availability_on is False
 
     # Put it back on, the same way.
-    web.get("/admin/settings")
-    web.post(
-        "/admin/settings",
-        data={
-            "csrf_token": _csrf(web),
-            "availability_on": "1",
-            "booking_mode": "slots",
-            "name": "Practice",
-            "timezone": "Asia/Yerevan",
-            "default_language": "ru",
-            "reminder_offsets_min": "1440, 60",
-        },
-    )
+    web.post("/admin/switch/availability", data={"csrf_token": _csrf(web), "value": "on"})
     await _fresh(committed)
     practice = (await committed.execute(select(Practice).limit(1))).scalar_one()
     assert practice.availability_on is True

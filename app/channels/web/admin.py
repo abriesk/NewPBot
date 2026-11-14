@@ -488,6 +488,14 @@ def _back(path: str, flash: str = "", fragment: str = "") -> RedirectResponse:
 #: The two daily switches (NP5b): URL name -> practice field. They live on the Today page.
 SWITCHES = {"availability": "availability_on", "online-only": "online_only"}
 
+#: (switch, on?) -> flash code. Explicit, like SLOT_FLASH.
+SWITCH_FLASH = {
+    ("availability", True): "availability-on",
+    ("availability", False): "availability-off",
+    ("online-only", True): "online-only-on",
+    ("online-only", False): "online-only-off",
+}
+
 #: How many free times the Propose / Approve / Move cards offer as chips, and how far ahead.
 CHIP_LIMIT = 40
 
@@ -688,7 +696,7 @@ def build_router() -> APIRouter:
                 return _back("/admin/login")
             on = value == "on"
             await update_settings(session, **{SWITCHES[name]: on})
-            return _back("/admin", f"{name}-{'on' if on else 'off'}")
+            return _back("/admin", SWITCH_FLASH[(name, on)])
 
     @router.get("/requests", response_class=HTMLResponse, include_in_schema=False)
     async def requests_list(

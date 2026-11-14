@@ -343,7 +343,7 @@ async def test_block_this_day_blocks_it_in_one_submit(
         web, "/admin/slots/block-range", date_from=str(MONDAY), do="block", week=str(MONDAY)
     )
     assert "flash=blocked-3" in location and "view=grid" in location
-    assert "Blocked 3 free slots" in _flash_of(web, location)
+    assert "Blocked 3 slots" in _flash_of(web, location)
     assert set((await _day_status(committed, MONDAY)).values()) == {"blocked"}
     assert set((await _day_status(committed, MONDAY + timedelta(days=1))).values()) == {"available"}
     # And the header now offers to free the day again.
@@ -370,6 +370,7 @@ async def test_blocking_a_range_refuses_over_a_booked_slot_and_lists_its_time(
         date_from=str(MONDAY),
         date_to=str(MONDAY + timedelta(days=2)),
     )
+    assert 'class="flash error" role="alert"' in web.get(location).text, "a refusal is an alert"
     sentence = _flash_of(web, location)
     assert "Nothing was blocked" in sentence and "14:30" in sentence
     assert "Test Client" not in location, "no client name rides the URL"
@@ -508,29 +509,30 @@ async def test_templates_save_apply_and_delete_through_the_forms(
     await _fresh(committed)
     template = (await committed.execute(select(WeekTemplate))).scalar_one()
     assert template.name == "Normal week" and len(template.entries) == 3
+    tid = template.id
     page = web.get("/admin/slots").text
-    assert f'/admin/slots/templates/{template.id}/apply"' in page and "Normal week" in page
+    assert f'/admin/slots/templates/{tid}/apply"' in page and "Normal week" in page
 
     first = MONDAY + timedelta(days=14)
     location = _post(
         web,
-        f"/admin/slots/templates/{template.id}/apply",
+        f"/admin/slots/templates/{tid}/apply",
         date_from=str(first),
         date_to=str(first + timedelta(days=6)),
     )
     assert "Applied the template: 3 new slots." in _flash_of(web, location)
     assert set((await _day_status(committed, first)).keys()) == {"10:00", "11:00"}
 
-    bad = _post(web, f"/admin/slots/templates/{template.id}/apply", date_from="x", date_to="y")
+    bad = _post(web, f"/admin/slots/templates/{tid}/apply", date_from="x", date_to="y")
     assert "dates could not be read" in _flash_of(web, bad)
-    gone = _post(web, f"/admin/slots/templates/{template.id}/delete")
+    gone = _post(web, f"/admin/slots/templates/{tid}/delete")
     assert "Template deleted" in _flash_of(web, gone)
     missing = _post(
-        web, f"/admin/slots/templates/{template.id}/apply", date_from=str(first), date_to=str(first)
+        web, f"/admin/slots/templates/{tid}/apply", date_from=str(first), date_to=str(first)
     )
     assert "no longer exists" in _flash_of(web, missing)
     nope = web.post(
-        f"/admin/slots/templates/{template.id}/frob",
+        f"/admin/slots/templates/{tid}/frob",
         data={"csrf_token": _csrf(web)},
         follow_redirects=False,
     )
@@ -541,7 +543,7 @@ async def test_templates_save_apply_and_delete_through_the_forms(
 
 
 def test_the_new_flash_codes_become_sentences() -> None:
-    assert _flash("blocked-4") == ("Blocked 4 free slots. They are no longer offered.", "ok")
+    assert _flash("blocked-4") == ("Blocked 4 slots. They are no longer offered.", "ok")
     assert _flash("blocked-1") == ("Blocked 1 slot. It is no longer offered.", "ok")
     assert _flash("blocked-0") == ("Nothing to do: there are no free slots in that range.", "ok")
     assert _flash("unblocked-2") == ("Freed 2 slots: offered again.", "ok")
