@@ -530,9 +530,20 @@ def _chips(slots: Sequence[slot_service.SlotView]) -> list[dict[str, Any]]:
     return days
 
 
-def _grid_url(monday: date, flash: str = "") -> str:
+def _grid_url(monday: date, flash: str = "", day: date | None = None) -> str:
     url = f"/admin/requests?view=grid&start={monday.isoformat()}"
+    if day is not None:
+        url += f"&day={day.isoformat()}"
     return url + ("&flash=" + quote(flash, safe="") if flash else "")
+
+
+def _day_back(week: str) -> date | None:
+    """The day a grid form came from. A form posts its own date as `week`; `_week_back` snaps it
+    to its Monday, and this keeps the day itself so a phone lands on the day she was looking at."""
+    try:
+        return date.fromisoformat(week)
+    except ValueError:
+        return None
 
 
 def _week_back(week: str) -> date | None:
@@ -692,6 +703,16 @@ def build_router() -> APIRouter:
                 await _context(session, request, admin, **await _today(session)),
             )
 
+    @router.get("/more", response_class=HTMLResponse, include_in_schema=False)
+    async def more_page(request: Request) -> Response:
+        """NP5c: the pages that are not one of the five daily ones, with a line on what each is
+        for. On a phone this is where the sixth tab goes."""
+        async with unit_of_work() as session:
+            admin = await current_admin(session, request)
+            if admin is None:
+                return _back("/admin/login")
+            return _render("admin/more.html", await _context(session, request, admin))
+
     @router.post("/switch/{name}", include_in_schema=False)
     async def switch(
         request: Request,
@@ -715,7 +736,12 @@ def build_router() -> APIRouter:
 
     @router.get("/requests", response_class=HTMLResponse, include_in_schema=False)
     async def requests_list(
-        request: Request, status: str = "", view: str = "", start: str = "", q: str = ""
+        request: Request,
+        status: str = "",
+        view: str = "",
+        start: str = "",
+        q: str = "",
+        day: str = "",
     ) -> Response:
         """§12.2: two views of one query, chosen by `?view=`.
 
@@ -732,7 +758,7 @@ def build_router() -> APIRouter:
                 return _render(
                     "admin/requests.html",
                     await _context(
-                        session, request, admin, view="grid", **await _schedule(session, start)
+                        session, request, admin, view="grid", **await _schedule(session, start, day)
                     ),
                 )
 
@@ -1068,6 +1094,7 @@ def build_router() -> APIRouter:
                             "date": local.date(),
                             "label": f"{local:%a} {local.day} {local:%b}",
                             "today": local.date() == today,
+                            "open": False,
                             "slots": [],
                         }
                     )
@@ -1081,6 +1108,14 @@ def build_router() -> APIRouter:
                         "deletable": s.id not in referenced,
                     }
                 )
+
+            # NP5c: each day is folded to its header; today and the next day that has slots are
+            # open, so a long list is a short page.
+            later = [d for d in days if d["date"] > today]
+            for d in days:
+                d["open"] = d["today"] or (bool(later) and d is later[0])
+                d["free"] = sum(1 for x in d["slots"] if x["status"] == "available")
+                d["blocked"] = sum(1 for x in d["slots"] if x["status"] == "blocked")
 
             return _render(
                 "admin/slots.html",
@@ -1157,10 +1192,13 @@ def build_router() -> APIRouter:
 
             # NP5b: a cell on the week grid sends the week it came from and goes back to it.
             monday = _week_back(week)
+            shown = _day_back(week)
 
             def home(flash: str, fragment: str = "") -> RedirectResponse:
                 if monday is not None:
-                    return RedirectResponse(_grid_url(monday, flash) + fragment, status_code=303)
+                    return RedirectResponse(
+                        _grid_url(monday, flash, shown) + fragment, status_code=303
+                    )
                 return _back("/admin/slots", flash, fragment)
 
             try:
@@ -1200,10 +1238,11 @@ def build_router() -> APIRouter:
             if admin is None:
                 return _back("/admin/login")
             monday = _week_back(week)
+            shown = _day_back(week)
 
             def home(flash: str) -> RedirectResponse:
                 if monday is not None:
-                    return RedirectResponse(_grid_url(monday, flash), status_code=303)
+                    return RedirectResponse(_grid_url(monday, flash, shown), status_code=303)
                 return _back("/admin/slots", flash)
 
             try:
@@ -2345,7 +2384,7 @@ def _week_start(value: str, zone: ZoneInfo) -> date:
     return anchor - timedelta(days=anchor.weekday())
 
 
-async def _schedule(session: AsyncSession, start: str) -> dict[str, Any]:
+async def _schedule(session: AsyncSession, start: str, want: str = "") -> dict[str, Any]:
     """§12.2's week schedule: seven day columns, plus what has no cell.
 
     Entries are placed by the **local wall-clock date** of their start, never by
@@ -2415,12 +2454,24 @@ async def _schedule(session: AsyncSession, start: str) -> dict[str, Any]:
             )
 
     today = datetime.now(UTC).astimezone(zone).date()
+    # NP5c: on a phone the grid shows one day. The one in `?day=` if it is in this week, else
+    # today if it is, else the Monday. A wide screen shows all seven and ignores this.
+    shown = _day_back(want[:10])
+    if shown is None or not monday <= shown <= monday + timedelta(days=6):
+        shown = today if monday <= today <= monday + timedelta(days=6) else monday
     return {
         "week": monday.isoformat(),
+        "shown": shown.isoformat(),
+        "shown_label": shown.strftime("%A %d %b"),
+        "day_prev": (shown - timedelta(days=1)).isoformat(),
+        "day_next": (shown + timedelta(days=1)).isoformat(),
         "days": [
             {
                 "label": day.strftime("%a %d %b"),
                 "date": day.isoformat(),
+                "short": day.strftime("%a"),
+                "num": day.day,
+                "shown": day == shown,
                 "today": day == today,
                 "entries": rows,
                 "slots": cells[day],

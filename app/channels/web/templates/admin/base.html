@@ -41,18 +41,37 @@ try {
     <button type="submit">Sign out</button>
   </form>
   {% set here = request.url.path %}
+  {# NP5c: which destination she is on. Five primary ones, everything else is "More". The schedule
+     is the requests page with ?view=grid, so the query decides between the two. #}
+  {% if here in ("/admin", "/admin/") %}{% set cur = "today" %}
+  {% elif here == "/admin/requests" and request.query_params.get("view") == "grid" %}{% set cur = "schedule" %}
+  {% elif here == "/admin/requests" or here.startswith("/admin/requests/") %}{% set cur = "requests" %}
+  {% elif here == "/admin/slots" %}{% set cur = "slots" %}
+  {% elif here == "/admin/waitlist" %}{% set cur = "waitlist" %}
+  {% else %}{% set cur = "more" %}{% endif %}
   {% set nav_items = [
-    ("/admin", "Today"), ("/admin/requests", t.nav_requests), ("/admin/waitlist", t.nav_waitlist),
-    ("/admin/slots", t.nav_slots), ("/admin/content", t.nav_content),
-    ("/admin/translations", t.nav_translations), ("/admin/session-types", t.nav_session_types),
-    ("/admin/timezones", t.nav_timezones), ("/admin/delivery", t.nav_delivery),
-    ("/admin/maintenance", t.nav_maintenance), ("/admin/clients", t.nav_clients),
-    ("/admin/privacy", t.nav_privacy), ("/admin/settings", t.nav_settings),
-    ("/admin/help", t.nav_help)] %}
-  <nav aria-label="Admin sections">
-    {% for href, label in nav_items %}
-      <a href="{{ href }}"{% if here == href or (href != "/admin" and here.startswith(href ~ "/")) or (href == "/admin" and here == "/admin/") %} aria-current="page"{% endif %}>{{ label }}</a>
+    ("/admin", "Today", "today"), ("/admin/requests", t.nav_requests, "requests"),
+    ("/admin/requests?view=grid", "Schedule", "schedule"), ("/admin/waitlist", t.nav_waitlist, "waitlist"),
+    ("/admin/slots", t.nav_slots, "slots"), ("/admin/content", t.nav_content, ""),
+    ("/admin/translations", t.nav_translations, ""), ("/admin/session-types", t.nav_session_types, ""),
+    ("/admin/timezones", t.nav_timezones, ""), ("/admin/delivery", t.nav_delivery, ""),
+    ("/admin/maintenance", t.nav_maintenance, ""), ("/admin/clients", t.nav_clients, ""),
+    ("/admin/privacy", t.nav_privacy, ""), ("/admin/settings", t.nav_settings, ""),
+    ("/admin/help", t.nav_help, "")] %}
+  {# A wide screen: every page in one row. #}
+  <nav class="full" aria-label="Admin sections">
+    {% for href, label, key in nav_items %}
+      <a href="{{ href }}"{% if (key and key == cur) or (not key and (here == href or here.startswith(href ~ "/"))) %} aria-current="page"{% endif %}>{{ label }}</a>
     {% endfor %}
+  </nav>
+  {# A phone: the five she uses every day and "More", in one row that never scrolls sideways. #}
+  <nav class="tabs" aria-label="Main">
+    <a href="/admin"{% if cur == "today" %} aria-current="page"{% endif %}>Today</a>
+    <a href="/admin/requests"{% if cur == "requests" %} aria-current="page"{% endif %}>Requests</a>
+    <a href="/admin/requests?view=grid"{% if cur == "schedule" %} aria-current="page"{% endif %}>Schedule</a>
+    <a href="/admin/slots"{% if cur == "slots" %} aria-current="page"{% endif %}>Slots</a>
+    <a href="/admin/waitlist"{% if cur == "waitlist" %} aria-current="page"{% endif %}>Waitlist</a>
+    <a href="/admin/more"{% if cur == "more" %} aria-current="page"{% endif %}>More</a>
   </nav>
  </div>
 </header>

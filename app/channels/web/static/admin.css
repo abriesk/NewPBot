@@ -413,3 +413,92 @@ a.button-link {
 }
 details.another { margin: .5rem 0; }
 details.another > summary { cursor: pointer; padding: .4rem 0; color: var(--ink-soft); }
+
+/* --- NP5c ---------------------------------------------------------------- */
+
+/* The header on a phone: the five daily pages and "More" in one row of six that never scrolls
+   sideways; every other page is on /admin/more. A wide screen keeps the one row of everything. */
+.admin header nav.tabs { display: none; }
+.admin header nav.full { display: flex; }
+@media (max-width: 57.99rem) {
+  .admin header nav.full { display: none; }
+  .admin header nav.tabs {
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 0; overflow: visible;
+    padding-top: 0; -webkit-mask-image: none; mask-image: none;
+  }
+  .admin header nav.tabs a {
+    min-height: 2.75rem; justify-content: center; text-align: center; padding: 0 .1rem;
+    font-size: .78rem; border-bottom-width: 3px;
+  }
+  .admin header nav.tabs a[aria-current="page"] { font-weight: 700; }
+}
+
+ul.more { list-style: none; padding: 0; margin: 1rem 0; border-top: 1px solid var(--line); }
+ul.more li { border-bottom: 1px solid var(--line); }
+ul.more a {
+  display: block; padding: .8rem 0 .1rem; min-height: 2.75rem; font-weight: 600; text-decoration: none;
+}
+ul.more li span { display: block; padding-bottom: .7rem; color: var(--ink-soft); font-size: .9rem; }
+
+/* Tables as cards under 40rem (requests, clients, delivery). The first cell is the card's
+   heading; the others carry their column name from `data-label`. */
+@media (max-width: 40rem) {
+  .scroll.stacked { overflow: visible; background: none; }
+  .stacked table, .stacked tbody, .stacked tr, .stacked td { display: block; }
+  .stacked thead {
+    position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0);
+    white-space: nowrap;
+  }
+  .stacked tr {
+    border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface);
+    padding: .6rem .8rem; margin: 0 0 .75rem;
+  }
+  .stacked td { border: 0; padding: .2rem 0; overflow-wrap: anywhere; }
+  .stacked td[data-label]::before {
+    content: attr(data-label); display: inline-block; min-width: 6.2rem; margin-right: .5rem;
+    color: var(--ink-soft); font-size: .85rem; font-weight: 600;
+  }
+  .stacked td:first-child { font-size: 1.02rem; }
+  .stacked td.act { padding-top: .5rem; }
+  .stacked td.act button { min-height: 2.75rem; }
+  .stacked td.when { white-space: normal; }
+}
+
+/* The week grid on a phone: one day, chosen from a strip of seven; a wide screen shows the week
+   and hides the strip. */
+.daynav { display: none; }
+.daystep { display: flex; gap: .5rem; flex-wrap: wrap; margin: .5rem 0; }
+.daystep a { min-height: 2.75rem; flex: 1 1 8rem; justify-content: center; }
+ul.daystrip {
+  list-style: none; margin: 0 0 .75rem; padding: 0; display: grid;
+  grid-template-columns: repeat(7, 1fr); gap: .25rem;
+}
+.daystrip a {
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 2.75rem; border: 1px solid var(--control); border-radius: var(--radius-sm);
+  color: var(--ink-soft); text-decoration: none; font-size: .72rem; line-height: 1.15;
+}
+.daystrip a b { font-size: .95rem; font-weight: 600; color: var(--ink); }
+.daystrip a.today { border-color: var(--accent); }
+.daystrip a[aria-current="date"] {
+  background: var(--accent-soft); border-color: var(--accent); border-width: 2px; font-weight: 700;
+}
+@media (max-width: 40rem) {
+  .daynav { display: block; }
+  .week { display: block; }
+  .week .wday { display: none; margin-bottom: .75rem; }
+  .week .wday.shown { display: block; }
+  .weeknav { gap: .5rem 1rem; }
+  .weeknav a { min-height: 2.75rem; display: inline-flex; align-items: center; }
+}
+
+/* Slots: each day folded to a header and its count. */
+details.slot-day { margin: 0 0 .5rem; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+details.slot-day > summary {
+  display: flex; flex-wrap: wrap; gap: .1rem .75rem; align-items: baseline; justify-content: space-between;
+  cursor: pointer; min-height: 2.75rem; padding: .6rem .8rem; font-weight: 600;
+}
+details.slot-day > summary .today { color: var(--accent); font-weight: 600; font-size: .85rem; }
+details.slot-day > summary .tally { font-weight: 400; font-size: .88rem; color: var(--ink-soft); }
+details.slot-day > summary:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+details.slot-day ul.slots { margin: 0 .8rem .5rem; }

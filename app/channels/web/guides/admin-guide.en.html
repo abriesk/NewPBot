@@ -325,11 +325,11 @@
       <table>
         <thead><tr><th>#</th><th>Page</th><th>Why</th></tr></thead>
         <tbody>
-          <tr><td>1</td><td>Settings</td><td>Name, timezone, booking mode, meeting links</td></tr>
-          <tr><td>2</td><td>Session types</td><td>Duration and price</td></tr>
+          <tr><td>1</td><td>Settings</td><td>Name, timezone, booking mode, meeting links, your photo, the languages you work in</td></tr>
+          <tr><td>2</td><td>Session types</td><td>Duration and price (clients see the price when you fill it in)</td></tr>
           <tr><td>3</td><td>Timezones</td><td>Cities clients can pick</td></tr>
           <tr><td>4</td><td>Slots</td><td>Next week of times, if you book by slots</td></tr>
-          <tr><td>5</td><td>Content</td><td>Pages clients will read</td></tr>
+          <tr><td>5</td><td>Content</td><td>Pages clients will read, including <strong>About me</strong> (the short bio beside your photo) and <strong>Cancellation</strong> (your rule, quoted in “what happens next”)</td></tr>
           <tr><td>6</td><td>Translations</td><td>Missing Russian / Armenian strings</td></tr>
         </tbody>
       </table>
@@ -337,26 +337,50 @@
 
     <section class="card" id="menu">
       <h2>3. The admin menu</h2>
+      <p>Five pages are the ones you use every day. On a computer they sit in one row with the rest; on a phone the top of every page carries just these five and <strong>More</strong>, in one row that never scrolls sideways. The page you are on is marked (bold, with a line under it, and announced to a screen reader as the current page).</p>
       <table>
         <thead><tr><th>Page</th><th>Address</th><th>Use it for</th></tr></thead>
         <tbody>
-          <tr><td>Requests</td><td><code>/admin/requests</code></td><td>Approve, propose, reject, cancel — as a list or as a week schedule</td></tr>
+          <tr><td>Today</td><td><code>/admin</code></td><td>The home screen: who is waiting for you (with Approve on the row), today's and tomorrow's sessions, the delivery and waitlist counts, and the two daily switches</td></tr>
+          <tr><td>Requests</td><td><code>/admin/requests</code></td><td>The list. Opens on <strong>Needs you</strong>; the other statuses are one tap away</td></tr>
+          <tr><td>Schedule</td><td><code>/admin/requests?view=grid</code></td><td>The week: sessions and your free times, Block, repeat last week, templates</td></tr>
+          <tr><td>Slots</td><td><code>/admin/slots</code></td><td>Open times for a range of dates, block a date range, the list of upcoming slots day by day</td></tr>
           <tr><td>Waitlist</td><td><code>/admin/waitlist</code></td><td>People waiting while bookings are closed</td></tr>
-          <tr><td>Slots</td><td><code>/admin/slots</code></td><td>Create a week; block or delete free times</td></tr>
-          <tr><td>Content</td><td><code>/admin/content</code></td><td>Practice pages in Markdown</td></tr>
-          <tr><td>Translations</td><td><code>/admin/translations</code></td><td>Reword buttons and bot/email copy</td></tr>
-          <tr><td>Session types</td><td><code>/admin/session-types</code></td><td>Products you offer</td></tr>
-          <tr><td>Timezones</td><td><code>/admin/timezones</code></td><td>Client timezone list</td></tr>
-          <tr><td>Delivery</td><td><code>/admin/delivery</code></td><td>Did a message actually leave?</td></tr>
-          <tr><td>Maintenance</td><td><code>/admin/maintenance</code></td><td>Config export/import; download dumps</td></tr>
-          <tr><td>Clients</td><td><code>/admin/clients</code></td><td>The people who have booked: their history and how to reach them</td></tr>
-          <tr><td>Privacy</td><td><code>/admin/privacy</code></td><td>Every client row there has ever been. Export one person, or erase them</td></tr>
-          <tr><td>Settings</td><td><code>/admin/settings</code></td><td>Availability and operational knobs</td></tr>
-          <tr><td>Help</td><td><code>/admin/help</code></td><td>This guide</td></tr>
-          <tr><td>The dot</td><td><code>/admin/status</code></td><td>The traffic light: what is working, and what to tell your IT person</td></tr>
         </tbody>
       </table>
-      <p>The header brand returns to Requests — that is the home screen.</p>
+      <p><strong>More</strong> (<code>/admin/more</code>) lists everything else, with a line on what each page is for:</p>
+      <table>
+        <thead><tr><th>Page</th><th>Address</th><th>Use it for</th></tr></thead>
+        <tbody>
+          <tr><td>Clients</td><td><code>/admin/clients</code></td><td>The people who have booked: their history and how to reach them</td></tr>
+          <tr><td>Delivery</td><td><code>/admin/delivery</code></td><td>Did a message actually leave? Retry the ones that gave up</td></tr>
+          <tr><td>Session types</td><td><code>/admin/session-types</code></td><td>Products you offer, with length and price</td></tr>
+          <tr><td>Content</td><td><code>/admin/content</code></td><td>Practice pages in Markdown</td></tr>
+          <tr><td>Translations</td><td><code>/admin/translations</code></td><td>Reword buttons and bot/email copy</td></tr>
+          <tr><td>Timezones</td><td><code>/admin/timezones</code></td><td>Client timezone list</td></tr>
+          <tr><td>Settings</td><td><code>/admin/settings</code></td><td>Booking rules, your photo, hold time, the abuse guard, theme</td></tr>
+          <tr><td>Privacy</td><td><code>/admin/privacy</code></td><td>Every client row there has ever been. Export one person, or erase them</td></tr>
+          <tr><td>Maintenance</td><td><code>/admin/maintenance</code></td><td>Config export/import; download dumps</td></tr>
+          <tr><td>Status</td><td><code>/admin/status</code></td><td>The traffic light: what is working, and what to tell your IT person</td></tr>
+          <tr><td>Help</td><td><code>/admin/help</code></td><td>This guide</td></tr>
+        </tbody>
+      </table>
+      <p>The coloured dot next to <strong>Sign out</strong> is the traffic light; it opens Status and is always on screen. The header brand returns to Today.</p>
+    </section>
+
+    <section class="card" id="daily">
+      <h2>4. Daily workflow</h2>
+      <ol>
+        <li>Open <strong>Today</strong>. Under <strong>Waiting for you</strong> each request is a row: the name opens the request, and where the client's time is still held for them there is an <strong>Approve</strong> button right on the row. Tap it and you are back on Today with the request gone from the list.</li>
+        <li>For a row with <strong>Open</strong> instead of Approve, open the request, read what they wrote (detail page only) and approve at a time, propose another, or reject.</li>
+        <li>Before proposing a time of your own, look at the <strong>Schedule</strong>: your sessions and your free times for the week are on it. The request page also offers your free times as buttons.</li>
+        <li>Under <strong>At a glance</strong>: the waitlist, and whether every message was delivered — a red count links straight to the ones that gave up.</li>
+        <li>Once a week: <strong>Schedule</strong> → <em>Repeat this week into next week</em>, or apply a saved template (section 7).</li>
+        <li>Going away for a day or a week: <strong>Block day</strong> on the Schedule, or <strong>Slots</strong> → <em>Block a date range</em>. Closing bookings altogether is the switch on Today.</li>
+        <li>On the phone, send <code>/admin</code> to the bot.</li>
+      </ol>
+      <p>The two switches at the bottom of Today are the ones you turn most: <strong>Accepting new bookings</strong> and <strong>Online only for now</strong>. Each takes effect as you tap it and tells you which way it went. The rest of the setup stays on Settings.</p>
+      <div class="callout">Do not edit <code>.env</code> for ordinary practice changes. Availability, prices, reminders, content, and booking mode all live in the admin UI.</div>
     </section>
 
     <section class="card" id="daily">
@@ -376,10 +400,10 @@
     <section class="card" id="requests">
       <h2>5. Requests</h2>
       <h3>Two views of the same queue</h3>
-      <p><strong>list</strong> and <strong>schedule</strong> switch at the top of <code>/admin/requests</code>.</p>
+      <p><strong>list</strong> and <strong>schedule</strong> switch at the top of <code>/admin/requests</code>; on a phone, Requests and Schedule are two of the five tabs.</p>
       <ul>
-        <li><strong>list</strong> — filterable by status. Click the short UUID for the detail page.</li>
-        <li><strong>schedule</strong> — the week as a grid in the practice timezone, so you can see what a time collides with before you propose it. Arrows move a week at a time; <em>this week</em> comes back.</li>
+        <li><strong>list</strong> — opens on <strong>Needs you</strong> (pending and negotiating); the pills below it filter by any other status, each with its count, and <em>All</em> shows the history. The name opens the detail page; the short reference under it is what a client quotes. <strong>Find</strong> searches every status by reference or name. On a phone each row is a card, with the name as its heading, instead of a wide table.</li>
+        <li><strong>schedule</strong> — the week as a grid in the practice timezone, so you can see what a time collides with before you propose it. <em>previous</em> and <em>next</em> move a week at a time; <em>this week</em> comes back. Your sessions are on it with their status, and so are the times you have opened (section 7). <strong>On a phone the grid shows one day</strong>: a strip of the seven days (today ringed, the shown one filled) and <em>Previous day</em> / <em>Next day</em> buttons; a computer shows the whole week.</li>
       </ul>
       <p>Under the grid, <strong>Unscheduled</strong> holds the requests with no instant to draw: someone who asked in words, and a slot request whose hold has since lapsed. They are listed rather than dropped — these are usually the ones most in need of an answer.</p>
       <p>The list carries <strong>Name</strong> and <strong>Contact</strong>, because this is where you decide what to open. A name falls back to the client's remembered name, so a returning client is not blank just because they did not retype it. Each contact is a link: email opens your mail client, a Telegram id opens the chat where your own Telegram already knows that person and otherwise stays the plain id it always was.</p>
@@ -411,6 +435,8 @@
         <p>Only the actions this status allows are live. The rest stay on the page, greyed, with a line saying why — so someone looking for Cancel learns that it is for confirmed sessions only, instead of hunting for a button that was removed.</p>
         <p><strong>Approve</strong> — from <code>pending</code> and from <code>negotiating</code>. Leave the time blank and it confirms the last time either side put forward; on a <code>pending</code> request, where nothing has been discussed, that is the slot the client picked. Naming a time still wins. Optional per-session meeting URL; otherwise the standing room from Settings is used for online sessions.</p>
         <p><strong>Propose</strong> — a time, a note, or both. A note with no time is a real move, not a mistake: the client is told there is a reply and sent to their request page to read it, and they can accept it there. Nothing can be scheduled out of words, so the request stays <code>negotiating</code> until one of you names a time — you are told when they accept.</p>
+        <p>Wherever a button cannot be taken back — <strong>Reject…</strong>, <strong>Cancel…</strong>, deleting a slot or a template — the first tap only opens a small red box that asks the question (“Really delete this slot?”) with a <strong>Yes, …</strong> button in it. Nothing happens until you tap that. Closing the box again does nothing.</p>
+        <p>In <strong>Approve</strong>, <strong>Propose</strong> and <strong>Move</strong> your free times are listed as buttons, grouped by day; one tap on a time is the whole action. The field for another time is folded under <em>Another time</em>. A typed time and a tapped one are different fields: if you do both, the one you tapped is used.</p>
         <p><strong>Reject</strong> — a <em>note to the client</em>, optional, and it reaches them in your words with nothing added in front of it. Use it for a referral as readily as for a refusal: “not my area, Anna at the centre takes these” is the answer more often than “no”, and the message no longer labels it as a reason. Cancel stops reminders on a confirmed session. Cancel is not an alias for Reject: they send the client different messages.</p>
         <p><strong>Move this session</strong> — for the day something happens and you cannot keep an appointment you have already agreed. Give the new time and, if you have a moment, a line for the client. The booking stays booked: they are told the old time and the new one, their reminders follow, and nothing waits on their reply. If the new time does not suit them they will write back on their request page.</p>
         <p>The hour you are <em>leaving</em> is <strong>blocked</strong>, not put back on offer — the reason it is free is that your day came apart, and the last thing you need is a stranger booking it. Unblock it on Slots when the day is yours again. If you move onto an hour where you already have someone, you are told so and it goes through anyway; check the week schedule.</p>
@@ -445,39 +471,46 @@
         <li><strong>They saw your free times and none of them suited.</strong> Both the website and the bot now offer “None of these times suit me” under the picker. This is the one that arrives while you <em>do</em> have openings, so expect entries that are about the hours you offer rather than about having no room — worth reading as a hint about which times to add.</li>
       </ul>
       <p><strong>Reachable at</strong> lists the client's identities, the same as on a request page — always there and always true, whatever they wrote in their own contact note above it.</p>
+      <p>The page opens on <strong>Waiting</strong>, the people nobody has answered yet; <em>Contacted</em>, <em>Converted</em>, <em>Closed</em> and <em>All</em> are the other filters, each with its count (the Today page shows the same number). Each entry is a card on every screen size.</p>
       <table>
-        <thead><tr><th>Action</th><th>Meaning</th></tr></thead>
+        <thead><tr><th>Button</th><th>Meaning</th></tr></thead>
         <tbody>
-          <tr><td>contacted</td><td>Sends what you type to the client. Leave it blank and nothing goes out — the record is just that you reached out.</td></tr>
-          <tr><td>converted</td><td>They booked, or you will book them by hand.</td></tr>
-          <tr><td>closed</td><td>No longer waiting.</td></tr>
+          <tr><td>Contacted</td><td>Only on a new entry. Sends what you type in <em>Message to the client</em> above it. Leave it blank and nothing goes out — the record is just that you reached out.</td></tr>
+          <tr><td>Booked a session</td><td>On a contacted entry: they booked, or you will book them by hand.</td></tr>
+          <tr><td>Close entry</td><td>No longer waiting. It has its own button, so a message typed for Contacted is never sent or stored by it.</td></tr>
         </tbody>
       </table>
-      <p>A waitlist entry is not a booking: no slot, no negotiation, no reminders. The note on <strong>contacted</strong> is a message to the client — not private the way it is on converted or closed.</p>
+      <p>A waitlist entry is not a booking: no slot, no negotiation, no reminders. The message field exists only where a button sends it, so nothing you type is ever dropped.</p>
     </section>
 
     <section class="card" id="slots">
       <h2>7. Slots</h2>
-      <p>Times are in the <strong>practice timezone</strong> shown at the top of <code>/admin/slots</code>.</p>
-      <h3>Create a week</h3>
+      <p>Times are in the <strong>practice timezone</strong> shown at the top of the forms. There are four ways to open times and three to take them away; the week itself is on the <strong>Schedule</strong>.</p>
+      <h3>Open times</h3>
+      <p><strong>A range of dates — Slots → “Create slots in bulk”.</strong> The form is folded once there are slots; it opens on next Monday to Sunday with Monday–Friday ticked.</p>
       <ol>
-        <li>From / To dates.</li>
-        <li>Weekdays.</li>
+        <li>From / To dates, and the weekdays you want.</li>
         <li>Start times, comma-separated — <code>10:00, 11:00, 15:30</code>.</li>
-        <li>Duration (default 60) and optional modality lock (online / onsite / either).</li>
-        <li>Create.</li>
+        <li>Duration (default 60) and an optional modality lock (online / onsite / either).</li>
+        <li>Create. You are told how many were made.</li>
       </ol>
+      <p><strong>Repeat last week — “Repeat this week into next week”.</strong> On the Schedule and on Slots, under <em>Copy and templates</em>. One tap copies the slots of the week you are looking at into the following week, day for day, and says how many it made. It skips a time that already exists and a time already past, and a blocked slot is not copied (the message says how many).</p>
+      <p><strong>Templates.</strong> Same box: <em>Save the week of … as a template</em> and give it a name (“Normal week”). Under <em>Your templates</em>, <em>Apply</em> lays that pattern on any From–To dates (it fills in next Monday to Sunday); <em>Delete…</em> asks first and leaves the slots already made. Saving under a name that exists replaces that template.</p>
+      <h3>Look at them and take them away</h3>
+      <p><strong>On the Schedule</strong> the free times are in each day beside the sessions, dashed with a green edge; a blocked time is struck through and red. <em>Block</em> / <em>Unblock</em> on the time does it in one tap and brings you back to the same day. <em>Block day</em> (and <em>Free day</em> to undo) in the day's heading does the whole day. A time a session already covers says <em>Covered</em>; times already past have no button.</p>
+      <p><strong>Block a date range</strong> (Slots, folded): From / To, <em>Block these days</em> or <em>Free them again</em>. For a holiday: one submit. If a session is booked in the range, <strong>nothing</strong> is blocked and you are told which times are in the way, so you can move that session first.</p>
+      <p><strong>The list on Slots</strong> is grouped by day, each day folded to its date and a count (“5 slots · 3 free · 1 blocked”). Today and the next day with slots are open; tap any other day to open it. A phone screen stays short even with weeks of slots.</p>
       <table>
         <thead><tr><th>Status</th><th>What you can do</th></tr></thead>
         <tbody>
-          <tr><td>available</td><td>Block or delete</td></tr>
-          <tr><td>available, marked <em>asked for</em></td><td>Block only</td></tr>
+          <tr><td>available</td><td>Block, or Delete… (asks first)</td></tr>
+          <tr><td>available, <em>Cannot be deleted</em></td><td>Block only</td></tr>
           <tr><td>blocked</td><td>Unblock</td></tr>
           <tr><td>held / booked</td><td>In use — do not delete</td></tr>
         </tbody>
       </table>
-      <div class="callout">A free time can still say <strong>asked for</strong> instead of offering delete. Somebody once asked for that hour, and their request still records it — even if you rejected it, or it expired. Block it and it stops being offered; the old request keeps its history.</div>
-      <div class="callout">Slots are not in the configuration export. Recreate next week here.</div>
+      <div class="callout">A free time can say <strong>Cannot be deleted: a request asked for this time</strong>. Somebody once asked for that hour, and their request still records it — even if you rejected it, or it expired. Block it and it stops being offered; the old request keeps its history.</div>
+      <div class="callout">Slots are not in the configuration export. Repeat last week, or apply a template, to recreate them.</div>
     </section>
 
     <section class="card" id="settings">
@@ -513,15 +546,20 @@
       <ul>
         <li><strong>Timezone</strong> must be IANA, e.g. <code>Asia/Yerevan</code> — never <code>UTC+4</code>.</li>
         <li><strong>Default language</strong> <code>ru</code> / <code>hy</code> / <code>en</code>.</li>
+        <li><strong>Languages you work in</strong> — free text, shown to clients as one of three facts on the front page, as you write it (<em>Русский, English</em>). Empty shows nothing.</li>
         <li><strong>Clinic address link</strong> and <strong>standing meeting room</strong>. You can still override the meeting URL when approving.</li>
         <li>Join links are not sent by email; email points at the request page.</li>
-        <li><strong>Slot hold</strong> (minutes), <strong>pending expiry</strong> (hours), <strong>cancellation window</strong>, <strong>retention</strong> (months — free text is later cleared, rows stay).</li>
+        <li><strong>Slot hold</strong> (minutes) — how long a time is kept for a client who has picked it; <strong>pending expiry</strong> (hours), <strong>cancellation window</strong>, <strong>retention</strong> (months — free text is later cleared, rows stay).</li>
         <li><strong>Reminder offsets</strong> in minutes, comma-separated, e.g. <code>1440, 60</code>. Empty = no reminders.</li>
       </ul>
+      <h3>Your photo</h3>
+      <p>Its own box below the main form, with its own <strong>Upload</strong> button (JPEG, PNG or WebP, up to 6 MB) and <strong>Remove the photo</strong>. Clients see it beside the first lines about you on the front page; the image is shrunk and stripped of camera data on upload. With no photo they see a plain illustration, never an empty frame. Your short bio is the <strong>About me</strong> page on <strong>Content</strong>.</p>
       <h3>Abuse</h3>
-      <p><strong>Check that the forms are filled in by a person</strong> is off, and should stay off until you need it. With it on, a visitor's browser quietly does a small piece of arithmetic while they fill the booking or waitlist form in — nothing to click, nothing to read, and about half a second on the default setting.</p>
-      <p>Turn it on if requests start arriving that nobody made, or if sign-in emails start going to addresses that never asked for one. <strong>Difficulty</strong> is how much work the browser does; each step up doubles it, so 16 is about half a second, 20 about seven, and 24 a couple of minutes. Move it one step at a time and put it back when the trouble stops — a client on an old phone pays several times what a laptop does.</p>
-      <div class="callout warn">While this is on, somebody whose browser has JavaScript switched off cannot send either form at all. That is the reason it is off by default. Telegram is unaffected, and stays open either way.</div>
+      <p><strong>Check that the booking and waitlist forms are filled in by a person</strong> (captcha) is <strong>on</strong> for a new installation, and off only on a practice that existed before it was added. With it on, a visitor's browser quietly does a small piece of arithmetic while they fill the booking or waitlist form in — nothing to click, nothing to read, and about half a second on the default setting.</p>
+      <p>Turn it off if clients on old phones complain that the form is slow, and on if requests start arriving that nobody made, or if sign-in emails start going to addresses that never asked for one. <strong>Difficulty</strong> is how much work the browser does; each step up doubles it, so 16 is about half a second, 20 about seven, and 24 a couple of minutes. Move it one step at a time and put it back when the trouble stops — a client on an old phone pays several times what a laptop does.</p>
+      <div class="callout warn">While this is on, somebody whose browser has JavaScript switched off cannot send either form at all. That is the price of having it on. Telegram is unaffected, and stays open either way.</div>
+      <p><strong>Hold for an unverified email (minutes)</strong>, default 15. A web booking from an email address nobody has proved holds its time for only this long. When the client follows the link in the email the booking becomes a normal one — the ordinary slot hold — and <em>only then are you told about the request</em>. A request from an address that never confirms lapses with the hold, the time goes back on offer, and you are never messaged about it. From 1 to 120.</p>
+      <p><strong>Web bookings per hour from one address (IP)</strong>, default 10 (1 to 1000). More than that from one connection in an hour is refused with “Too many attempts. Please try again later.” Raise it if several clients share one office or phone network; lower it if somebody is flooding the form.</p>
 
       <h3>Footer links</h3>
       <p>Name and address, one pair per row — Telegram, Instagram, a channel, anything you want people to be able to find. They appear at the bottom of every page of your site, in the order listed here, and are the same in all three languages. Three blank rows are always offered; fill one in to add a link, clear both fields of a row to remove it. Eight at most.</p>
@@ -589,7 +627,8 @@
     <section class="card" id="delivery">
       <h2>13. Delivery</h2>
       <p>One row = one outbound message. Status moves <code>pending</code> → <code>sending</code> → <code>sent</code>, or <code>failed</code> / <code>dead</code>.</p>
-      <p><code>dead</code> means retries stopped. Check SMTP, or whether the user blocked the bot. Taking a new admin action queues a fresh message; dead rows are not resent from this page.</p>
+      <p>The pills at the top filter by status and show how many there are; <strong>dead</strong> and <strong>failed</strong> come first and are outlined in red when there are any. The page opens on <em>All</em>. On a phone each message is a card. The Today page counts the same rows and links to them.</p>
+      <p><code>dead</code> means retries stopped (about a day of trying). Check SMTP, or whether the user blocked the bot, then press <strong>Retry</strong> on that row: the message is queued again and tried afresh. Retry is offered on <code>dead</code> rows only, and not on a message for a client who has been erased (it would have nobody to go to). A row that failed once and is still being retried needs nothing from you.</p>
     </section>
 
     <section class="card" id="clients">
@@ -660,10 +699,13 @@
         <li><strong>Email</strong> — login links and “open your request page”. No meeting URL in the body.</li>
       </ul>
       <h3>Booking</h3>
-      <p>They are asked <strong>how</strong> they would like to meet, then <strong>what kind</strong> of session, and only then shown times — filtered to the two answers, so every time on the list is one they can actually book. It used to ask for the time first, which meant somebody could pick an hour and find out afterwards that it was never an online hour.</p>
+      <p><strong>The front page</strong> is now written in your voice: your photo (or a plain illustration until you upload one), your <strong>About me</strong> text, three facts — session length and price, online or in person, the languages you work in — and three steps for what happens after booking, then the button. What you have not filled in is simply left out; nothing reads “coming soon”. A <strong>What happens next</strong> block on the booking pages quotes your <strong>Cancellation</strong> text, or a plain default when it is empty. <code>/privacy</code> shows the privacy page (yours from Content, or a general text that you should read once).</p>
+      <p>They are asked <strong>how</strong> they would like to meet, then <strong>what kind</strong> of session (with the price, if you set one), and only then shown times — filtered to the two answers, so every time on the list is one they can actually book. It used to ask for the time first, which meant somebody could pick an hour and find out afterwards that it was never an online hour.</p>
       <p>Someone booking <strong>in person</strong> is not asked for a timezone: they are coming to the room, so the room's clock is theirs. Someone booking online is asked once, and not again.</p>
       <p>If nothing is free the way they asked, they get a button offering the other way — “switch to in person” — rather than a list of times of a kind they did not ask for. If nothing is free either way, they are offered the waitlist.</p>
-      <p>Picking a slot does not reserve it. The page asks them to finish inside the slot-hold window and says plainly that the time is not held until they submit — two people can be looking at the same slot until one of them does. That page now also <strong>names the time</strong> they picked, so the form they are hurrying to fill in says which appointment it is for; and the three booking pages carry a small progress bar, so it reads as one errand rather than three.</p>
+      <p>The times are shown as a strip of days with a count each, and within a day as morning / afternoon / evening, with one line saying which time zone it is and a <em>change</em> link. Picking a time does not reserve it; submitting the form does, and the booking page says so. That page now also <strong>names the time</strong> they picked, so the form they are hurrying to fill in says which appointment it is for; and the three booking pages carry a small progress bar, so it reads as one errand rather than three.</p>
+      <p><strong>A booking from an email address nobody has proved is held for 15 minutes</strong> (your <em>Hold for an unverified email</em> setting), and the page says so (“Your time is saved while you finish”). They are asked to open the link in their email; the link opens a page that names the booking and asks <strong>Send this booking request</strong> or <strong>Just sign in, do not book</strong> — opening it alone, or an email program pre-reading it, does nothing. Pressing the first makes the booking a normal one and tells you; the second signs them in and files nothing. Past 15 minutes the time goes back on offer. A sign-in link and the link to a request land on the same kind of page, with a single <strong>Continue</strong> button.</p>
+      <p>The request page reads like a status page: a headline and a line for each status, the time large, a three-point timeline, the join link as a button, and an <strong>add to calendar</strong> file once it is confirmed. The web booking form has the captcha when you have it on, and is limited per address per hour (Settings).</p>
       <p>A signed-in client gets their name filled in, and the contact note from their last request offered back. Typing an address into the form signs nobody in: the session and the Telegram link both wait for the emailed link, which only the owner of that address can read. The booking itself goes through either way, and a sign-in link is emailed with it.</p>
       <h3>Answering your proposal</h3>
       <p>On the request page and in the bot: Accept, Decline, and a way to suggest another time — your own free slots as buttons first, in their timezone, filtered exactly as the booking picker is. One tap gives you something you can approve in one click. Beneath them, where free text is allowed, a date picker and a note.</p>
@@ -713,6 +755,11 @@
           <tr><td>An action is greyed out</td><td>This status does not allow it; the reason is printed in its place. Cancel is for confirmed sessions only — reject the rest.</td></tr>
           <tr><td>Approve is refused on a negotiation</td><td>Neither side has ever named a time, so there is nothing to confirm. Type the time you agreed on rather than leaving the field blank.</td></tr>
           <tr><td>A request shows no name</td><td>Booked from the web without one. Use Contact in the same row, or open Clients.</td></tr>
+          <tr><td>A client says their booking vanished</td><td>They did not follow the confirmation link within the unverified hold (15 minutes by default). The time went back on offer and you were never told. Ask them to book again and confirm from the email at once.</td></tr>
+          <tr><td>A client says “Too many attempts”</td><td>The per-address limit for web bookings (Settings → <em>Web bookings per hour from one address</em>) or the sign-in limit. Wait an hour, or raise the limit.</td></tr>
+          <tr><td>The page looks cut off on my phone</td><td>The five daily pages and <strong>More</strong> are the bar at the top. Everything else is under More. Pages with a wide table show a card per row instead.</td></tr>
+          <tr><td>I blocked a slot and the page jumped</td><td>It returns to the same day on the Schedule, or to the same time on Slots (a folded day opens by itself).</td></tr>
+          <tr><td>A message shows <code>dead</code></td><td>Delivery → fix the cause (SMTP, a blocked bot) → <strong>Retry</strong> on the row.</td></tr>
           <tr><td>A client never answers email</td><td>Open the request. An <code>unverified</code> address is sent nothing at all.</td></tr>
           <tr><td>Telegram truncates a page</td><td>Split content into more blocks.</td></tr>
           <tr><td>Need old bookings back</td><td>Database restore, not config import. Ask the host.</td></tr>

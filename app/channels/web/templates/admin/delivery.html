@@ -16,29 +16,29 @@
   {% endfor %}
 </p>
 
-<div class="scroll">
-<table>
+<div class="scroll stacked">
+<table role="table">
   <thead><tr>
-    <th>Created</th><th>Channel</th><th>Intent</th><th>Status</th>
-    <th>Attempts</th><th>Last error</th><th></th>
+    <th role="columnheader">Created</th><th role="columnheader">Channel</th><th role="columnheader">Intent</th><th role="columnheader">Status</th>
+    <th role="columnheader">Attempts</th><th role="columnheader">Last error</th><th role="columnheader"><span class="sr-only">Action</span></th>
   </tr></thead>
   <tbody>
   {% for row in rows %}
-    <tr>
-      <td>{{ row.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
-      <td>{{ row.channel.value | capitalize }}</td>
-      <td>{% if links.get(row.id) %}<a href="{{ links[row.id] }}">{{ row.intent_key | intent_label }}</a>{% else %}{{ row.intent_key | intent_label }}{% endif %}</td>
-      <td><span class="badge {{ row.status.value }}">{{ row.status.value | human("outbox") }}</span></td>
-      <td>{{ row.attempts }}</td>
-      <td>{{ row.last_error or "" }}</td>
-      <td>{% if row.status.value == "dead" and row.last_error != "client erased" %}
+    <tr role="row">
+      <td role="cell" data-label="Created">{{ row.created_at.strftime("%Y-%m-%d %H:%M") }}</td>
+      <td role="cell" data-label="Channel">{{ row.channel.value | capitalize }}</td>
+      <td role="cell" data-label="Intent">{% if links.get(row.id) %}<a href="{{ links[row.id] }}">{{ row.intent_key | intent_label }}</a>{% else %}{{ row.intent_key | intent_label }}{% endif %}</td>
+      <td role="cell" data-label="Status"><span class="badge {{ row.status.value }}">{{ row.status.value | human("outbox") }}</span></td>
+      <td role="cell" data-label="Attempts">{{ row.attempts }}</td>
+      <td role="cell" data-label="Last error">{{ row.last_error or "" }}</td>
+      <td role="cell" class="act">{% if row.status.value == "dead" and row.last_error != "client erased" %}
         <form method="post" action="/admin/delivery/{{ row.id }}/retry">
           <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
           <button type="submit">{{ t.delivery_retry }}</button>
         </form>{% endif %}</td>
     </tr>
   {% else %}
-    <tr><td colspan="7" class="muted">Nothing sent yet.</td></tr>
+    <tr role="row"><td role="cell" colspan="7" class="muted">Nothing sent yet.</td></tr>
   {% endfor %}
   </tbody>
 </table>

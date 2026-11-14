@@ -274,7 +274,11 @@ async def test_slots_are_grouped_by_day_and_an_action_lands_on_its_row(
 ) -> None:
     _sign_in(web)
     page = web.get("/admin/slots").text
-    assert re.search(r'<h3 id="day-\d{4}-\d\d-\d\d">[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}', page)
+    assert re.search(
+        r'<details class="slot-day" id="day-\d{4}-\d\d-\d\d"[^>]*>\s*<summary>\s*'
+        r'<span class="when">[A-Z][a-z]{2} \d{1,2} [A-Z][a-z]{2}',
+        page,
+    )
     assert f'id="slot-{scratch["slot_id"]}"' in page
     response = web.post(
         f"/admin/slots/{scratch['slot_id']}/block",
@@ -415,7 +419,8 @@ async def test_the_current_page_is_marked_in_the_nav_and_every_input_has_a_name(
     _sign_in(web)
     page = web.get("/admin/waitlist").text
     assert re.search(r'<a href="/admin/waitlist" aria-current="page">', page)
-    assert page.count('aria-current="page"') == 1
+    # NP5c: two bars (the full row and the phone's five + More), each marking the page once.
+    assert page.count('aria-current="page"') == 2
     for path in ("/admin/content", "/admin/timezones", "/admin/privacy", "/admin/translations"):
         html = re.sub(r"<label\b.*?</label>", "", web.get(path).text, flags=re.S)
         for tag in re.findall(r"<(?:input|textarea)\b[^>]*>", html):
@@ -530,6 +535,6 @@ async def test_a_warning_and_a_refusal_are_drawn_and_announced_as_alerts(
 def test_the_search_box_fits_a_phone_and_the_table_shows_it_scrolls() -> None:
     html = open("app/channels/web/templates/admin/requests.html", encoding="utf-8").read()
     assert 'placeholder="Ref or name"' in html
-    assert "scroll-hint" in html
+    assert 'class="scroll stacked"' in html  # NP5c: a card per row on a phone instead of a hint
     css = open("app/channels/web/static/admin.css", encoding="utf-8").read()
     assert "no-repeat local" in css and "td.when { white-space: nowrap; }" in css

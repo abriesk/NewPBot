@@ -11,16 +11,30 @@
   {% endif %}
 </p>
 
+{# NP5c: on a phone one day at a time, chosen here; the seven columns below are all there, and a
+   wide screen shows them all and hides this. Links, so it needs no script. #}
+<div class="daynav" role="group" aria-label="Day of this week">
+  <p class="daystep">
+    <a class="button-link" href="/admin/requests?view=grid&amp;start={{ day_prev }}&amp;day={{ day_prev }}"><span aria-hidden="true">&larr;</span> Previous day</a>
+    <a class="button-link" href="/admin/requests?view=grid&amp;start={{ day_next }}&amp;day={{ day_next }}">Next day <span aria-hidden="true">&rarr;</span></a>
+  </p>
+  <ul class="daystrip">
+    {% for day in days %}
+      <li><a href="/admin/requests?view=grid&amp;start={{ week }}&amp;day={{ day.date }}"{% if day.shown %} aria-current="date"{% endif %}{% if day.today %} class="today"{% endif %}><span>{{ day.short }}</span><b>{{ day.num }}</b></a></li>
+    {% endfor %}
+  </ul>
+</div>
+
 <div class="scroll">
 <div class="week">
   {% for day in days %}
-    <section class="wday{% if day.today %} is-today{% endif %}" id="d-{{ day.date }}">
+    <section class="wday{% if day.today %} is-today{% endif %}{% if day.shown %} shown{% endif %}" id="d-{{ day.date }}">
       <h3>{{ day.label }}</h3>
       {% if not day.over and (day.free or day.blocked) %}
       <form method="post" action="/admin/slots/block-range" class="dayform">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <input type="hidden" name="date_from" value="{{ day.date }}">
-        <input type="hidden" name="week" value="{{ week }}">
+        <input type="hidden" name="week" value="{{ day.date }}">
         {% if day.free %}
           <button type="submit" name="do" value="block" class="secondary small" aria-label="Block {{ day.label }}">Block day</button>
         {% else %}
@@ -43,7 +57,7 @@
           {% if not c.past %}
           <form method="post" action="/admin/slots/{{ c.id }}/{{ 'unblock' if c.blocked else 'block' }}">
             <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-            <input type="hidden" name="week" value="{{ week }}">
+            <input type="hidden" name="week" value="{{ day.date }}">
             <button type="submit" class="secondary small">{{ "Unblock" if c.blocked else "Block" }}</button>
           </form>
           {% endif %}

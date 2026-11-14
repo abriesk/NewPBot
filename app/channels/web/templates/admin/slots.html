@@ -65,8 +65,11 @@
 <h2>Upcoming <span class="count">{{ count }}</span></h2>
 <div class="slot-days">
 {% for day in days %}
-  <section class="slot-day" aria-labelledby="day-{{ day.date.isoformat() }}">
-    <h3 id="day-{{ day.date.isoformat() }}">{{ day.label }}{% if day.today %} <span class="today">today</span>{% endif %}</h3>
+  <details class="slot-day" id="day-{{ day.date.isoformat() }}"{% if day.open %} open{% endif %}>
+    <summary>
+      <span class="when">{{ day.label }}{% if day.today %} <span class="today">today</span>{% endif %}</span>
+      <span class="tally">{{ day.slots | length }} slot{{ "" if day.slots | length == 1 else "s" }}{% if day.free %} · {{ day.free }} free{% endif %}{% if day.blocked %} · {{ day.blocked }} blocked{% endif %}</span>
+    </summary>
     <ul class="slots">
     {% for s in day.slots %}
       <li id="slot-{{ s.id }}">
@@ -109,9 +112,21 @@
       </li>
     {% endfor %}
     </ul>
-  </section>
+  </details>
 {% else %}
   <p class="muted">No upcoming slots. Open the form above to create some.</p>
 {% endfor %}
 </div>
+<script>
+// A link to one slot (#slot-12, after Block) can land inside a folded day: open that day.
+(function () {
+  var reveal = function () {
+    var el = location.hash.length > 1 ? document.getElementById(location.hash.slice(1)) : null;
+    var day = el && el.closest ? el.closest('details.slot-day') : null;
+    if (day) { day.open = true; el.scrollIntoView(); }
+  };
+  reveal();
+  window.addEventListener('hashchange', reveal);
+})();
+</script>
 {% endblock %}

@@ -1,0 +1,20 @@
+{% extends "admin/base.html" %}
+{% block title %}More{% endblock %}
+{% block content %}
+<h1>More</h1>
+{# NP5c: on a phone the header carries the five daily pages; everything else is here. #}
+<p class="muted">The pages you use less often.</p>
+<ul class="more">
+  <li><a href="/admin/clients">{{ t.nav_clients }}</a><span>Everyone who has requested a consultation.</span></li>
+  <li><a href="/admin/delivery">{{ t.nav_delivery }}</a><span>Did the message arrive? Retry the ones that did not.</span></li>
+  <li><a href="/admin/session-types">{{ t.nav_session_types }}</a><span>Kinds of session, their length and price.</span></li>
+  <li><a href="/admin/content">{{ t.nav_content }}</a><span>The texts on the site.</span></li>
+  <li><a href="/admin/translations">{{ t.nav_translations }}</a><span>The wording of messages and pages.</span></li>
+  <li><a href="/admin/timezones">{{ t.nav_timezones }}</a><span>The zones a client can choose.</span></li>
+  <li><a href="/admin/settings">{{ t.nav_settings }}</a><span>Your photo, booking rules, hold time, captcha, theme.</span></li>
+  <li><a href="/admin/privacy">{{ t.nav_privacy }}</a><span>Export or erase a client's data.</span></li>
+  <li><a href="/admin/maintenance">{{ t.nav_maintenance }}</a><span>Backups and configuration.</span></li>
+  <li><a href="/admin/status">{{ t.nav_status }}</a><span>The health checks, in full.</span></li>
+  <li><a href="/admin/help">{{ t.nav_help }}</a><span>The guide to this console.</span></li>
+</ul>
+{% endblock %}

@@ -1224,7 +1224,7 @@ def test_an_unknown_view_is_the_list_rather_than_an_error(
     page = web.get("/admin/requests?view=gantt")
 
     assert page.status_code == 200
-    assert "<table>" in page.text
+    assert "<table" in page.text
 
 
 def test_the_schedule_never_renders_problem_text(
@@ -1246,8 +1246,8 @@ def test_the_toggle_leaves_the_list_view_exactly_as_it_was(
     explicit = web.get("/admin/requests?view=list").text
     filtered = web.get("/admin/requests?status=confirmed")
 
-    assert "<table>" in default
-    assert "<table>" in explicit
+    assert "<table" in default
+    assert "<table" in explicit
     assert 'class="filters"' in default
     assert filtered.status_code == 200
     assert str(schedule_week["confirmed"]) in filtered.text

@@ -13,29 +13,29 @@
   exports and erasure, see <a href="/admin/privacy">{{ t.nav_privacy }}</a>.
 </p>
 
-<div class="scroll">
-<table>
+<div class="scroll stacked">
+<table role="table">
   <thead><tr>
-    <th>Name</th><th>Contact</th><th>Requests</th>
-    <th>Last session</th><th>Next session</th><th>Since</th>
+    <th role="columnheader">Name</th><th role="columnheader">Contact</th><th role="columnheader">Requests</th>
+    <th role="columnheader">Last session</th><th role="columnheader">Next session</th><th role="columnheader">Since</th>
   </tr></thead>
   <tbody>
   {% for row in rows %}
-    <tr>
-      <td><a href="/admin/clients/{{ row.id }}">{{ row.name or 'unnamed' }}</a></td>
-      <td class="muted">
+    <tr role="row">
+      <td role="cell" class="wide-link"><a href="/admin/clients/{{ row.id }}">{{ row.name or 'unnamed' }}</a></td>
+      <td role="cell" class="muted" data-label="Contact">
         {% for c in row.contact %}{{ contact_link(c) }}<br>{% else %}—{% endfor %}
       </td>
       {# The same page the name opens, landing on the table rather than the top
          of it: a count is the thing somebody wants to click, and one that does
          nothing reads as though there were nowhere to go. #}
-      <td><a href="/admin/clients/{{ row.id }}#requests">{{ row.requests }}</a></td>
-      <td>{{ row.last_session or '—' }}</td>
-      <td>{{ row.next_session or '—' }}</td>
-      <td class="muted">{{ row.since }}</td>
+      <td role="cell" data-label="Requests"><a href="/admin/clients/{{ row.id }}#requests">{{ row.requests }}</a></td>
+      <td role="cell" data-label="Last session">{{ row.last_session or '—' }}</td>
+      <td role="cell" data-label="Next session">{{ row.next_session or '—' }}</td>
+      <td role="cell" class="muted" data-label="Since">{{ row.since }}</td>
     </tr>
   {% else %}
-    <tr><td colspan="6" class="muted">Nobody has booked yet.</td></tr>
+    <tr role="row"><td role="cell" colspan="6" class="muted">Nobody has booked yet.</td></tr>
   {% endfor %}
   </tbody>
 </table>
