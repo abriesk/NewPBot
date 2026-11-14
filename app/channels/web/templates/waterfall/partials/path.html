@@ -35,10 +35,10 @@ href="{{ o.href }}" hx-get="{{ o.frag }}" hx-target="#path" hx-swap="innerHTML" 
 </ol>
 {% endif %}
 
-<section id="q-current" class="q q-{{ kind }}" tabindex="-1" aria-labelledby="q-h">
+<section id="q-current" class="q q-{{ kind }}" tabindex="-1" aria-labelledby="{% if step_n %}q-step {% endif %}q-h">
   {# A drop that falls with the card and lands in a ring: a small playful moment, decorative only. #}
   <svg class="drop" viewBox="0 0 40 40" aria-hidden="true" focusable="false"><ellipse class="drop-ring" cx="20" cy="33" rx="9" ry="3"/><path class="drop-body" d="M20 6c4 6 7 10 7 14a7 7 0 0 1-14 0c0-4 3-8 7-14z"/></svg>
-  {% if step_n %}<p class="q-step">{{ t.step.replace('{n}', step_n|string).replace('{total}', step_total|string) }}</p>{% endif %}
+  {% if step_n %}<p class="q-step" id="q-step">{{ t.step.replace('{n}', step_n|string).replace('{total}', step_total|string) }}</p>{% endif %}
   {% if details and error %}<p class="flash" role="alert">{{ error }}</p>{% endif %}
 
   {% if kind == 'type' %}
@@ -85,12 +85,12 @@ href="{{ o.href }}" hx-get="{{ o.frag }}" hx-target="#path" hx-swap="innerHTML" 
 
   {% elif kind == 'name' %}
     <h2 id="q-h">{{ t.ask_name }}</h2>
-    <input class="field" type="text" name="name" maxlength="200" autocomplete="name" value="{{ value }}" aria-labelledby="q-h">
+    <input class="field" type="text" name="name" autocomplete="name" value="{{ value }}" aria-labelledby="q-h">
     <div class="answers"><button type="submit" name="act" value="next" class="ans primary">{{ wf.continue }}</button><button type="submit" name="act" value="skip" class="ans">{{ t.skip }}</button></div>
 
   {% elif kind == 'email' %}
     <h2 id="q-h">{{ t.email_label }}</h2>
-    <input class="field" type="email" name="email" required maxlength="254" autocomplete="email" inputmode="email" value="{{ value }}" aria-labelledby="q-h" aria-describedby="email-hint">
+    <input class="field" type="email" name="email" required autocomplete="email" inputmode="email" value="{{ value }}" aria-labelledby="q-h" aria-describedby="email-hint">
     <p class="muted" id="email-hint">{{ t.email_hint }}</p>
     <div class="answers"><button type="submit" name="act" value="next" class="ans primary">{{ wf.continue }}</button></div>
 

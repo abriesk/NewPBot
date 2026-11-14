@@ -261,8 +261,9 @@ async def test_the_questions_after_the_time_are_one_page_each_and_carry_the_answ
         "name",
     ]
 
-    page = _next(web, page, name="Zoya\nIvanova")  # a text input strips line breaks
-    assert _kind(page) == "email" and "Zoya Ivanova" in page
+    page = _next(web, page, name="Zoya  Ivanova")  # carried exactly as typed: no collapsing
+    assert _kind(page) == "email" and "Zoya Ivanova" in page  # (the stone shows it on one line)
+    assert 'name="name" value="Zoya  Ivanova"' in page
     # the address is required, and a refused one is an alert on the same question
     bad = _next(web, page, email="not-an-address")
     assert _kind(bad) == "email" and 'role="alert"' in bad
@@ -281,7 +282,7 @@ async def test_the_questions_after_the_time_are_one_page_each_and_carry_the_answ
 
     # a typed stone asks its question again, with the other answers kept
     back = _next(web, page, act="goto:name")
-    assert _kind(back) == "name" and 'value="Zoya Ivanova"' in back
+    assert _kind(back) == "name" and 'value="Zoya  Ivanova"' in back
     assert 'name="email" value="waterfall@example.test"' in back
     # a stale page is told so, and what was typed is not repeated
     stale = web.post("/book/next", data={"csrf_token": "wrong", "step": "name", "name": "SECRET"})
@@ -314,25 +315,47 @@ async def test_a_signed_in_client_is_not_asked_for_an_address(
         await committed.commit()
 
 
+ANSWERS = [
+    ("Anna", "work stress", "email is fine"),
+    # nothing is collapsed, trimmed or cut on the way: two spaces, leading spaces, 201 characters
+    ("Anna  Maria", "  a note with leading spaces", " spaced  contact "),
+    ("N" * 201, "note", "c"),
+]
+
+
+@pytest.mark.parametrize("name,problem,contact", ANSWERS)
 @pytest.mark.parametrize("flow", ["default", "waterfall"])
 @pytest.mark.asyncio
 async def test_both_flows_file_the_same_request(
-    web: TestClient, committed: AsyncSession, web_slot: int, flow: str
+    web: TestClient,
+    committed: AsyncSession,
+    web_slot: int,
+    flow: str,
+    name: str,
+    problem: str,
+    contact: str,
 ) -> None:
     """The same answers give the same request row, whichever flow was used."""
-    from app.core.models import Identity
+    import html as _html
+
+    from app.core.models import Client, Identity
 
     email = "web-e2e@example.test"
     zone = (await committed.execute(select(Practice.timezone).limit(1))).scalar_one()
     if flow == "waterfall":
         page = await _hold(web, committed, web_slot)
-        page = _next(web, page, name="Anna")
+        page = _next(web, page, name=name)
         page = _next(web, page, email=email)
-        page = _next(web, page, contact="email is fine")
-        page = _next(web, page, problem="work stress")
+        page = _next(web, page, contact=contact)
+        page = _next(web, page, problem=problem)
         names = _form_names(page, "/book")
         form = page.split('id="wf-form"')[1].split("</form>")[0]
-        fields = dict(re.findall(r'<input type="hidden" name="([a-z_]+)" value="([^"]*)"', form))
+        fields = {
+            key: _html.unescape(value)
+            for key, value in re.findall(
+                r'<input type="hidden" name="([a-z_]+)" value="([^"]*)"', form
+            )
+        }
         assert names.count("problem") == 1 and names.count("name") == 1
         done = web.post("/book", data=fields)
     else:
@@ -358,9 +381,9 @@ async def test_both_flows_file_the_same_request(
             "/book",
             data={
                 "csrf_token": _csrf(web),
-                "problem": "work stress",
-                "name": "Anna",
-                "contact": "email is fine",
+                "problem": problem,
+                "name": name,
+                "contact": contact,
                 "email": email,
             },
         )
@@ -374,6 +397,10 @@ async def test_both_flows_file_the_same_request(
             select(BookingRequest).where(BookingRequest.client_id == identity.client_id)
         )
     ).scalar_one()
+    client = (
+        await committed.execute(select(Client).where(Client.id == identity.client_id))
+    ).scalar_one()
+    assert client.display_name == name
     assert (
         request.status,
         request.source_channel,
@@ -386,8 +413,8 @@ async def test_both_flows_file_the_same_request(
         RequestStatus.pending,
         Channel.web,
         web_slot,
-        "work stress",
-        "email is fine",
+        problem,
+        contact,
         Modality.online,
         zone,
     )
@@ -494,3 +521,63 @@ def test_the_stylesheet_is_self_contained_and_every_effect_stills_under_reduced_
     script = (STATIC / "waterfall.js").read_text()
     assert "defaultSwapDelay = calm() ? 0" in script and "behavior: calm()" in script
     assert "setTimeout" not in script and "setInterval" not in script
+
+
+@pytest.mark.asyncio
+async def test_over_long_text_is_refused_in_both_flows(
+    web: TestClient, committed: AsyncSession, web_slot: int
+) -> None:
+    """The default flow refuses an over-long note; the waterfall does too, a question earlier."""
+    from app.core.policies import CLIENT_TEXT_MAX_CHARS
+
+    too_long = "x" * (CLIENT_TEXT_MAX_CHARS + 1)
+    page = await _hold(web, committed, web_slot)
+    page = _next(web, page, name="Anna")
+    page = _next(web, page, email="refuse@example.test")
+    page = _next(web, page, contact="c")
+    refused = _next(web, page, problem=too_long)
+    assert _kind(refused) == "problem" and 'role="alert"' in refused
+    # and the same text posted straight to the final handler is refused there too
+    form = page.split('id="wf-form"')[1].split("</form>")[0]
+    fields = dict(re.findall(r'<input type="hidden" name="([a-z_]+)" value="([^"]*)"', form))
+    fields["problem"] = too_long
+    assert web.post("/book", data={**fields, "contact": "c"}).status_code == 409
+
+
+@pytest.mark.asyncio
+async def test_the_next_question_is_only_for_the_waterfall(
+    web: TestClient, committed: AsyncSession
+) -> None:
+    posted = web.post(
+        "/book/next", data={"csrf_token": "x", "step": "name"}, follow_redirects=False
+    )
+    assert posted.status_code == 303 and posted.headers["location"] == "/book"
+    await _set_skin(committed, "waterfall")
+    assert (
+        web.post("/book/next", data={"csrf_token": "x"}, follow_redirects=False).status_code != 404
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_step_and_the_question_are_announced(
+    web: TestClient, committed: AsyncSession, web_slot: int
+) -> None:
+    await _set_skin(committed, "waterfall")
+    page = web.get("/book").text
+    assert '<p id="wf-live" class="sr-only" aria-live="polite"></p>' in page
+    # the question is named by its step and its heading, in that order
+    assert 'id="q-step"' in page and 'aria-labelledby="q-step q-h"' in page
+    details = await _hold(web, committed, web_slot)
+    assert 'id="wf-live"' in details and 'aria-labelledby="q-step q-h"' in details
+    script = (STATIC / "waterfall.js").read_text()
+    # filled after a swap and after a history restore (htmx settles nothing then)
+    assert "wf-live" in script and "htmx:historyRestore" in script and "htmx:afterSettle" in script
+
+
+def test_a_failed_fragment_request_falls_back_to_a_normal_page_load() -> None:
+    """Markup-level only: the handlers exist and use the link's address and the form's own submit.
+    What a real browser does when the server dies mid-request is not testable here."""
+    script = (STATIC / "waterfall.js").read_text()
+    assert "htmx:responseError" in script and "htmx:sendError" in script
+    assert "window.location.href = el.href" in script and "form.submit()" in script
+    assert "pressed.name" in script  # the pressed button (skip / change) is not lost

@@ -10,6 +10,9 @@
 {% block content %}
 <div class="wf">
   <h1 class="wf-title">{{ t.consultation }}</h1>
+  {# The step and the question are announced here after every swap (waterfall.js fills it), also when the
+     path came back from the browser history without a settle event. #}
+  <p id="wf-live" class="sr-only" aria-live="polite"></p>
   <div id="path" class="path">{% include "waterfall/partials/path.html" %}</div>
 </div>
 {% endblock %}

@@ -181,6 +181,8 @@ same, and `tests/e2e/test_np6.py` checks that the same answers file the same row
   `POST /book/hold`; the last page is the default flow's own `POST /book`.
 - Pages the Waterfall has no layout of its own for (request status, waitlist, confirm, errors) keep the
   default layout in the Waterfall's colours.
+- **Rolling back**: a configuration export taken on a build with NP6 contains `client_skin`, which a build
+  without NP6 refuses on import. Before rolling back, set the flow to *Default* and export again.
 - **Preview**: while signed in to the admin, `/book?skin=waterfall` (or `?skin=default`) shows that flow to
   you alone; `?skin=live` ends it. Clients always get the setting.
 - Code: `app/channels/web/client.py` (`_waterfall_view`, `_waterfall_details`, `/book/q`, `/book/next`),

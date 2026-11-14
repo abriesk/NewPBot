@@ -37,7 +37,7 @@ from app.channels.web.security import (
 )
 from app.config import get_settings
 from app.core.enums import Channel, Modality, SenderType, TokenPurpose
-from app.core.errors import DomainError, NotFound, SlotUnavailable, TokenInvalid
+from app.core.errors import DomainError, NotFound, SlotUnavailable, TextTooLong, TokenInvalid
 from app.core.models import (
     BookingRequest,
     Client,
@@ -50,6 +50,7 @@ from app.core.models import (
 from app.core.policies import (
     CLIENT_TEXT_MAX_CHARS,
     BookingPath,
+    check_client_text,
     hold_expiry,
     now_utc,
     parse_client_time,
@@ -1663,14 +1664,15 @@ def build_router() -> APIRouter:
         back as hidden fields of the form, are checked here, and go out again in the next page.
         Without a script this is a full page with one question; with htmx, the fragment."""
         fragment = request.headers.get("hx-request") == "true"
-        typed = {
-            "name": _one_line(name, 200),
-            "email": _one_line(email, 254),
-            "contact": _one_line(contact, CLIENT_TEXT_MAX_CHARS),
-            "problem": problem.replace("\r\n", "\n")[:CLIENT_TEXT_MAX_CHARS].strip(),
-        }
+        # Carried exactly as typed: the request row must be the one the default form files for the
+        # same answers (nothing is collapsed, trimmed or cut here; `POST /book` and the booking
+        # service decide what is kept or refused).
+        typed = {"name": name, "email": email, "contact": contact, "problem": problem}
         async with unit_of_work() as session:
             context = await _context(session, request)
+            if context["skin"] != "waterfall":
+                # Not this visitor's flow (the setting, or an admin's preview): same as /book/q.
+                return RedirectResponse("/book", status_code=303)
             client = await _session_client(session, request)
             reservation = await _reservation(session, request, client)
             if reservation is None:
@@ -1700,6 +1702,14 @@ def build_router() -> APIRouter:
                         status = 200 if fragment else 400
                     else:
                         typed["email"] = address
+                if not errors and kind in ("contact", "problem"):
+                    # The default flow refuses text over the limit (check_client_text); the same
+                    # check, one question earlier, so the answer is not lost at the last page.
+                    try:
+                        check_client_text(typed[kind], kind)
+                    except TextTooLong:
+                        errors = {kind: context["t"]["error_title"]}
+                        status = 200 if fragment else 400
                 if not errors:
                     later = asked[asked.index(kind) + 1 :]
                     kind = later[0] if later else "send"
