@@ -559,6 +559,191 @@ async def _picker_view(
     }
 
 
+def _wf_url(path: str, state: dict[str, Any]) -> str:
+    """A waterfall address: the answers so far, in the order they were given, and nothing else."""
+    query = urlencode(
+        [(key, str(value)) for key, value in state.items() if value not in ("", None)]
+    )
+    return f"{path}?{query}" if query else path
+
+
+async def _waterfall_view(
+    session: AsyncSession,
+    request: Request,
+    context: dict[str, Any],
+    *,
+    fragment: bool,
+) -> dict[str, Any]:
+    """NP6: the waterfall flow's one page, built from the answers in the query string.
+
+    The URL is the whole state (`session_type_id`, `modality`, `day`, `slot`), so every question is
+    an ordinary link and the flow works without a script: one question per page. An answer that is
+    not a real one (an old link, a day with no times) is treated as not given, and everything after
+    an unanswered question is ignored. A question with one possible answer is skipped: it asks
+    nothing and leaves no stone. The booking rules are the default flow's: the same picker, and the
+    last step posts the same `/book/hold`.
+    """
+    lang = context["lang"]
+    practice = context["practice"]
+    query = request.query_params
+    tz = query.get("tz", "")
+    zone = tz if tz and _valid_zone(tz) else _timezone(request, practice.timezone)
+    types = await _session_type_options(session, lang)
+    type_ids = [row["id"] for row in types]
+
+    texts = {
+        "picker_time": await get_text(session, lang, "picker.time"),
+        "continue": await get_text(session, lang, "common.continue"),
+    }
+    state: dict[str, Any] = {}
+    stones: list[dict[str, str]] = []
+    out: dict[str, Any] = {
+        "kind": "",
+        "options": [],
+        "groups": [],
+        "go": None,
+        "wf": texts,
+        "new_stone": fragment and request.headers.get("x-wf") == "fwd",
+    }
+
+    def link(**extra: Any) -> dict[str, str]:
+        target = {**state, **extra}
+        return {"href": _wf_url("/book", target), "frag": _wf_url("/book/q", target)}
+
+    def answered(kind: str, key: str, value: Any, label: str, aria: str = "") -> None:
+        stones.append({"kind": kind, "label": label, "aria": aria or label, **link()})
+        state[key] = value
+
+    def finish(kind: str) -> dict[str, Any]:
+        out["kind"] = kind
+        out["stones"] = stones
+        asked = [step for step in ("type", "mode", "day", "time") if step not in skipped]
+        out["step_total"] = len(asked)
+        out["step_n"] = asked.index(kind) + 1 if kind in asked else 0
+        return out
+
+    skipped: set[str] = set()
+
+    # 1. the format
+    asked_type = _int_or_none(query.get("session_type_id"))
+    if len(types) == 1:
+        skipped.add("type")
+        type_id: int | None = type_ids[0]
+        state["session_type_id"] = type_id
+    elif asked_type in type_ids:
+        type_id = asked_type
+        label = next(row["label"] for row in types if row["id"] == type_id)
+        answered("type", "session_type_id", type_id, label)
+    else:
+        out["options"] = [
+            {"label": row["label"], **link(session_type_id=row["id"])} for row in types
+        ]
+        return finish("type" if types else "empty")
+
+    # 2. online or in person
+    labels = context["t"]
+    if practice.online_only:
+        skipped.add("mode")
+        mode = "online"
+        state["modality"] = mode
+    elif query.get("modality") in ("online", "onsite"):
+        mode = str(query.get("modality"))
+        answered("mode", "modality", mode, labels["modality_" + mode])
+    else:
+        out["options"] = [
+            {"label": labels["modality_online"], **link(modality="online")},
+            {"label": labels["modality_onsite"], **link(modality="onsite")},
+        ]
+        return finish("mode")
+    out["mode"] = mode
+    before_mode = {key: value for key, value in state.items() if key != "modality"}
+
+    # 3. the day (the pool); 4. the time. The default flow's picker supplies both.
+    picker = await _picker_view(
+        session,
+        request,
+        lang=lang,
+        practice=practice,
+        session_type_id=type_id,
+        modality=mode,
+        zone=zone,
+        day=query.get("day"),
+    )
+    out["zone_line"] = picker["zone_line"]
+    if not picker["has_times"]:
+        switch = picker["switch_to"]
+        out["empty"] = {
+            "none_this_way": picker["none_this_way"],
+            "switch_label": picker["switch_label"],
+            "switch_href": _wf_url("/book", {**before_mode, "modality": switch}) if switch else "",
+            "frag": _wf_url("/book/q", {**before_mode, "modality": switch}) if switch else "",
+        }
+        return finish("empty")
+    strip = {row["iso"]: row for row in picker["strip"]}
+    day = query.get("day", "")
+    if day not in strip:
+        out["options"] = [{**row, **link(day=row["iso"])} for row in picker["strip"]]
+        return finish("day")
+    chosen = strip[day]
+    answered(
+        "day",
+        "day",
+        day,
+        f"{chosen['dow']} {chosen['num']} {chosen['mon']}",
+        picker["chosen_heading"],
+    )
+
+    times = {t["id"]: t for group in picker["groups"] for t in group["times"]}
+    slot_id = _int_or_none(query.get("slot"))
+    if slot_id not in times:
+        out["groups"] = [
+            {
+                "title": group["title"],
+                "times": [{**t, **link(slot=t["id"])} for t in group["times"]],
+            }
+            for group in picker["groups"]
+        ]
+        return finish("time")
+    answered("time", "slot", slot_id, times[slot_id]["label"], times[slot_id]["aria"])
+
+    # What follows the time in stage B (name, contact, note, consent) is the details page for now:
+    # the same hold the default flow posts.
+    out["go"] = {
+        "slot_id": slot_id,
+        "session_type_id": type_id,
+        "modality": mode,
+        "tz": zone,
+    }
+    return finish("go")
+
+
+async def _session_type_options(session: AsyncSession, lang: str) -> list[dict[str, Any]]:
+    """The active session types as the booking pages list them: id and the label with the price
+    only when she stored one (quick win 13; never invented)."""
+    out: list[dict[str, Any]] = []
+    for st in await _active_session_types(session):
+        name = await session_type_name(session, lang, st.code)
+        price = price_text(st)
+        out.append(
+            {
+                "id": st.id,
+                "label": await get_text(
+                    session,
+                    lang,
+                    "booking.type.with_price",
+                    name=name,
+                    duration=st.duration_min,
+                    price=price,
+                )
+                if price
+                else await get_text(
+                    session, lang, "booking.type.without_price", name=name, duration=st.duration_min
+                ),
+            }
+        )
+    return out
+
+
 async def _what_next(session: AsyncSession, lang: str, practice: Practice) -> dict[str, str]:
     """The reusable "what happens next" block: who reads the client's text (only her), when she
     answers (the hours her own setting gives a request), how to cancel (her content block, or a
@@ -650,7 +835,7 @@ SKIN_COOKIE = "pb_skin_preview"
 async def _skin(session: AsyncSession, request: Request, practice: Practice) -> dict[str, Any]:
     """NP6: the look this request gets. Clients get the practice's `client_skin`.
 
-    The preview (`?skin=river`, `?skin=default`; `?skin=live` ends it) is for a signed-in admin
+    The preview (`?skin=waterfall`, `?skin=default`; `?skin=live` ends it) is for a signed-in admin
     only: it is kept in a cookie so the pages and the htmx swaps that follow show the same skin,
     and the cookie is read only together with a valid admin session, so for anybody else it does
     nothing.
@@ -874,15 +1059,15 @@ async def _error_page(
     )
 
 
-#: NP6: the templates the river skin has of its own. A page it does not have yet is the default one.
-RIVER_TEMPLATES = frozenset(
-    name for name in TEMPLATES.env.list_templates() if name.startswith("river/")
+#: NP6: the templates the waterfall flow has of its own; a page it has none for is the default one.
+WATERFALL_TEMPLATES = frozenset(
+    name for name in TEMPLATES.env.list_templates() if name.startswith("waterfall/")
 )
 
 
 def _render(name: str, context: dict[str, Any], status_code: int = 200) -> HTMLResponse:
-    if context.get("skin") == "river" and f"river/{name}" in RIVER_TEMPLATES:
-        name = f"river/{name}"
+    if context.get("skin") == "waterfall" and f"waterfall/{name}" in WATERFALL_TEMPLATES:
+        name = f"waterfall/{name}"
     # Starlette takes the request first; the older (name, context) form is gone.
     response = TEMPLATES.TemplateResponse(
         context["request"], name, context, status_code=status_code
@@ -1070,32 +1255,13 @@ def build_router() -> APIRouter:
                     {**context, "by_choice": False, "captcha": _challenge(practice)},
                 )
 
-            session_types: list[dict[str, Any]] = []
-            for st in await _active_session_types(session):
-                name = await session_type_name(session, context["lang"], st.code)
-                price = price_text(st)
-                session_types.append(
-                    {
-                        "id": st.id,
-                        # A price is shown only when she stored one (quick win 13); never invented.
-                        "label": await get_text(
-                            session,
-                            context["lang"],
-                            "booking.type.with_price",
-                            name=name,
-                            duration=st.duration_min,
-                            price=price,
-                        )
-                        if price
-                        else await get_text(
-                            session,
-                            context["lang"],
-                            "booking.type.without_price",
-                            name=name,
-                            duration=st.duration_min,
-                        ),
-                    }
+            if context["skin"] == "waterfall":
+                return _render(
+                    "book.html",
+                    {**context, **await _waterfall_view(session, request, context, fragment=False)},
                 )
+
+            session_types = await _session_type_options(session, context["lang"])
 
             options = (
                 (
@@ -1166,6 +1332,18 @@ def build_router() -> APIRouter:
                 },
             )
 
+    @router.get("/book/q", response_class=HTMLResponse, include_in_schema=False)
+    async def book_question(request: Request) -> Response:
+        """NP6: the answers so far and the next question, as the fragment the page swaps in.
+
+        Only for a request that gets the waterfall flow (the setting, or an admin's preview)."""
+        async with unit_of_work() as session:
+            context = await _context(session, request)
+            if context["skin"] != "waterfall":
+                return Response(status_code=404)
+            view = await _waterfall_view(session, request, context, fragment=True)
+            return _render("waterfall/partials/path.html", {**context, **view})
+
     @router.get("/book/slots", response_class=HTMLResponse, include_in_schema=False)
     async def book_slots(
         request: Request,
@@ -1192,8 +1370,7 @@ def build_router() -> APIRouter:
                 zone=zone,
                 day=day,
             )
-            skin = await _skin(session, request, practice)
-            return _render("partials/slots.html", {**view, "skin": skin["skin"]})
+            return _render("partials/slots.html", view)
 
     @router.post("/book/hold", include_in_schema=False)
     async def book_hold(

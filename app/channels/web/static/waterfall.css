@@ -1,0 +1,247 @@
+/* NP6: the "Waterfall" booking flow. Loaded after style.css by templates/waterfall/book.html, and only
+   when the practice's `client_skin` is `waterfall` (or an admin is previewing it). It re-paints the
+   tokens style.css already reads (calm water colours) and lays the booking out as one question at a
+   time: the answered ones condense into stones above (the trail), the next falls in below.
+   CSS only; no font, image or external asset.
+
+   Playful, never pressing: a few small moments to watch, no counters, timers or rewards. Every effect is a short transition
+   (the question falls and settles in ~400 ms, the answer ripples, the stone condenses, the line
+   between them fills) and every one is switched off under prefers-reduced-motion (last block).
+
+   Contrast, light: ink #12262b, soft #2c454b, muted #435c62 on the lightest and darkest background
+   used (#e9f4f6, #d7ebf0) and on the card #f7fbfc are all above 4.5:1; button text #fff on #1b5b68
+   is above 7:1. The dark palette is chosen the same way. */
+
+body.skin-waterfall {
+  color-scheme: light;
+  --bg: #e9f4f6;
+  --bg-tint: #d7ebf0;
+  --surface: #f7fbfc;
+  --ink: #12262b;
+  --ink-soft: #2c454b;
+  --muted: #435c62;
+  --line: #b4d3da;
+  --line-strong: #7ea9b4;
+  --control: #4f7882;
+  --accent: #1b5b68;
+  --accent-hover: #134550;
+  --accent-ink: #ffffff;
+  --accent-soft: #cfe8ed;
+  --ring: #1b5b68;
+
+  --r-sky: #dff0f3;
+  --r-sun: #f3dc9a;
+  --r-water: #a6d2db;
+  --r-pool: #cfe8ed;
+  --r-stone: #ece6d8;
+  --r-stone-edge: #6f6955;
+  --r-line: #4f8a99;     /* the thin stream between stones (decorative) */
+  background-color: var(--bg);
+  background-image: linear-gradient(180deg, #f1f8f1 0, #e4f2f4 14rem, #d7ebf0 100%);
+}
+
+@media (prefers-color-scheme: dark) {
+  body.skin-waterfall {
+    color-scheme: dark;
+    --bg: #0e1c21;
+    --bg-tint: #162a30;
+    --surface: #14282e;
+    --ink: #e3f0f2;
+    --ink-soft: #c4d9dd;
+    --muted: #9fbbc1;
+    --line: #2a4750;
+    --line-strong: #3f6a75;
+    --control: #78a3ad;
+    --accent: #7cc4d4;
+    --accent-hover: #9ad4e0;
+    --accent-ink: #0a1a1e;
+    --accent-soft: #17353d;
+    --ring: #7cc4d4;
+
+    --r-sky: #12303a;
+    --r-sun: #cdb877;
+    --r-water: #245b69;
+    --r-pool: #123038;
+    --r-stone: #2b3a3c;
+    --r-stone-edge: #9aa7a0;
+    --r-line: #5f9aa8;
+    background-image: linear-gradient(180deg, #0f2127 0, #0e1c21 14rem, #0b171b 100%);
+  }
+}
+
+
+/* --- Layout: one column, centred ------------------------------------------ */
+
+.skin-waterfall .wf { max-width: 30rem; margin: 0 auto; padding-bottom: 3rem; }
+.skin-waterfall .wf-title { margin: .5rem 0 1.25rem; font-size: clamp(1.3rem, 1.1rem + 1vw, 1.6rem); text-align: center; color: var(--ink-soft); }
+.skin-waterfall .path { display: flex; flex-direction: column; align-items: stretch; min-width: 0; }
+.skin-waterfall .path :where(h2, h3, p, a, span, li) { overflow-wrap: break-word; min-width: 0; }
+
+/* --- The trail: the answers so far, as stones on a thin stream ------------- */
+
+.skin-waterfall .trail { display: flex; flex-direction: column; align-items: center; margin: 0; padding: 0; list-style: none; }
+.skin-waterfall .stone { position: relative; display: flex; flex-direction: column; align-items: center; max-width: 100%; }
+.skin-waterfall .stone a {
+  display: inline-flex;
+  align-items: center;
+  gap: .7rem;
+  min-height: 2.75rem;
+  max-width: 100%;
+  padding: .45rem 1.15rem;
+  border: 1.5px solid var(--r-stone-edge);
+  flex-wrap: wrap;
+  justify-content: center;
+  border-radius: 1.5rem 1.2rem 1.6rem 1.3rem / 1.3rem 1.6rem 1.2rem 1.5rem;
+  background: var(--r-stone);
+  color: var(--ink);
+  text-align: center;
+  text-decoration: none;
+  line-height: 1.25;
+}
+.skin-waterfall .stone a:hover { border-color: var(--accent); background: var(--accent-soft); }
+.skin-waterfall .stone-edit { color: var(--accent); font-size: .85rem; font-weight: 600; text-decoration: underline; text-underline-offset: .18em; white-space: nowrap; }
+/* The stream line down from each stone to whatever comes next; it fills from the top when it is new. */
+.skin-waterfall .stone::after,
+.skin-waterfall .q::before {
+  content: "";
+  display: block;
+  width: 3px;
+  height: 1.3rem;
+  margin: 0 auto;
+  border-radius: 2px;
+  background: var(--r-line);
+}
+.skin-waterfall .q { position: relative; }
+.skin-waterfall .q::before { position: absolute; top: -1.3rem; left: calc(50% - 1.5px); }
+.skin-waterfall .trail:empty + .q::before { display: none; }
+
+/* --- The question now: big, centred, one at a time ------------------------- */
+
+.skin-waterfall .q {
+  margin: 1.3rem 0 0;
+  padding: 1.6rem 1.15rem 1.75rem;
+  border: 1px solid var(--line-strong);
+  border-radius: 1.7rem 1.4rem 1.8rem 1.5rem / 1.5rem 1.8rem 1.4rem 1.7rem;
+  background: var(--surface);
+  box-shadow: var(--shadow-md);
+  text-align: center;
+}
+.skin-waterfall .path > .q:first-child { margin-top: 0; }
+.skin-waterfall .q:focus { outline: none; }
+.skin-waterfall .q:focus-visible { outline: 2px solid var(--ring); outline-offset: 3px; }
+.skin-waterfall .q-step { margin: 0 0 .5rem; color: var(--muted); font-size: .9rem; letter-spacing: .02em; }
+.skin-waterfall .q h2 { margin: 0 0 1.2rem; font-size: clamp(1.4rem, 1.15rem + 1.2vw, 1.75rem); line-height: 1.25; }
+.skin-waterfall .q h3 { margin: 1.2rem 0 .6rem; color: var(--muted); font-family: var(--sans); font-size: .82rem; font-weight: 600; letter-spacing: .05em; text-transform: uppercase; }
+.skin-waterfall .q .muted { margin: 1rem 0 0; }
+.skin-waterfall .q .note { text-align: left; }
+
+.skin-waterfall .answers { display: grid; gap: .7rem; }
+.skin-waterfall .ans {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 3.4rem;
+  padding: .8rem 1.1rem;
+  overflow: hidden;
+  border: 1.5px solid var(--control);
+  border-radius: 1.25rem;
+  background: var(--surface);
+  color: var(--ink);
+  font: inherit;
+  font-size: 1.05rem;
+  line-height: 1.3;
+  text-align: center;
+  text-decoration: none;
+  cursor: pointer;
+}
+.skin-waterfall .ans:hover { border-color: var(--accent); background: var(--accent-soft); color: var(--ink); box-shadow: none; }
+.skin-waterfall .ans:focus-visible { outline: 2px solid var(--ring); outline-offset: 2px; }
+.skin-waterfall .ans.primary { border-color: var(--accent); background: var(--accent); color: var(--accent-ink); }
+.skin-waterfall .ans.primary:hover { background: var(--accent-hover); color: var(--accent-ink); }
+.skin-waterfall .drop { display: block; width: 2rem; height: 2rem; margin: -.4rem auto .35rem; overflow: visible; }
+.skin-waterfall .drop-body { fill: var(--r-water); stroke: var(--accent); stroke-width: 1.5; }
+.skin-waterfall .drop-ring { fill: none; stroke: var(--accent); stroke-width: 1.2; opacity: 0; }
+.skin-waterfall .sparkles { display: block; width: 7.5rem; height: 1.5rem; margin: 0 auto .6rem; overflow: visible; }
+.skin-waterfall .spark { fill: var(--r-sun); stroke: var(--r-stone-edge); stroke-width: .8; stroke-linejoin: round; }
+.skin-waterfall .go { margin: 0; }
+.skin-waterfall .go .ans { width: 100%; }
+
+/* The pool: the days */
+.skin-waterfall .pool { display: grid; grid-template-columns: repeat(auto-fill, minmax(4.2rem, 1fr)); gap: .55rem; margin: 0; padding: .8rem; list-style: none; border: 1px solid var(--line-strong); border-radius: 2rem 1.5rem 2.1rem 1.7rem / 1.6rem 2rem 1.5rem 2.1rem; background: var(--r-pool); }
+.skin-waterfall .pool li { min-width: 0; }
+.skin-waterfall .ans.day { display: grid; justify-items: center; align-content: center; gap: .05rem; min-height: 4.4rem; padding: .4rem .2rem; border-radius: 1.2rem 1rem 1.3rem 1.1rem; }
+.skin-waterfall .day .dow, .skin-waterfall .day .mon { color: var(--muted); font-size: .76rem; text-transform: uppercase; letter-spacing: .03em; }
+.skin-waterfall .day .num { font-family: var(--serif); font-size: 1.3rem; font-weight: 600; }
+.skin-waterfall .day .cnt { color: var(--accent); font-size: .8rem; font-weight: 600; }
+
+/* The times: stepping stones */
+.skin-waterfall .rocks { display: grid; grid-template-columns: repeat(auto-fit, minmax(5rem, 5.5rem)); justify-content: center; gap: .6rem .55rem; }
+.skin-waterfall .ans.rock { min-height: 2.9rem; padding: .4rem .25rem; border: 1.5px solid var(--r-stone-edge); border-radius: 55% 45% 52% 48% / 62% 55% 45% 40%; background: var(--r-stone); font-variant-numeric: tabular-nums; }
+.skin-waterfall .ans.rock:hover { border-color: var(--accent); background: var(--accent-soft); }
+.skin-waterfall .lake p { margin: 0 0 1rem; }
+
+/* --- Motion: short, soft, and none when the system asks for less ------------ */
+
+@media (prefers-reduced-motion: no-preference) {
+  /* The next question drops in quickly and lands softly. */
+  .skin-waterfall .q { animation: wf-fall .42s cubic-bezier(.25, .8, .35, 1) both; }
+  .skin-waterfall .q::before { transform-origin: top; animation: wf-fill .35s ease-out .05s both; }
+  /* The drop falls with the card, squashes as it lands and sends a ring out. */
+  .skin-waterfall .drop-body { transform-origin: 50% 100%; animation: wf-drop .6s cubic-bezier(.3, .7, .4, 1) both; }
+  .skin-waterfall .drop-ring { transform-origin: 50% 50%; animation: wf-ring .8s ease-out .3s both; }
+  /* All the answers given: a few soft sparkles, once, no more. */
+  .skin-waterfall .spark { transform-box: fill-box; transform-origin: center; animation: wf-twinkle 1.6s ease-in-out both; }
+  .skin-waterfall .s2 { animation-delay: .25s; }
+  .skin-waterfall .s3 { animation-delay: .5s; }
+  /* The answer that was just given condenses into its stone, with a little bounce and a ring. */
+  .skin-waterfall .stone.is-new a { animation: wf-condense .55s cubic-bezier(.3, .7, .4, 1) both; }
+  .skin-waterfall .stone.is-new::before { content: ""; position: absolute; top: .2rem; left: 50%; margin-left: -1.1rem; width: 2.2rem; height: 2.2rem; border: 2px solid var(--accent); border-radius: 50%; opacity: 0; pointer-events: none; animation: wf-stone-ring .7s ease-out .1s both; }
+  .skin-waterfall .stone.is-new::after { transform-origin: top; animation: wf-fill .35s ease-out both; }
+  /* The tapped answer ripples from where it was touched. */
+  .skin-waterfall .ans.picked::after {
+    content: "";
+    position: absolute;
+    left: var(--rx, 50%);
+    top: var(--ry, 50%);
+    width: 1rem;
+    height: 1rem;
+    margin: -.5rem 0 0 -.5rem;
+    border-radius: 50%;
+    background: var(--accent);
+    opacity: .35;
+    pointer-events: none;
+    animation: wf-ripple .45s ease-out both;
+  }
+  /* While the old path waits to be replaced, the question settles back. */
+  .skin-waterfall .path.htmx-swapping .q { transition: opacity .22s ease, transform .22s ease; opacity: .55; transform: translateY(.5rem) scale(.985); }
+}
+@keyframes wf-fall {
+  0% { opacity: 0; transform: translateY(-2.6rem); }
+  60% { opacity: 1; transform: translateY(.4rem); }
+  100% { opacity: 1; transform: none; }
+}
+@keyframes wf-fill { from { transform: scaleY(0); } to { transform: scaleY(1); } }
+@keyframes wf-condense {
+  0% { transform: scale(1.3, 1.3); opacity: .5; }
+  55% { transform: scale(.93, 1.06); opacity: 1; }
+  80% { transform: scale(1.03, .98); }
+  100% { transform: scale(1); }
+}
+@keyframes wf-drop {
+  0% { transform: translateY(-1.6rem) scale(.8, 1.2); opacity: 0; }
+  55% { transform: translateY(0) scale(.9, 1.15); opacity: 1; }
+  75% { transform: scale(1.25, .7); }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes wf-ring { 0% { transform: scale(.4); opacity: .7; } 100% { transform: scale(2.4); opacity: 0; } }
+@keyframes wf-stone-ring { 0% { transform: scale(.6); opacity: .6; } 100% { transform: scale(2.6); opacity: 0; } }
+@keyframes wf-twinkle { 0% { transform: scale(0) rotate(-30deg); opacity: 0; } 40% { transform: scale(1.25) rotate(0); opacity: 1; } 100% { transform: scale(1); opacity: 1; } }
+@keyframes wf-ripple { from { transform: scale(1); opacity: .4; } to { transform: scale(26); opacity: 0; } }
+
+@media (prefers-reduced-motion: reduce) {
+  .skin-waterfall *, .skin-waterfall *::before, .skin-waterfall *::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

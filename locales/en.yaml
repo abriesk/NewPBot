@@ -353,6 +353,7 @@ picker:
   afternoon: "Afternoon"
   evening: "Evening"
   days: "Choose a day"
+  time: "Choose a time"
   day_free: "{day}: {count} free"
   show_times: "Show times"
 

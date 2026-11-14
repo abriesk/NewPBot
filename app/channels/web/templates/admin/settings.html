@@ -55,12 +55,12 @@
     </label>
     <label>Look of the client site
       <select name="client_skin">
-        <option value="default" {% if practice.client_skin != "river" %}selected{% endif %}>Default</option>
-        <option value="river" {% if practice.client_skin == "river" %}selected{% endif %}>River (a calm stream: one long page)</option>
+        <option value="default" {% if practice.client_skin != "waterfall" %}selected{% endif %}>Default</option>
+        <option value="waterfall" {% if practice.client_skin == "waterfall" %}selected{% endif %}>Waterfall (one question at a time, the answers stack above)</option>
       </select>
-      <small>What your clients see. To look at the River page before you switch, open
-        <code>/?skin=river</code> while you are signed in here: only you see it, and
-        <code>/?skin=live</code> goes back to what clients get.</small>
+      <small>What your clients see. To look at the Waterfall booking before you switch, open
+        <code>/book?skin=waterfall</code> while you are signed in here: only you see it, and
+        <code>/book?skin=live</code> goes back to what clients get.</small>
     </label>
     <label>Languages you work in
       <input type="text" name="languages" maxlength="120" value="{{ practice.languages or '' }}"

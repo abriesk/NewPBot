@@ -1,0 +1,15 @@
+{# NP6: the waterfall booking flow. One question on screen at a time; an answered question condenses into a
+   stone above, the next one falls in below. Everything is an ordinary link carrying the answers so far in its
+   query string, so without a script each question is a page of its own; htmx (already used by the default
+   booking page) swaps the path in place and waterfall.js only adds scrolling and focus. #}
+{% extends "base.html" %}
+{% block title %}{{ t.consultation }} — {{ practice.name }}{% endblock %}
+{% block skin_head %}<link rel="stylesheet" href="/static/waterfall.css">{% endblock %}
+{% block head %}<script src="/static/htmx.min.js" defer></script><script src="/static/waterfall.js" defer></script>{% endblock %}
+{% block body_attrs %} class="skin-waterfall"{% endblock %}
+{% block content %}
+<div class="wf">
+  <h1 class="wf-title">{{ t.consultation }}</h1>
+  <div id="path" class="path">{% include "waterfall/partials/path.html" %}</div>
+</div>
+{% endblock %}

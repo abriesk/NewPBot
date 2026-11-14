@@ -1,4 +1,4 @@
-"""client skin: which look the client site has (default | river)
+"""client skin: which look the client site has (default | waterfall)
 
 NP6. Adds `practice.client_skin` (text, NOT NULL, default 'default'). Additive: every existing
 practice keeps the look it has. The allowed names are checked in `update_settings`, not by a

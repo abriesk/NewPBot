@@ -257,6 +257,7 @@ picker:
   afternoon: "День"                               # TODO: review
   evening: "Вечер"                                # TODO: review
   days: "Выберите день"                           # TODO: review
+  time: "Выберите время"                          # TODO: review
   day_free: "{day}: свободно {count}"             # TODO: review
   show_times: "Показать время"                    # TODO: review
 

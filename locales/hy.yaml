@@ -263,6 +263,7 @@ picker:
   afternoon: "Օրվա կեսին"                         # TODO: review
   evening: "Երեկո"                                # TODO: review
   days: "Ընտրեք օրը"                              # TODO: review
+  time: "Ընտրեք ժամը"                             # TODO: review
   day_free: "{day}՝ ազատ է {count}"               # TODO: review
   show_times: "Ցույց տալ ժամերը"                  # TODO: review
 

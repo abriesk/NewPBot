@@ -64,7 +64,7 @@ CAPTCHA_DIFFICULTY_MAX = 24
 
 #: NP6: the looks the client site can have. Templates and CSS differ; routes, forms, rules and
 #: texts do not.
-CLIENT_SKINS = ("default", "river")
+CLIENT_SKINS = ("default", "waterfall")
 
 #: §6.1. A footer, not a directory: past about this many the row stops reading
 #: as "where else to find me" and starts reading as a menu.

@@ -1,0 +1,90 @@
+{# NP6: the path so far (stones) and the question now (the card that falls in). Shared by the full page and by
+   the /book/q fragment. Decorative drops are CSS only; nothing here is read out apart from the text. #}
+{% macro nav(o, back=False) -%}
+href="{{ o.href }}" hx-get="{{ o.frag }}" hx-target="#path" hx-swap="innerHTML" hx-push-url="{{ o.href }}" hx-headers='{"X-WF": "{{ 'back' if back else 'fwd' }}"}'
+{%- endmacro %}
+{% if stones %}
+<ol class="trail">
+  {% for s in stones %}
+  <li class="stone{% if loop.last and new_stone %} is-new{% endif %}" data-kind="{{ s.kind }}">
+    <a {{ nav(s, True) }} aria-label="{{ t.change }}: {{ s.aria }}">
+      <span class="stone-label">{{ s.label }}</span><span class="stone-edit" aria-hidden="true">{{ t.change }}</span>
+    </a>
+  </li>
+  {% endfor %}
+</ol>
+{% endif %}
+
+<section id="q-current" class="q q-{{ kind }}" tabindex="-1" aria-labelledby="q-h">
+  {# A drop that falls with the card and lands in a ring: a small playful moment, decorative only. #}
+  <svg class="drop" viewBox="0 0 40 40" aria-hidden="true" focusable="false"><ellipse class="drop-ring" cx="20" cy="33" rx="9" ry="3"/><path class="drop-body" d="M20 6c4 6 7 10 7 14a7 7 0 0 1-14 0c0-4 3-8 7-14z"/></svg>
+  {% if step_n %}<p class="q-step">{{ t.step.replace('{n}', step_n|string).replace('{total}', step_total|string) }}</p>{% endif %}
+
+  {% if kind == 'type' %}
+    <h2 id="q-h">{{ t.choose_type }}</h2>
+    <div class="answers">
+      {% for o in options %}<a class="ans" {{ nav(o) }}>{{ o.label }}</a>{% endfor %}
+    </div>
+
+  {% elif kind == 'mode' %}
+    <h2 id="q-h">{{ t.choose_modality }}</h2>
+    <div class="answers">
+      {% for o in options %}<a class="ans" {{ nav(o) }}>{{ o.label }}</a>{% endfor %}
+    </div>
+
+  {% elif kind == 'day' %}
+    <h2 id="q-h">{{ t.picker_days }}</h2>
+    <ul class="pool">
+      {% for o in options %}
+      <li><a class="ans day" {{ nav(o) }} aria-label="{{ o.aria }}">
+        <span class="dow">{{ o.dow }}</span><span class="num">{{ o.num }}</span><span class="mon">{{ o.mon }}</span><span class="cnt">{{ o.count }}</span>
+      </a></li>
+      {% endfor %}
+    </ul>
+    <p class="muted zone-line">{{ zone_line }}</p>
+
+  {% elif kind == 'time' %}
+    <h2 id="q-h">{{ wf.picker_time }}</h2>
+    {% for g in groups %}
+    <div class="part">
+      <h3>{{ g.title }}</h3>
+      <div class="rocks">
+        {% for o in g.times %}<a class="ans rock" {{ nav(o) }} aria-label="{{ o.aria }}">{{ o.label }}</a>{% endfor %}
+      </div>
+    </div>
+    {% endfor %}
+    <p class="muted zone-line">{{ zone_line }}</p>
+
+  {% elif kind == 'go' %}
+    {# Stage A ends here: the rest of the flow is the default details page, entered through the same hold. #}
+    <form method="post" action="/book/hold" class="go">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+      <input type="hidden" name="slot_id" value="{{ go.slot_id }}">
+      <input type="hidden" name="session_type_id" value="{{ go.session_type_id }}">
+      <input type="hidden" name="modality" value="{{ go.modality }}">
+      <input type="hidden" name="tz" value="{{ go.tz }}">
+      <svg class="sparkles" viewBox="0 0 120 24" aria-hidden="true" focusable="false"><path class="spark s1" d="M20 12l2-6 2 6 6 2-6 2-2 6-2-6-6-2z"/><path class="spark s2" d="M60 6l1.6-4 1.6 4 4 1.6-4 1.6-1.6 4-1.6-4-4-1.6z"/><path class="spark s3" d="M100 12l2-6 2 6 6 2-6 2-2 6-2-6-6-2z"/></svg>
+      <button type="submit" class="ans primary">{{ wf.continue }}</button>
+    </form>
+
+  {% else %}
+    <div class="lake">
+      {% if empty and empty.switch_href %}
+        <p>{{ empty.none_this_way }}</p>
+        <a class="ans" {{ nav({'href': empty.switch_href, 'frag': empty.frag}) }}>{{ empty.switch_label }}</a>
+      {% else %}
+        <p>{{ t.no_slots }}</p>
+        <p class="muted">{{ t.waitlist_intro }}</p>
+        <a class="ans primary" href="/waitlist">{{ t.waitlist_join }}</a>
+      {% endif %}
+    </div>
+  {% endif %}
+
+  {% if mode == 'onsite' and kind in ('day', 'time', 'go') %}
+  <p class="muted note">
+    {% if practice.clinic_onsite_url %}
+      {% set parts = t.onsite_info.split(practice.clinic_onsite_url, 1) %}{{ parts[0] }}<a href="{{ practice.clinic_onsite_url }}">{{ practice.clinic_onsite_url }}</a>{{ parts[1] if parts|length > 1 else '' }}
+    {% else %}{{ t.onsite_no_address }}{% endif %}
+  </p>
+  {% endif %}
+</section>
